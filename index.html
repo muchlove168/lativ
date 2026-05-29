@@ -874,25 +874,55 @@ async function handleUpload(event){
 // ============================================================
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxUcxDbJKnDu33T-in6NMWqKZXekzHi35EYG_sUd08s4OLvpLYiqVtif0fQJDfD83s/exec';
 
-// GAS 通訊：寫入用 POST+no-cors（fire-and-forget），讀取用 GET
+// ================================================================
+// GAS 通訊層：讀取用 GET，寫入用隱藏 iframe（真正繞過 CORS）
+// ================================================================
 async function gasPost(payload) {
   const action = payload.action || '';
   const isRead = action.startsWith('load') || action === 'pruneHistory';
 
   if (isRead) {
-    // 讀取：用 GET 帶 action 參數，避免 CORS preflight
+    // 讀取：GET 請求，GAS doGet 直接回應 JSON
     const url = GAS_URL + '?action=' + encodeURIComponent(action);
-    const res = await fetch(url, { method: 'GET' });
+    const res = await fetch(url);
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'GAS error');
     return json;
   } else {
-    // 寫入：用 FormData POST（不觸發 preflight）
-    const form = new FormData();
-    form.append('payload', JSON.stringify(payload));
-    await fetch(GAS_URL, { method: 'POST', body: form, mode: 'no-cors' });
-    // no-cors 無法讀回應，樂觀假設成功
-    return { ok: true };
+    // 寫入：用隱藏 form + iframe，繞過所有 CORS 限制
+    return new Promise((resolve, reject) => {
+      const frameId = 'gas_frame_' + Date.now();
+      const formId  = 'gas_form_'  + Date.now();
+
+      const iframe = document.createElement('iframe');
+      iframe.name = frameId;
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = GAS_URL;
+      form.target = frameId;
+      form.style.display = 'none';
+
+      const input = document.createElement('input');
+      input.type  = 'hidden';
+      input.name  = 'payload';
+      input.value = JSON.stringify(payload);
+      form.appendChild(input);
+      document.body.appendChild(form);
+
+      // 提交後清理，1.5 秒後視為成功（iframe 無法讀跨域回應）
+      const cleanup = () => {
+        try { document.body.removeChild(iframe); } catch(e) {}
+        try { document.body.removeChild(form);   } catch(e) {}
+      };
+
+      iframe.onload = () => { cleanup(); resolve({ ok: true }); };
+      setTimeout(() => { cleanup(); resolve({ ok: true }); }, 3000);
+
+      try { form.submit(); } catch(e) { cleanup(); reject(e); }
+    });
   }
 }
 
