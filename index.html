@@ -970,23 +970,21 @@ function renderUploadBadge() {
   const badge = document.getElementById('cloud-sync-badge');
   if (!badge) return;
 
-  // 過濾出進行中/失敗的任務（完成的 3 秒後移除）
   const active = _uploadQueue.filter(j => j.status === 'running' || j.status === 'pending');
   const errors = _uploadQueue.filter(j => j.status === 'error');
   const allDone = _uploadQueue.length > 0 && active.length === 0 && errors.length === 0;
 
-  // 沒任何任務 → 隱藏
   if (_uploadQueue.length === 0) {
     badge.style.display = 'none';
+    hideUploadTooltip();
     return;
   }
 
   badge.style.display = 'flex';
 
-  // 計算總進度（active 任務的平均）
+  let tooltipLines = [];
   if (active.length > 0) {
     const avgPct = active.reduce((s,j)=>s+j.pct, 0) / active.length;
-    const names = active.map(j => `${j.name} ${j.detail}`).join(' · ');
     document.getElementById('cloud-sync-icon').textContent = '☁️';
     document.getElementById('cloud-sync-label').textContent = active.length > 1
       ? `同步 ${active.length} 項`
@@ -994,21 +992,24 @@ function renderUploadBadge() {
     document.getElementById('cloud-sync-bar').style.background = '#a3d977';
     document.getElementById('cloud-sync-bar').style.width = avgPct + '%';
     document.getElementById('cloud-sync-pct').textContent = Math.round(avgPct) + '%';
-    badge.title = names;
+    tooltipLines = _uploadQueue.map(j => {
+      const icon = j.status==='done'?'✓': j.status==='error'?'⚠': '☁';
+      const pct = j.status==='done'?'100%': j.status==='error'?'失敗': Math.round(j.pct)+'%';
+      return `${icon} ${j.name} ${j.detail||''} ${pct}`;
+    });
   } else if (errors.length > 0) {
     document.getElementById('cloud-sync-icon').textContent = '⚠';
     document.getElementById('cloud-sync-label').textContent = `${errors.length} 項失敗`;
     document.getElementById('cloud-sync-bar').style.background = '#e88c8c';
     document.getElementById('cloud-sync-bar').style.width = '100%';
     document.getElementById('cloud-sync-pct').textContent = '!';
-    badge.title = errors.map(e => `${e.name}: ${e.error}`).join('\n');
+    tooltipLines = errors.map(e => `⚠ ${e.name}\n   錯誤：${e.error}`);
+    tooltipLines.push('───');
+    tooltipLines.push('點擊清除錯誤訊息');
     badge.style.cursor = 'pointer';
     badge.onclick = () => {
-      const msg = errors.map(e => `❌ ${e.name}\n   錯誤：${e.error}`).join('\n\n');
-      if (confirm(msg + '\n\n按「確定」清除錯誤訊息')) {
-        _uploadQueue.length = 0;
-        renderUploadBadge();
-      }
+      _uploadQueue.length = 0;
+      renderUploadBadge();
     };
   } else if (allDone) {
     document.getElementById('cloud-sync-icon').textContent = '✓';
@@ -1016,15 +1017,45 @@ function renderUploadBadge() {
     document.getElementById('cloud-sync-bar').style.background = '#7bc97b';
     document.getElementById('cloud-sync-bar').style.width = '100%';
     document.getElementById('cloud-sync-pct').textContent = '100%';
-    badge.title = _uploadQueue.map(j => `✓ ${j.name}`).join('\n');
-    // 3 秒後清空佇列、隱藏
+    tooltipLines = _uploadQueue.map(j => `✓ ${j.name}`);
     setTimeout(() => {
       if (_uploadQueue.every(j => j.status === 'done')) {
         _uploadQueue.length = 0;
         badge.style.display = 'none';
+        hideUploadTooltip();
       }
     }, 3000);
   }
+  // 更新自訂 tooltip 內容（不會閃）
+  setUploadTooltipContent(tooltipLines.join('\n'));
+}
+
+// 自訂 tooltip（取代 title，避免閃動）
+function ensureUploadTooltip() {
+  let tip = document.getElementById('upload-tooltip');
+  if (tip) return tip;
+  tip = document.createElement('div');
+  tip.id = 'upload-tooltip';
+  tip.style.cssText = 'position:fixed;display:none;background:rgba(40,30,25,0.96);color:#fff;padding:10px 14px;border-radius:6px;font-size:12px;line-height:1.6;white-space:pre;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.3);max-width:400px;pointer-events:none;font-family:var(--font)';
+  document.body.appendChild(tip);
+
+  const badge = document.getElementById('cloud-sync-badge');
+  badge.addEventListener('mouseenter', () => {
+    const rect = badge.getBoundingClientRect();
+    tip.style.display = 'block';
+    tip.style.top = (rect.bottom + 6) + 'px';
+    tip.style.left = rect.left + 'px';
+  });
+  badge.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  return tip;
+}
+function setUploadTooltipContent(content) {
+  const tip = ensureUploadTooltip();
+  tip.textContent = content;
+}
+function hideUploadTooltip() {
+  const tip = document.getElementById('upload-tooltip');
+  if (tip) tip.style.display = 'none';
 }
 
 // 進度條 UI（保留給 init 讀取用）
