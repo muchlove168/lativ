@@ -39,7 +39,53 @@
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
   .card-title { padding: 9px 14px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 12px; color: var(--text2); letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; background: var(--surface2); flex-wrap: wrap; }
   .card-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
-  .tbl-wrap { overflow-x: auto; }
+  /* ── 手機響應式（iPhone / Android）── */
+  @media (max-width: 768px) {
+    body { font-size: 12px; }
+
+    /* Header：縮小、可捲動 */
+    .header { padding: 0 10px; gap: 8px; height: auto; min-height: 48px; flex-wrap: wrap; overflow-x: auto; }
+    .header-logo { font-size: 13px; padding-right: 10px; }
+    .header h1 { font-size: 12px; }
+    .header-row-count { font-size: 11px; padding: 2px 8px; }
+    .header-date { font-size: 11px; margin-left: 0; }
+    .upload-btn { font-size: 11px; padding: 5px 8px; }
+
+    /* Tabs：水平捲動 */
+    .tabs { padding: 0 8px; }
+    .tab { padding: 8px 12px; font-size: 12px; }
+
+    /* 內容區 */
+    .content { padding: 10px; }
+
+    /* SKU 儲位 TAB：直欄改為上下排列 */
+    #tab-sku > div[style*="display:flex"] { flex-direction: column !important; }
+    #tab-sku .sku-side-panel { width: 100% !important; min-width: unset !important; }
+
+    /* 統計面板 */
+    .stats-panel { flex-direction: column !important; }
+    .stat-box { min-width: unset !important; }
+
+    /* 底部 footer */
+    .sku-footer { flex-direction: column !important; gap: 8px !important; padding: 10px !important; }
+    .sku-footer > div { width: 100% !important; text-align: center; }
+
+    /* 表格字體稍微放大，手指好點 */
+    table { font-size: 12px; }
+    th { padding: 6px 6px; font-size: 11px; }
+    td { padding: 6px 6px; }
+
+    /* 卡片 */
+    .card-title { font-size: 12px; }
+
+    /* 按鈕放大，手指好點 */
+    button { min-height: 36px; }
+
+    /* 儲位數據 TAB */
+    #tab-slotdata > div { flex-direction: column !important; }
+    #slot-mid-col, #tab-slotdata > div > div { width: 100% !important; }
+  }
+
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th { background: var(--surface2); color: var(--text2); padding: 7px 10px; text-align: center !important; font-weight: 700; white-space: nowrap; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: 0.3px; }
   td { padding: 6px 10px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.4); white-space: nowrap; }
@@ -1448,32 +1494,18 @@ async function saveFW26Data(){
 }
 async function loadFW26Data(){
   try{
-    const rows=await idbGet('fw26_rows');
-    console.log('FW26 load from IndexedDB:',rows?rows.length:'null');
-    if(rows&&rows.length){
-      FW26_FILTER_DATA=rows;
-      window.EMBEDDED_FW26_LOOKUP={};
-      FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])window.EMBEDDED_FW26_LOOKUP[r[0]]=r[3];});
-      document.getElementById('fw26-upload-status').textContent=`已載入 ${FW26_FILTER_DATA.length} 筆新品資料`;
+    // 從雲端讀取
+    const r = await gasPost({ action:'loadFW26' });
+    if(r.data && r.data.length){
+      FW26_FILTER_DATA = r.data;
+      window.EMBEDDED_FW26_LOOKUP = {};
+      FW26_FILTER_DATA.forEach(row=>{ if(row[0]&&row[3]) window.EMBEDDED_FW26_LOOKUP[row[0]]=row[3]; });
+      const statusEl = document.getElementById('fw26-upload-status');
+      if(statusEl) statusEl.textContent = `已載入 ${FW26_FILTER_DATA.length} 筆新品資料`;
+      console.log('FW26 從雲端載入:', FW26_FILTER_DATA.length);
       return true;
     }
-  }catch(e){console.error('FW26 IDB load failed:',e);}
-  // fallback: localStorage
-  try{
-    const backup=window._fw26Backup||null;
-    if(backup){
-      const rows=JSON.parse(backup);
-      if(rows&&rows.length){
-        FW26_FILTER_DATA=rows;
-        window.EMBEDDED_FW26_LOOKUP={};
-        FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])window.EMBEDDED_FW26_LOOKUP[r[0]]=r[3];});
-        const total=window._fw26BackupTotal||rows.length;
-        document.getElementById('fw26-upload-status').textContent=`已載入 ${total} 筆新品資料（從備份恢復）`;
-        console.log('FW26 restored from localStorage backup:',rows.length);
-        return true;
-      }
-    }
-  }catch(e){console.warn('FW26 localStorage fallback failed:',e);}
+  }catch(e){ console.warn('FW26 雲端讀取失敗，使用內嵌資料:', e); }
   return false;
 }
 function clearFW26Data(){
