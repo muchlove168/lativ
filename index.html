@@ -874,11 +874,26 @@ async function handleUpload(event){
 // ============================================================
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxUcxDbJKnDu33T-in6NMWqKZXekzHi35EYG_sUd08s4OLvpLYiqVtif0fQJDfD83s/exec';
 
+// GAS 通訊：寫入用 POST+no-cors（fire-and-forget），讀取用 GET
 async function gasPost(payload) {
-  const res = await fetch(GAS_URL, { method:'POST', body:JSON.stringify(payload) });
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || 'GAS error');
-  return json;
+  const action = payload.action || '';
+  const isRead = action.startsWith('load') || action === 'pruneHistory';
+
+  if (isRead) {
+    // 讀取：用 GET 帶 action 參數，避免 CORS preflight
+    const url = GAS_URL + '?action=' + encodeURIComponent(action);
+    const res = await fetch(url, { method: 'GET' });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'GAS error');
+    return json;
+  } else {
+    // 寫入：用 FormData POST（不觸發 preflight）
+    const form = new FormData();
+    form.append('payload', JSON.stringify(payload));
+    await fetch(GAS_URL, { method: 'POST', body: form, mode: 'no-cors' });
+    // no-cors 無法讀回應，樂觀假設成功
+    return { ok: true };
+  }
 }
 
 // ── EPR 主資料 ──
