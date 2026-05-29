@@ -234,6 +234,15 @@
   <span class="header-logo">lativ</span>
   <h1>每日數據報表系統</h1>
   <span class="header-row-count" id="data-status">尚未載入</span>
+  <!-- ★ 雲端同步狀態 badge -->
+  <div id="cloud-sync-badge" style="display:none;align-items:center;gap:6px;background:rgba(255,255,255,0.12);padding:3px 10px;border-radius:12px;font-size:11px;color:#fff;min-width:120px">
+    <span id="cloud-sync-icon">☁️</span>
+    <span id="cloud-sync-label">同步中</span>
+    <div style="flex:1;background:rgba(0,0,0,0.2);height:4px;border-radius:2px;overflow:hidden;min-width:50px">
+      <div id="cloud-sync-bar" style="height:100%;background:#a3d977;width:0%;transition:width 0.3s"></div>
+    </div>
+    <span id="cloud-sync-pct" style="font-weight:700;min-width:32px;text-align:right">0%</span>
+  </div>
   <span class="header-date" id="header-date"></span>
   <button class="upload-btn" onclick="document.getElementById('file-input').click()">⬆ 上傳 EPR 報表</button>
   <button class="upload-btn" onclick="clearAllData()" style="background:rgba(192,57,43,0.9);color:#fff">🗑 清除資料</button>
@@ -902,17 +911,94 @@ async function handleUpload(event){
     }
     document.getElementById('data-status').textContent=`已載入 ${DB.length.toLocaleString()} 筆`;
     buildCache();
-    // buildCache 完成後才能正確判定 XX狀態
     DB.forEach(r=>{ r.XX狀態 = getXXStatus(r); });
-    await saveEPRData(dateLabel||new Date().toISOString().slice(0,10));
-    histSave(dateLabel||new Date().toISOString().slice(0,10));
-    checkMonthlyAutoSave();
+
+    // ★ 立即渲染 UI，使用者馬上可操作
     Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);
     renderAll();
     updateRelocStats();
     hideLoading();
+
+    // ★ 雲端上傳改為背景執行（不阻塞 UI）
+    const uploadDate = dateLabel || new Date().toISOString().slice(0,10);
+    backgroundCloudSync(uploadDate);
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
+}
+
+// ================================================================
+// ★ 背景雲端同步（不阻塞 UI）
+// ================================================================
+async function backgroundCloudSync(dateLabel) {
+  cloudSyncShow('同步中', 0);
+  try {
+    // 1. 上傳 EPR（最大資料量）
+    await gasChunkUploadBG('epr', DB, dateLabel, (pct, current, total) => {
+      cloudSyncShow(`同步中 ${current}/${total}`, pct);
+    });
+
+    // 2. 上傳歷史快照（小）
+    cloudSyncShow('儲存歷史', 95);
+    histSave(dateLabel);
+
+    // 3. 月底SKU自動更新（小）
+    checkMonthlyAutoSave();
+
+    cloudSyncDone(true);
+  } catch(e) {
+    console.error('雲端同步失敗:', e);
+    cloudSyncDone(false, e.message);
+  }
+}
+
+// 進度條 UI 控制
+function cloudSyncShow(label, pct) {
+  const badge = document.getElementById('cloud-sync-badge');
+  if (!badge) return;
+  badge.style.display = 'flex';
+  document.getElementById('cloud-sync-icon').textContent = '☁️';
+  document.getElementById('cloud-sync-label').textContent = label;
+  document.getElementById('cloud-sync-bar').style.background = '#a3d977';
+  document.getElementById('cloud-sync-bar').style.width = pct + '%';
+  document.getElementById('cloud-sync-pct').textContent = Math.round(pct) + '%';
+}
+function cloudSyncDone(success, errMsg) {
+  const badge = document.getElementById('cloud-sync-badge');
+  if (!badge) return;
+  if (success) {
+    document.getElementById('cloud-sync-icon').textContent = '✓';
+    document.getElementById('cloud-sync-label').textContent = '已同步';
+    document.getElementById('cloud-sync-bar').style.background = '#7bc97b';
+    document.getElementById('cloud-sync-bar').style.width = '100%';
+    document.getElementById('cloud-sync-pct').textContent = '100%';
+    // 3 秒後淡出
+    setTimeout(()=>{ badge.style.transition='opacity 1s'; badge.style.opacity='0.6'; }, 3000);
+    setTimeout(()=>{ badge.style.display='none'; badge.style.opacity='1'; badge.style.transition=''; }, 10000);
+  } else {
+    document.getElementById('cloud-sync-icon').textContent = '⚠';
+    document.getElementById('cloud-sync-label').textContent = '同步失敗';
+    document.getElementById('cloud-sync-bar').style.background = '#e88c8c';
+    document.getElementById('cloud-sync-pct').textContent = '!';
+    badge.title = errMsg || '雲端同步失敗，本地資料正常';
+    badge.style.cursor = 'pointer';
+    badge.onclick = () => alert('雲端同步失敗：' + (errMsg||'未知錯誤') + '\n\n本地操作不受影響，下次上傳時會重試。');
+  }
+}
+
+// 背景版分批上傳（callback 回報進度）
+async function gasChunkUploadBG(key, rows, dateParam, onProgress) {
+  const total = Math.ceil(rows.length / CHUNK_SIZE);
+  await gasFetch({ action:'chunkStart', key, total });
+  for (let i = 0; i < total; i++) {
+    const chunk = rows.slice(i*CHUNK_SIZE, (i+1)*CHUNK_SIZE);
+    await gasFetch({ action:'chunkSend', key, idx:i, data:chunk });
+    const pct = ((i+1)/total) * 90; // 0~90% 給分批上傳，留 10% 給 commit
+    onProgress(pct, i+1, total);
+  }
+  onProgress(92, total, total);
+  const result = await gasFetch({ action:'chunkCommit', key, date: dateParam||'' });
+  onProgress(95, total, total);
+  return result;
 }
 
 // ================================================================
