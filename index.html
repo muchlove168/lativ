@@ -921,37 +921,113 @@ async function handleUpload(event){
 
     // ★ 雲端上傳改為背景執行（不阻塞 UI）
     const uploadDate = dateLabel || new Date().toISOString().slice(0,10);
-    backgroundCloudSync(uploadDate);
+    backgroundUpload('EPR 主資料', async (progress)=>{
+      await gasChunkUploadBG('epr', DB, uploadDate, (pct,cur,tot)=>{
+        progress(pct, `${cur}/${tot}`);
+      });
+      // 順便存歷史 + 月底SKU
+      histSave(uploadDate);
+      checkMonthlyAutoSave();
+    });
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
 }
 
 // ================================================================
-// ★ 背景雲端同步（不阻塞 UI）
+// ★ 多任務背景上傳管理器（同時多檔案上傳也能正確顯示）
 // ================================================================
-async function backgroundCloudSync(dateLabel) {
-  cloudSyncShow('同步中', 0);
-  try {
-    // 1. 上傳 EPR（最大資料量）
-    await gasChunkUploadBG('epr', DB, dateLabel, (pct, current, total) => {
-      cloudSyncShow(`同步中 ${current}/${total}`, pct);
-    });
+const _uploadQueue = [];  // [{name, status:'pending|running|done|error', pct, detail, error}]
+let _uploadSeq = 0;
 
-    // 2. 上傳歷史快照（小）
-    cloudSyncShow('儲存歷史', 95);
-    histSave(dateLabel);
+function backgroundUpload(name, task) {
+  const id = ++_uploadSeq;
+  const job = { id, name, status:'pending', pct:0, detail:'' };
+  _uploadQueue.push(job);
+  renderUploadBadge();
 
-    // 3. 月底SKU自動更新（小）
-    checkMonthlyAutoSave();
+  // 啟動任務
+  (async () => {
+    job.status = 'running';
+    renderUploadBadge();
+    try {
+      await task((pct, detail) => {
+        job.pct = pct;
+        job.detail = detail || '';
+        renderUploadBadge();
+      });
+      job.status = 'done';
+      job.pct = 100;
+    } catch(e) {
+      job.status = 'error';
+      job.error = e.message;
+      console.error('背景上傳失敗:', name, e);
+    }
+    renderUploadBadge();
+  })();
+}
 
-    cloudSyncDone(true);
-  } catch(e) {
-    console.error('雲端同步失敗:', e);
-    cloudSyncDone(false, e.message);
+function renderUploadBadge() {
+  const badge = document.getElementById('cloud-sync-badge');
+  if (!badge) return;
+
+  // 過濾出進行中/失敗的任務（完成的 3 秒後移除）
+  const active = _uploadQueue.filter(j => j.status === 'running' || j.status === 'pending');
+  const errors = _uploadQueue.filter(j => j.status === 'error');
+  const allDone = _uploadQueue.length > 0 && active.length === 0 && errors.length === 0;
+
+  // 沒任何任務 → 隱藏
+  if (_uploadQueue.length === 0) {
+    badge.style.display = 'none';
+    return;
+  }
+
+  badge.style.display = 'flex';
+
+  // 計算總進度（active 任務的平均）
+  if (active.length > 0) {
+    const avgPct = active.reduce((s,j)=>s+j.pct, 0) / active.length;
+    const names = active.map(j => `${j.name} ${j.detail}`).join(' · ');
+    document.getElementById('cloud-sync-icon').textContent = '☁️';
+    document.getElementById('cloud-sync-label').textContent = active.length > 1
+      ? `同步 ${active.length} 項`
+      : `${active[0].name} ${active[0].detail}`;
+    document.getElementById('cloud-sync-bar').style.background = '#a3d977';
+    document.getElementById('cloud-sync-bar').style.width = avgPct + '%';
+    document.getElementById('cloud-sync-pct').textContent = Math.round(avgPct) + '%';
+    badge.title = names;
+  } else if (errors.length > 0) {
+    document.getElementById('cloud-sync-icon').textContent = '⚠';
+    document.getElementById('cloud-sync-label').textContent = `${errors.length} 項失敗`;
+    document.getElementById('cloud-sync-bar').style.background = '#e88c8c';
+    document.getElementById('cloud-sync-bar').style.width = '100%';
+    document.getElementById('cloud-sync-pct').textContent = '!';
+    badge.title = errors.map(e => `${e.name}: ${e.error}`).join('\n');
+    badge.style.cursor = 'pointer';
+    badge.onclick = () => {
+      const msg = errors.map(e => `❌ ${e.name}\n   錯誤：${e.error}`).join('\n\n');
+      if (confirm(msg + '\n\n按「確定」清除錯誤訊息')) {
+        _uploadQueue.length = 0;
+        renderUploadBadge();
+      }
+    };
+  } else if (allDone) {
+    document.getElementById('cloud-sync-icon').textContent = '✓';
+    document.getElementById('cloud-sync-label').textContent = '全部已同步';
+    document.getElementById('cloud-sync-bar').style.background = '#7bc97b';
+    document.getElementById('cloud-sync-bar').style.width = '100%';
+    document.getElementById('cloud-sync-pct').textContent = '100%';
+    badge.title = _uploadQueue.map(j => `✓ ${j.name}`).join('\n');
+    // 3 秒後清空佇列、隱藏
+    setTimeout(() => {
+      if (_uploadQueue.every(j => j.status === 'done')) {
+        _uploadQueue.length = 0;
+        badge.style.display = 'none';
+      }
+    }, 3000);
   }
 }
 
-// 進度條 UI 控制
+// 進度條 UI（保留給 init 讀取用）
 function cloudSyncShow(label, pct) {
   const badge = document.getElementById('cloud-sync-badge');
   if (!badge) return;
@@ -967,21 +1043,17 @@ function cloudSyncDone(success, errMsg) {
   if (!badge) return;
   if (success) {
     document.getElementById('cloud-sync-icon').textContent = '✓';
-    document.getElementById('cloud-sync-label').textContent = '已同步';
+    document.getElementById('cloud-sync-label').textContent = '已就緒';
     document.getElementById('cloud-sync-bar').style.background = '#7bc97b';
     document.getElementById('cloud-sync-bar').style.width = '100%';
     document.getElementById('cloud-sync-pct').textContent = '100%';
-    // 3 秒後淡出
-    setTimeout(()=>{ badge.style.transition='opacity 1s'; badge.style.opacity='0.6'; }, 3000);
-    setTimeout(()=>{ badge.style.display='none'; badge.style.opacity='1'; badge.style.transition=''; }, 10000);
+    setTimeout(()=>{ badge.style.display='none'; }, 2000);
   } else {
     document.getElementById('cloud-sync-icon').textContent = '⚠';
     document.getElementById('cloud-sync-label').textContent = '同步失敗';
     document.getElementById('cloud-sync-bar').style.background = '#e88c8c';
     document.getElementById('cloud-sync-pct').textContent = '!';
-    badge.title = errMsg || '雲端同步失敗，本地資料正常';
-    badge.style.cursor = 'pointer';
-    badge.onclick = () => alert('雲端同步失敗：' + (errMsg||'未知錯誤') + '\n\n本地操作不受影響，下次上傳時會重試。');
+    badge.title = errMsg || '雲端同步失敗';
   }
 }
 
@@ -1069,8 +1141,8 @@ async function loadEPRData() {
     if (!r.data || !r.data.length) return false;
 
     // ★ 把所有欄位強制轉成字串/數字（Sheets 會把純數字儲存格回傳為 number 型別）
-    const STR_FIELDS = ['商品系列','商品編號','商品名稱','顏色','尺寸','儲位','倉位','狀態','季別'];
-    const NUM_FIELDS = ['總採購量','總進貨量','未到量','未抓貨','銷售庫存','倉庫庫存','架上數量','倉位總數量','商品材積','儲位材積'];
+    const STR_FIELDS = ['商品系列','商品編號','商品名稱','顏色','尺寸','儲位','倉位','狀態','季別','包材'];
+    const NUM_FIELDS = ['總採購量','總進貨量','未到量','未抓貨','銷售庫存','倉庫庫存','架上數量','倉位總數量','商品材積','儲位材積','可賣數量','保留數量'];
     DB = r.data.map(row => {
       const obj = {};
       STR_FIELDS.forEach(k => { obj[k] = row[k]!=null ? String(row[k]) : ''; });
@@ -1541,7 +1613,6 @@ async function handleFW26Upload(event){
     const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];
     const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
-    // A~M: 採購人員,採購單季別,分類,款號,商品編號,商品名稱,顏色名稱,尺寸,預計交期,顏色數,尺寸段,包裝耗材,類別
     FW26_FILTER_DATA=raw.map(r=>[
       String(r['商品編號']||'').trim(),
       r['商品名稱']||'',
@@ -1557,16 +1628,21 @@ async function handleFW26Upload(event){
       r['尺寸段']||'',
       r['包裝耗材']||''
     ]);
-    // 更新 EMBEDDED_FW26_LOOKUP
     window.EMBEDDED_FW26_LOOKUP={};
     FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])window.EMBEDDED_FW26_LOOKUP[r[0]]=r[3];});
     document.getElementById('fw26-upload-status').textContent=`已載入 ${FW26_FILTER_DATA.length} 筆新品資料`;
-    await saveFW26Data();
     updateSeasonSKUFromFW26();
     initFW26();
     DIRTY.fw26=true;
     renderFW26Stats();renderFW26CatTable();renderFW26Table();
     hideLoading();
+
+    // ★ 雲端上傳改為背景執行（不阻塞 UI）
+    backgroundUpload('FW26 新品', async (progress)=>{
+      await gasChunkUploadBG('fw26', FW26_FILTER_DATA, '', (pct,cur,tot)=>{
+        progress(pct, `${cur}/${tot}`);
+      });
+    });
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
 }
@@ -3543,8 +3619,8 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     const r = await gasPost({ action:'loadEPR' });
     cloudSyncShow('處理資料', 75);
     if (r.data && r.data.length) {
-      const STR_FIELDS = ['商品系列','商品編號','商品名稱','顏色','尺寸','儲位','倉位','狀態','季別'];
-      const NUM_FIELDS = ['總採購量','總進貨量','未到量','未抓貨','銷售庫存','倉庫庫存','架上數量','倉位總數量','商品材積','儲位材積'];
+      const STR_FIELDS = ['商品系列','商品編號','商品名稱','顏色','尺寸','儲位','倉位','狀態','季別','包材'];
+      const NUM_FIELDS = ['總採購量','總進貨量','未到量','未抓貨','銷售庫存','倉庫庫存','架上數量','倉位總數量','商品材積','儲位材積','可賣數量','保留數量'];
       DB = r.data.map(row => {
         const obj = {};
         STR_FIELDS.forEach(k => { obj[k] = row[k]!=null ? String(row[k]) : ''; });
