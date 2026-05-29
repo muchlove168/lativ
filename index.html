@@ -915,70 +915,73 @@ async function handleUpload(event){
   event.target.value='';
 }
 
-// ============================================================
-// ★ 雲端 API（Google Apps Script）
-// ============================================================
+// ================================================================
+// ★ 雲端 API v3：所有通訊用 GET，大資料分批傳送
+// ================================================================
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxUcxDbJKnDu33T-in6NMWqKZXekzHi35EYG_sUd08s4OLvpLYiqVtif0fQJDfD83s/exec';
+const CHUNK_SIZE = 150; // 每批筆數（EPR 每筆約 300 bytes，150筆≈45KB，URL 安全）
 
-// ================================================================
-// GAS 通訊層：讀取用 GET，寫入用隱藏 iframe（真正繞過 CORS）
-// ================================================================
+// 基礎 GET 請求
+async function gasGet(params) {
+  const qs = Object.entries(params).map(([k,v]) => k+'='+encodeURIComponent(v)).join('&');
+  const res = await fetch(GAS_URL + '?' + qs);
+  const json = await res.json();
+  if (!json.ok) throw new Error(json.error || 'GAS error');
+  return json;
+}
+
+// 小資料單次 GET 寫入
 async function gasPost(payload) {
   const action = payload.action || '';
-  const isRead = action.startsWith('load') || action === 'pruneHistory';
-
-  if (isRead) {
-    // 讀取：GET 請求，GAS doGet 直接回應 JSON
-    const url = GAS_URL + '?action=' + encodeURIComponent(action);
-    const res = await fetch(url);
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'GAS error');
-    return json;
-  } else {
-    // 寫入：用隱藏 form + iframe，繞過所有 CORS 限制
-    return new Promise((resolve, reject) => {
-      const frameId = 'gas_frame_' + Date.now();
-      const formId  = 'gas_form_'  + Date.now();
-
-      const iframe = document.createElement('iframe');
-      iframe.name = frameId;
-      iframe.style.display = 'none';
-      document.body.appendChild(iframe);
-
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = GAS_URL;
-      form.target = frameId;
-      form.style.display = 'none';
-
-      const input = document.createElement('input');
-      input.type  = 'hidden';
-      input.name  = 'payload';
-      input.value = JSON.stringify(payload);
-      form.appendChild(input);
-      document.body.appendChild(form);
-
-      // 提交後清理，1.5 秒後視為成功（iframe 無法讀跨域回應）
-      const cleanup = () => {
-        try { document.body.removeChild(iframe); } catch(e) {}
-        try { document.body.removeChild(form);   } catch(e) {}
-      };
-
-      iframe.onload = () => { cleanup(); resolve({ ok: true }); };
-      setTimeout(() => { cleanup(); resolve({ ok: true }); }, 3000);
-
-      try { form.submit(); } catch(e) { cleanup(); reject(e); }
-    });
+  // 讀取
+  if (action.startsWith('load') || action === 'pruneHistory') {
+    return gasGet({ action });
   }
+  // 小資料寫入：直接 GET
+  if (action === 'saveSetting') {
+    const val = btoa(unescape(encodeURIComponent(JSON.stringify(payload.val))));
+    return gasGet({ action, key: payload.key, val });
+  }
+  if (action === 'saveHistory') {
+    const snap = btoa(unescape(encodeURIComponent(JSON.stringify(payload.snap))));
+    return gasGet({ action, date: payload.date, snap });
+  }
+  if (action === 'saveMonthly') {
+    const data = btoa(unescape(encodeURIComponent(JSON.stringify(payload.data))));
+    return gasGet({ action, data });
+  }
+  if (action === 'clearEPR') return gasGet({ action });
+  // 大資料：走分批流程
+  console.warn('gasPost: unknown action', action);
+  return { ok: true };
+}
+
+// 大資料分批上傳（EPR / FW26）
+async function gasChunkUpload(key, rows, dateParam) {
+  const total = Math.ceil(rows.length / CHUNK_SIZE);
+  // 1. 宣告開始
+  await gasGet({ action:'chunkStart', key, total });
+  // 2. 逐批傳送
+  for (let i = 0; i < total; i++) {
+    const chunk = rows.slice(i*CHUNK_SIZE, (i+1)*CHUNK_SIZE);
+    const data = btoa(unescape(encodeURIComponent(JSON.stringify(chunk))));
+    await gasGet({ action:'chunkSend', key, idx:i, data });
+    // 進度顯示
+    showLoading(`同步至雲端... ${Math.round((i+1)/total*100)}%`);
+  }
+  // 3. 提交組合
+  const result = await gasGet({ action:'chunkCommit', key, date: dateParam||'' });
+  return result;
 }
 
 // ── EPR 主資料 ──
 async function saveEPRData(dateLabel) {
   try {
-    showLoading('同步資料至雲端...');
-    await gasPost({ action:'saveEPR', data:DB, date:dateLabel });
+    showLoading('同步資料至雲端... 0%');
+    await gasChunkUpload('epr', DB, dateLabel);
     hideLoading();
-  } catch(e) { hideLoading(); console.warn('雲端儲存失敗:',e); alert('⚠️ 雲端儲存失敗：'+e.message); }
+    console.log('EPR 雲端儲存完成:', DB.length, '筆');
+  } catch(e) { hideLoading(); console.warn('EPR 雲端儲存失敗:',e); alert('⚠️ 雲端儲存失敗：'+e.message); }
 }
 
 async function loadEPRData() {
@@ -1015,7 +1018,10 @@ async function clearAllData() {
 
 // ── FW26 資料（雲端優先，內嵌備用）──
 async function saveFW26Data() {
-  try { await gasPost({ action:'saveFW26', data:FW26_FILTER_DATA }); } catch(e) { console.warn('FW26雲端儲存失敗:',e); }
+  try {
+    await gasChunkUpload('fw26', FW26_FILTER_DATA, '');
+    console.log('FW26 雲端儲存完成:', FW26_FILTER_DATA.length, '筆');
+  } catch(e) { console.warn('FW26 雲端儲存失敗:',e); }
 }
 async function loadFW26Data() {
   try {
