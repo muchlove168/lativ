@@ -749,8 +749,8 @@ let PACKAGING_RULES = [
   // XX-111 ~ XX-151 = 內衣褲袋類
   {
     zone:'XX', locStart:111, locEnd:151,
-    label:'女內褲袋／男內褲袋／免洗內褲袋／內衣袋／童Baby袋／Bra袋／夾鏈袋／包屁衣袋／發熱袋／涼感袋',
-    keywords:['內褲袋','免洗內褲','內衣袋','Bra袋','bra袋','BRA袋','夾鏈袋','夾鎖袋','童袋','Baby袋','baby袋','包屁衣袋','發熱袋','涼感袋','涼感中Bra','二入內衣','套裝組夾','童內褲袋','無痕內褲袋','中Bra袋']
+    label:'女內褲袋／男內褲袋／免洗內褲袋／內衣袋／童Baby袋／Bra袋／夾鏈袋／一般夾鍊袋／包屁衣袋／發熱袋／涼感袋',
+    keywords:['內褲袋','免洗內褲','內衣袋','Bra袋','bra袋','BRA袋','夾鏈袋','夾鎖袋','一般夾鍊袋','一般夾鏈袋','夾鍊袋','夾链袋','童袋','Baby袋','baby袋','包屁衣袋','發熱袋','涼感袋','涼感中Bra','二入內衣','套裝組夾','童內褲袋','無痕內褲袋','中Bra袋','夾鏈','夾鍊']
   },
   // TX-011 ~ TX-014 = 滑齒/鞋盒/大袋
   {
@@ -916,61 +916,52 @@ async function handleUpload(event){
 }
 
 // ================================================================
-// ★ 雲端 API v3：所有通訊用 GET，大資料分批傳送
+// ★ 雲端 API v4：fetch POST，GAS 原生支援跨域
 // ================================================================
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxUcxDbJKnDu33T-in6NMWqKZXekzHi35EYG_sUd08s4OLvpLYiqVtif0fQJDfD83s/exec';
-const CHUNK_SIZE = 150; // 每批筆數（EPR 每筆約 300 bytes，150筆≈45KB，URL 安全）
+const CHUNK_SIZE = 300; // 每批筆數
 
-// 基礎 GET 請求
+// 基礎 GET（讀取用）
 async function gasGet(params) {
-  const qs = Object.entries(params).map(([k,v]) => k+'='+encodeURIComponent(v)).join('&');
-  const res = await fetch(GAS_URL + '?' + qs);
-  const json = await res.json();
-  if (!json.ok) throw new Error(json.error || 'GAS error');
-  return json;
+  const qs = Object.entries(params).map(([k,v])=>k+'='+encodeURIComponent(String(v))).join('&');
+  const res = await fetch(GAS_URL+'?'+qs);
+  return res.json();
 }
 
-// 小資料單次 GET 寫入
+// 基礎 POST（寫入用）— GAS doPost 接 JSON
+async function gasFetch(payload) {
+  const res = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' }, // text/plain 不觸發 preflight
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+// 統一入口
 async function gasPost(payload) {
   const action = payload.action || '';
-  // 讀取
   if (action.startsWith('load') || action === 'pruneHistory') {
     return gasGet({ action });
   }
-  // 小資料寫入：直接 GET
-  if (action === 'saveSetting') {
-    const val = btoa(unescape(encodeURIComponent(JSON.stringify(payload.val))));
-    return gasGet({ action, key: payload.key, val });
-  }
-  if (action === 'saveHistory') {
-    const snap = btoa(unescape(encodeURIComponent(JSON.stringify(payload.snap))));
-    return gasGet({ action, date: payload.date, snap });
-  }
-  if (action === 'saveMonthly') {
-    const data = btoa(unescape(encodeURIComponent(JSON.stringify(payload.data))));
-    return gasGet({ action, data });
-  }
-  if (action === 'clearEPR') return gasGet({ action });
-  // 大資料：走分批流程
-  console.warn('gasPost: unknown action', action);
-  return { ok: true };
+  return gasFetch(payload);
 }
 
 // 大資料分批上傳（EPR / FW26）
 async function gasChunkUpload(key, rows, dateParam) {
   const total = Math.ceil(rows.length / CHUNK_SIZE);
+  showLoading('雲端準備中...');
   // 1. 宣告開始
-  await gasGet({ action:'chunkStart', key, total });
+  await gasFetch({ action:'chunkStart', key, total });
   // 2. 逐批傳送
   for (let i = 0; i < total; i++) {
     const chunk = rows.slice(i*CHUNK_SIZE, (i+1)*CHUNK_SIZE);
-    const data = btoa(unescape(encodeURIComponent(JSON.stringify(chunk))));
-    await gasGet({ action:'chunkSend', key, idx:i, data });
-    // 進度顯示
+    await gasFetch({ action:'chunkSend', key, idx:i, data:chunk });
     showLoading(`同步至雲端... ${Math.round((i+1)/total*100)}%`);
   }
-  // 3. 提交組合
-  const result = await gasGet({ action:'chunkCommit', key, date: dateParam||'' });
+  // 3. 提交
+  showLoading('雲端寫入中...');
+  const result = await gasFetch({ action:'chunkCommit', key, date: dateParam||'' });
   return result;
 }
 
@@ -1484,20 +1475,6 @@ async function handleFW26Upload(event){
   event.target.value='';
 }
 
-// 26FW — IndexedDB 存取
-async function saveFW26Data(){
-  try{
-    // FW26 資料由 saveFW26Data() 同步至雲端
-    console.log('FW26 saved to IndexedDB:',FW26_FILTER_DATA.length,'rows');
-    saveFW26Data();
-  }catch(e){console.error('FW26 IDB save failed:',e);}
-  // localStorage 備份（僅存前 5000 筆以避免容量限制）
-  try{
-    const backup=FW26_FILTER_DATA.slice(0,5000);
-    window._fw26Backup=backup;
-    window._fw26BackupTotal=FW26_FILTER_DATA.length;
-  }catch(e){console.warn('FW26 localStorage backup failed:',e);}
-}
 async function loadFW26Data(){
   try{
     // 從雲端讀取
@@ -2286,7 +2263,7 @@ function resetPackagingRules(){
   if(!confirm('確定要重設為預設值？'))return;
   PACKAGING_RULES=[
     {zone:'XX',locStart:11,locEnd:104,label:'大OPP袋／小OPP袋／中OPP袋／套裝小袋／特大OPP袋／迷你OPP袋／商務襯衫袋',keywords:['OPP袋','opp袋','套裝小袋','商務襯衫袋','迷你OPP','特大OPP']},
-    {zone:'XX',locStart:111,locEnd:151,label:'女內褲袋／男內褲袋／免洗內褲袋／內衣袋／童Baby袋／Bra袋／夾鏈袋／包屁衣袋／發熱袋／涼感袋',keywords:['內褲袋','免洗內褲','內衣袋','Bra袋','bra袋','BRA袋','夾鏈袋','夾鎖袋','童袋','Baby袋','baby袋','包屁衣袋','發熱袋','涼感袋','涼感中Bra','二入內衣','套裝組夾','童內褲袋','無痕內褲袋','中Bra袋']},
+    {zone:'XX',locStart:111,locEnd:151,label:'女內褲袋／男內褲袋／免洗內褲袋／內衣袋／童Baby袋／Bra袋／夾鏈袋／一般夾鍊袋／包屁衣袋／發熱袋／涼感袋',keywords:['內褲袋','免洗內褲','內衣袋','Bra袋','bra袋','BRA袋','夾鏈袋','夾鎖袋','一般夾鍊袋','夾鍊袋','童袋','Baby袋','baby袋','包屁衣袋','發熱袋','涼感袋','涼感中Bra','二入內衣','套裝組夾','童內褲袋','無痕內褲袋','中Bra袋']},
     {zone:'TX',locStart:11,locEnd:14,label:'滑齒號／男鞋盒／皮帶盒／女鞋盒／套裝大袋',keywords:['滑齒','鞋盒','皮帶盒','套裝大袋']},
   ];
   cloudSave('lativ_packaging_rules',[]);renderPackagingRulesList();
@@ -2838,38 +2815,33 @@ function exportRelocPlan(){
 // ============================================================
 async function clearReleasedSlots(){
   if(!window._relocPlan){alert('請先執行並匯出儲位釋放清單');return;}
-  if(!confirm('確定要從資料庫中清除所有已釋放儲位的 SKU 資訊？\n此操作無法復原，請確認已完成 ERP 系統的儲位釋放。'))return;
+  if(!confirm('確定要從資料庫中清除已成功分配儲位的 SKU 資訊？\n注意：未分配（需手動處理）的 SKU 不會被清除。\n此操作無法復原，請確認已完成 ERP 系統的儲位釋放。'))return;
 
   const{assignmentResult,unmatched,overflow}=window._relocPlan;
 
-  // 收集所有要清除的商品編號
+  // ★ 只清除「已成功分配」的 SKU，未分配（unmatched/overflow）保留
   const clearCodes=new Set();
   Object.values(assignmentResult).forEach(arr=>arr.forEach(({sku})=>{if(sku.商品編號)clearCodes.add(sku.商品編號);}));
-  [...unmatched,...overflow].forEach(({sku})=>{if(sku.商品編號)clearCodes.add(sku.商品編號);});
+  // unmatched 和 overflow 不加入刪除集合
 
-  if(!clearCodes.size){alert('沒有找到需要清除的 SKU');return;}
+  if(!clearCodes.size){alert('沒有找到已分配的 SKU');return;}
 
   const before=DB.length;
-  // 從 DB 移除這些 SKU（一個商品編號可能有多個尺寸/顏色，全部移除）
   DB=DB.filter(r=>!clearCodes.has(r.商品編號));
   const removed=before-DB.length;
 
-  // 同步更新 IndexedDB
-  // DB 已在上傳時同步至雲端，此處無需額外同步
-
-  // 重建快取並重新渲染
   buildCache();
   DB.forEach(r=>{r.XX狀態=getXXStatus(r);});
   Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);
   renderAll();
   updateRelocStats();
 
-  // 重置釋放計畫狀態
   window._relocPlan=null;
   document.getElementById('reloc-export-btn').style.display='none';
   document.getElementById('reloc-clear-btn').style.display='none';
 
-  alert(`已清除 ${clearCodes.size} 個商品（共移除 ${removed} 筆 SKU 資料）。\n儲位釋放計畫已重置，請重新執行儲位釋放。`);
+  const unmatchedCount=(unmatched||[]).length+(overflow||[]).length;
+  alert(`已清除 ${clearCodes.size} 個已分配商品（共移除 ${removed} 筆資料）。${unmatchedCount>0?`\n⚠️ ${unmatchedCount} 筆未分配 SKU 已保留，請手動處理後再重新執行儲位釋放。`:''}`);
 }
 
 
