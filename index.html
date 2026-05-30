@@ -1113,18 +1113,29 @@ const CHUNK_SIZE = 300; // 每批筆數
 // 基礎 GET（讀取用）
 async function gasGet(params) {
   const qs = Object.entries(params).map(([k,v])=>k+'='+encodeURIComponent(String(v))).join('&');
-  const res = await fetch(GAS_URL+'?'+qs);
+  const res = await fetch(GAS_URL+'?'+qs, { redirect:'follow' });
   return res.json();
 }
 
-// 基礎 POST（寫入用）— GAS doPost 接 JSON
-async function gasFetch(payload) {
-  const res = await fetch(GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain' }, // text/plain 不觸發 preflight
-    body: JSON.stringify(payload),
-  });
-  return res.json();
+// 基礎 POST — 自動重試一次
+async function gasFetch(payload, retry=1) {
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+    });
+    if (!res.ok) throw new Error('HTTP '+res.status);
+    return res.json();
+  } catch(e) {
+    if (retry > 0) {
+      console.warn('gasFetch 失敗，3秒後重試...', e.message);
+      await new Promise(r => setTimeout(r, 3000));
+      return gasFetch(payload, retry - 1);
+    }
+    throw e;
+  }
 }
 
 // 統一入口
