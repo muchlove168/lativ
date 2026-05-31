@@ -1328,7 +1328,7 @@ function renderSalesStats(){
       const reasonDiv=document.createElement('div');
       reasonDiv.style.cssText='font-size:10px;color:var(--text2);margin-top:2px;cursor:text;min-height:14px;';
       reasonDiv.title='雙擊編輯原因';
-      reasonDiv.textContent=reason||'雙擊新增原因...';
+      reasonDiv.textContent='保留原因：'+(reason||'（雙擊新增）');
       if(!reason) reasonDiv.style.fontStyle='italic';
 
       reasonDiv.ondblclick=(e)=>{
@@ -1346,7 +1346,8 @@ function renderSalesStats(){
             r[style]=newReason;
             localStorage.setItem('reserve_reasons',JSON.stringify(r));
           }catch(e){}
-          reasonDiv.textContent=newReason||'雙擊新增原因...';
+          reason=newReason;
+          reasonDiv.textContent='保留原因：'+(newReason||'（雙擊新增）');
           reasonDiv.style.fontStyle=newReason?'normal':'italic';
           input.replaceWith(reasonDiv);
         };
@@ -1354,12 +1355,12 @@ function renderSalesStats(){
         input.addEventListener('blur',save);
       };
 
-      // 展開詳細列表
+      // 展開詳細列表（grid 固定欄寬，對齊整齊）
       const detail=document.createElement('div');
       detail.style.cssText='display:none;margin-top:4px;padding-left:6px;border-left:2px solid var(--border);';
       g.items.forEach(r=>{
         const d=document.createElement('div');
-        d.style.cssText='font-size:10px;color:var(--text2);padding:1px 0;display:flex;gap:8px;';
+        d.style.cssText='display:grid;grid-template-columns:72px 36px 28px auto;gap:0;font-size:10px;color:var(--text2);padding:1px 0;';
         d.innerHTML=`<span style="color:var(--text)">${r.商品編號}</span><span>${r.顏色}</span><span>${r.尺寸}</span><span style="color:var(--red);font-weight:700">保留=${r.保留數量}</span>`;
         detail.appendChild(d);
       });
