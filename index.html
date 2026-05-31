@@ -236,6 +236,7 @@
   <div class="tab" onclick="switchTab('xx')">XX零碼區</div>
   <div class="tab" onclick="switchTab('reloc')">儲位釋放</div>
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
+  <div class="tab" onclick="switchTab('arrange')">儲位安排比對</div>
 </div>
 
 <div class="content">
@@ -834,11 +835,12 @@ function getXXStatus(r) {
 // TAB SWITCHING
 // ============================================================
 function switchTab(name){
-  const tabs=['sku','sales','fw26','db','xx','reloc','slotdata'];
+  const tabs=['sku','sales','fw26','db','xx','reloc','slotdata','arrange'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='slotdata'){renderSlotData();return;}
+  if(name==='arrange'){renderArrangeCompare();return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
     if(name==='sales'){renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();}
@@ -1315,20 +1317,20 @@ function renderSalesStats(){
       const row=document.createElement('div');
       row.style.cssText='border-bottom:1px solid var(--border);padding:4px 2px;';
 
-      // 摘要列：款號 + 筆數 + 保留值 + 展開箭頭
+      // 摘要列：款號 + 筆數 + 保留值 + 展開箭頭（grid 對齊與展開列一致）
       const summary=document.createElement('div');
-      summary.style.cssText='display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;';
+      summary.style.cssText='display:grid;grid-template-columns:72px 36px 1fr 14px;align-items:center;cursor:pointer;font-size:11px;';
       summary.innerHTML=`
-        <span style="font-weight:700;min-width:44px">${style}</span>
+        <span style="font-weight:700">${style}</span>
         <span style="color:var(--text2)">${g.count} 筆</span>
-        <span style="color:var(--red);flex:1">保留=${g.maxReserve}</span>
-        <span class="expand-arrow" style="color:var(--text3);font-size:10px;transition:transform 0.2s">▶</span>`;
+        <span style="color:var(--red)">保留=${g.maxReserve}</span>
+        <span class="expand-arrow" style="color:var(--text3);font-size:10px;transition:transform 0.2s;text-align:right">▶</span>`;
 
       // 原因列（雙擊編輯）
       const reasonDiv=document.createElement('div');
       reasonDiv.style.cssText='font-size:10px;color:var(--text2);margin-top:2px;cursor:text;min-height:14px;';
       reasonDiv.title='雙擊編輯原因';
-      reasonDiv.textContent='保留原因：'+(reason||'（雙擊新增）');
+      reasonDiv.textContent=reason?('保留原因：'+reason):'保留原因：';
       if(!reason) reasonDiv.style.fontStyle='italic';
 
       reasonDiv.ondblclick=(e)=>{
@@ -1339,7 +1341,10 @@ function renderSalesStats(){
         input.placeholder='輸入原因（Enter 儲存）';
         reasonDiv.replaceWith(input);
         input.focus();
+        let saved=false;
         const save=()=>{
+          if(saved)return;
+          saved=true;
           const newReason=input.value.trim();
           try{
             const r=JSON.parse(localStorage.getItem('reserve_reasons')||'{}');
@@ -1347,11 +1352,19 @@ function renderSalesStats(){
             localStorage.setItem('reserve_reasons',JSON.stringify(r));
           }catch(e){}
           reason=newReason;
-          reasonDiv.textContent='保留原因：'+(newReason||'（雙擊新增）');
+          reasonDiv.textContent=newReason?('保留原因：'+newReason):'保留原因：';
           reasonDiv.style.fontStyle=newReason?'normal':'italic';
-          input.replaceWith(reasonDiv);
+          if(input.parentNode) input.replaceWith(reasonDiv);
         };
-        input.addEventListener('keydown',e2=>{if(e2.key==='Enter')save();if(e2.key==='Escape'){input.replaceWith(reasonDiv);}});
+        const cancel=()=>{
+          if(saved)return;
+          saved=true;
+          if(input.parentNode) input.replaceWith(reasonDiv);
+        };
+        input.addEventListener('keydown',e2=>{
+          if(e2.key==='Enter'){e2.preventDefault();save();}
+          else if(e2.key==='Escape'){e2.preventDefault();cancel();}
+        });
         input.addEventListener('blur',save);
       };
 
@@ -1360,8 +1373,8 @@ function renderSalesStats(){
       detail.style.cssText='display:none;margin-top:4px;padding-left:6px;border-left:2px solid var(--border);';
       g.items.forEach(r=>{
         const d=document.createElement('div');
-        d.style.cssText='display:grid;grid-template-columns:72px 36px 28px auto;gap:0;font-size:10px;color:var(--text2);padding:1px 0;';
-        d.innerHTML=`<span style="color:var(--text)">${r.商品編號}</span><span>${r.顏色}</span><span>${r.尺寸}</span><span style="color:var(--red);font-weight:700">保留=${r.保留數量}</span>`;
+        d.style.cssText='display:grid;grid-template-columns:72px 36px 28px 1fr 14px;font-size:10px;color:var(--text2);padding:1px 0;';
+        d.innerHTML=`<span style="color:var(--text)">${r.商品編號}</span><span>${r.顏色}</span><span>${r.尺寸}</span><span style="color:var(--red);font-weight:700">保留=${r.保留數量}</span><span></span>`;
         detail.appendChild(d);
       });
 
@@ -1401,6 +1414,146 @@ function editTotalShipment(idx,td){
 function saveManualEdits(){try{localStorage.setItem('lativ_manual_edits',JSON.stringify({ss26NoPosStock:SS26_NO_POS_STOCK,seasonProgress:SEASON_PROGRESS_DATA.map(s=>({season:s.season,totalShipment:s.totalShipment}))}));}catch(e){}}
 function loadManualEdits(){
   try{const saved=localStorage.getItem('lativ_manual_edits');if(!saved)return;const data=JSON.parse(saved);if(data.ss26NoPosStock!==undefined)SS26_NO_POS_STOCK=data.ss26NoPosStock;if(data.seasonProgress){data.seasonProgress.forEach(s=>{const item=SEASON_PROGRESS_DATA.find(x=>x.season===s.season);if(item)item.totalShipment=s.totalShipment;});}}catch(e){}
+}
+
+// ============================================================
+// ★ 儲位安排比對 TAB
+// 上傳「匯出儲位安排.xlsx」→ 用商品編號比對 26FW 新品 → 統計類別所需儲位數
+// 儲位安排檔欄位：商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 商品包材, 貨到通知
+// 邏輯：每筆儲位安排（商品編號+尺寸）= 1 個所需儲位
+// ============================================================
+let ARRANGE_DATA = []; // [{code, name, size, volume, qty, ...}]
+let ARRANGE_RESULT = null;
+
+async function handleArrangeUpload(event){
+  const file=event.target.files[0];if(!file)return;
+  showLoading('讀取儲位安排報表中...');
+  try{
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
+    ARRANGE_DATA=raw.map(r=>({
+      code:String(r['商品編號']||'').trim(),
+      name:String(r['商品名稱']||''),
+      size:String(r['尺寸']||''),
+      slot:String(r['儲位']||''),
+      volume:Number(r['材積'])||0,
+      pending:Number(r['未到量'])||0,
+      plannedSlot:String(r['預計倉位']||''),
+      packaging:String(r['商品包材']||''),
+      arrival:String(r['貨到通知']||''),
+    })).filter(r=>r.code);
+
+    // 存到 IndexedDB
+    try{await idbPut('arrange_rows',ARRANGE_DATA);}catch(e){}
+
+    document.getElementById('arrange-status').textContent=`已載入 ${ARRANGE_DATA.length} 筆儲位安排資料`;
+    document.getElementById('arrange-clear-btn').style.display='inline-flex';
+    hideLoading();
+    renderArrangeCompare();
+  }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
+  event.target.value='';
+}
+
+async function clearArrangeData(){
+  if(!confirm('確定要清除儲位安排資料？'))return;
+  ARRANGE_DATA=[];
+  ARRANGE_RESULT=null;
+  try{await idbPut('arrange_rows',[]);}catch(e){}
+  document.getElementById('arrange-status').textContent='';
+  document.getElementById('arrange-clear-btn').style.display='none';
+  renderArrangeCompare();
+}
+
+function renderArrangeCompare(){
+  // 統計表格
+  const catBody=document.getElementById('arrange-cat-body');
+  const unmatchedBody=document.getElementById('arrange-unmatched-body');
+
+  if(!ARRANGE_DATA||!ARRANGE_DATA.length){
+    document.getElementById('arrange-total').textContent='—';
+    document.getElementById('arrange-matched').textContent='—';
+    document.getElementById('arrange-unmatched').textContent='—';
+    document.getElementById('arrange-slot-total').textContent='—';
+    if(catBody) catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未上傳資料</td></tr>';
+    if(unmatchedBody) unmatchedBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">—</td></tr>';
+    return;
+  }
+
+  // 建立 26FW lookup（用 EMBEDDED 或 FW26_FILTER_DATA）
+  const fw26Lookup=window.EMBEDDED_FW26_LOOKUP||{};
+  if(FW26_FILTER_DATA&&FW26_FILTER_DATA.length){
+    FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])fw26Lookup[r[0]]=r[3];});
+  }
+
+  // 統計各類別
+  const catStats={};        // {類別: {skuCount, slotCount}}
+  const unmatched=[];
+  let matchedCount=0;
+
+  ARRANGE_DATA.forEach(r=>{
+    const cat=fw26Lookup[r.code];
+    if(cat){
+      if(!catStats[cat])catStats[cat]={skuCount:0,slotCount:0};
+      catStats[cat].skuCount++;
+      catStats[cat].slotCount++;  // 每個 SKU 算 1 個儲位需求
+      matchedCount++;
+    }else{
+      unmatched.push(r);
+    }
+  });
+
+  // 上方統計
+  document.getElementById('arrange-total').textContent=ARRANGE_DATA.length.toLocaleString();
+  document.getElementById('arrange-matched').textContent=matchedCount.toLocaleString();
+  document.getElementById('arrange-unmatched').textContent=unmatched.length.toLocaleString();
+  document.getElementById('arrange-slot-total').textContent=matchedCount.toLocaleString();
+
+  // 類別統計表（依所需儲位數降序）
+  catBody.innerHTML='';
+  const sorted=Object.entries(catStats).sort((a,b)=>b[1].slotCount-a[1].slotCount);
+  if(!sorted.length){
+    catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未比對到 26FW 新品（請先確認已上傳 26FW 報表）</td></tr>';
+  }else{
+    sorted.forEach(([cat,s])=>{
+      const tr=document.createElement('tr');
+      tr.style.borderBottom='1px solid var(--border)';
+      tr.innerHTML=`
+        <td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td>
+        <td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}</td>
+        <td style="padding:6px 10px;text-align:right;font-weight:700;color:var(--accent)">${s.slotCount.toLocaleString()}</td>`;
+      catBody.appendChild(tr);
+    });
+    // 合計列
+    const totalSku=sorted.reduce((a,[,s])=>a+s.skuCount,0);
+    const totalSlot=sorted.reduce((a,[,s])=>a+s.slotCount,0);
+    const trTotal=document.createElement('tr');
+    trTotal.style.background='var(--surface2)';
+    trTotal.innerHTML=`
+      <td style="padding:8px 10px;text-align:left;font-weight:700;border-top:2px solid var(--accent)">合計</td>
+      <td style="padding:8px 10px;text-align:right;font-weight:700;border-top:2px solid var(--accent)">${totalSku.toLocaleString()}</td>
+      <td style="padding:8px 10px;text-align:right;font-weight:700;color:var(--accent);border-top:2px solid var(--accent)">${totalSlot.toLocaleString()}</td>`;
+    catBody.appendChild(trTotal);
+  }
+
+  // 未匹配清單
+  unmatchedBody.innerHTML='';
+  if(!unmatched.length){
+    unmatchedBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--green)">✓ 全部商品都已比對到 26FW 新品</td></tr>';
+  }else{
+    unmatched.forEach(r=>{
+      const tr=document.createElement('tr');
+      tr.style.borderBottom='1px solid var(--border)';
+      tr.innerHTML=`
+        <td style="padding:4px 8px;font-family:monospace;color:var(--text2)">${r.code}</td>
+        <td style="padding:4px 8px">${r.name}</td>
+        <td style="padding:4px 8px;text-align:left">${r.size}</td>`;
+      unmatchedBody.appendChild(tr);
+    });
+  }
+
+  ARRANGE_RESULT={catStats,unmatched,matchedCount};
 }
 
 // 26FW
@@ -3423,14 +3576,15 @@ async function exportAllData(){
   showLoading('準備匯出資料...');
   try{
     // 1. 收集 IndexedDB 資料
-    let eprRows=[],fw26Rows=[],eprDate='';
+    let eprRows=[],fw26Rows=[],arrangeRows=[],eprDate='';
     try{eprRows=await idbGet('epr_rows')||[];}catch(e){}
     try{eprDate=await idbGet('epr_date')||'';}catch(e){}
     try{fw26Rows=await idbGet('fw26_rows')||[];}catch(e){}
+    try{arrangeRows=await idbGet('arrange_rows')||[];}catch(e){}
 
     // 2. 收集所有 localStorage 設定
     const settings={};
-    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist'];
+    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist','reserve_reasons'];
     settingKeys.forEach(k=>{
       try{const v=localStorage.getItem(k);if(v!==null)settings[k]=JSON.parse(v);}catch(e){}
     });
@@ -3448,6 +3602,7 @@ async function exportAllData(){
       __exportedFrom:navigator.userAgent.substring(0,100),
       eprData:{rows:eprRows,date:eprDate,count:eprRows.length},
       fw26Data:{rows:fw26Rows,count:fw26Rows.length},
+      arrangeData:{rows:arrangeRows,count:arrangeRows.length},
       settings:settings,
       history:history,
     };
@@ -3487,7 +3642,7 @@ async function importAllData(file){
         return;
       }
 
-      let imported={epr:0,fw26:0,settings:0,history:0};
+      let imported={epr:0,fw26:0,arrange:0,settings:0,history:0};
 
       // 1. 還原 IndexedDB
       if(pkg.eprData&&pkg.eprData.rows){
@@ -3498,6 +3653,10 @@ async function importAllData(file){
       if(pkg.fw26Data&&pkg.fw26Data.rows){
         await idbPut('fw26_rows',pkg.fw26Data.rows);
         imported.fw26=pkg.fw26Data.rows.length;
+      }
+      if(pkg.arrangeData&&pkg.arrangeData.rows){
+        await idbPut('arrange_rows',pkg.arrangeData.rows);
+        imported.arrange=pkg.arrangeData.rows.length;
       }
 
       // 2. 還原設定
@@ -3516,7 +3675,7 @@ async function importAllData(file){
 
       hideLoading();
       const exportTime=pkg.__exportedAt?new Date(pkg.__exportedAt).toLocaleString('zh-TW'):'未知';
-      alert(`✓ 匯入成功！\n\n備份時間：${exportTime}\n\n已還原：\n• EPR：${imported.epr.toLocaleString()} 筆\n• FW26：${imported.fw26.toLocaleString()} 筆\n• 設定：${imported.settings} 項\n• 歷史：${imported.history} 天\n\n頁面將自動重新整理...`);
+      alert(`✓ 匯入成功！\n\n備份時間：${exportTime}\n\n已還原：\n• EPR：${imported.epr.toLocaleString()} 筆\n• FW26：${imported.fw26.toLocaleString()} 筆\n• 儲位安排：${imported.arrange.toLocaleString()} 筆\n• 設定：${imported.settings} 項\n• 歷史：${imported.history} 天\n\n頁面將自動重新整理...`);
 
       // 重新整理頁面以套用所有設定
       setTimeout(()=>location.reload(),500);
@@ -3551,6 +3710,15 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   try{fw26Restored=await loadFW26Data();}catch(e){console.warn('FW26 load failed:',e);}
   if(!fw26Restored){FW26_FILTER_DATA=EMBEDDED_FW26_STATIC;}
   console.log('FW26_FILTER_DATA.length after load:',FW26_FILTER_DATA.length);
+  // 載入儲位安排資料
+  try{
+    const arr=await idbGet('arrange_rows');
+    if(arr&&arr.length){
+      ARRANGE_DATA=arr;
+      document.getElementById('arrange-status').textContent=`已載入 ${arr.length} 筆儲位安排資料`;
+      document.getElementById('arrange-clear-btn').style.display='inline-flex';
+    }
+  }catch(e){}
   try{initFW26();}catch(e){console.warn('initFW26 failed:',e);}
   try{histUpdateUI();}catch(e){console.warn('histUpdateUI failed:',e);}
   try{renderSKUTables();}catch(e){console.warn('renderSKUTables failed:',e);}
@@ -3688,6 +3856,53 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   </div>
 </div>
 
+
+<!-- ═══ 儲位安排比對 TAB ═══ -->
+<div class="tab-panel" id="tab-arrange">
+  <div style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <button class="upload-btn" onclick="document.getElementById('arrange-file-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳「匯出儲位安排」報表</button>
+    <input type="file" id="arrange-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleArrangeUpload(event)">
+    <span id="arrange-status" style="font-size:12px;color:var(--text3)"></span>
+    <button class="upload-btn" onclick="clearArrangeData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto;display:none" id="arrange-clear-btn">✖ 清除資料</button>
+  </div>
+
+  <div class="stats-bar" style="padding:0 18px">
+    <div class="stat-box"><div class="label">儲位安排總筆數</div><div class="val" id="arrange-total">—</div></div>
+    <div class="stat-box"><div class="label">已比對 26FW 新品</div><div class="val good" id="arrange-matched">—</div></div>
+    <div class="stat-box"><div class="label">未匹配筆數</div><div class="val warn" id="arrange-unmatched">—</div></div>
+    <div class="stat-box"><div class="label">所需儲位總數</div><div class="val" id="arrange-slot-total">—</div></div>
+  </div>
+
+  <div style="padding:14px 18px;display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start">
+    <!-- 左：類別統計 -->
+    <div class="card">
+      <div class="card-title"><span class="dot"></span>各類別所需儲位數</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:left">類別</th>
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">SKU 數</th>
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">所需儲位</th>
+        </tr></thead>
+        <tbody id="arrange-cat-body"><tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未上傳資料</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- 右：未匹配清單 -->
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--red)"></span>未匹配 26FW 的商品（可能非新品或編號異常）</div>
+      <div style="max-height:480px;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品編號</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">尺寸</th>
+          </tr></thead>
+          <tbody id="arrange-unmatched-body"><tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="fw26-schedule-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center">
   <div style="background:var(--bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:92vw;max-height:90vh;overflow:auto;padding:0;min-width:600px">
