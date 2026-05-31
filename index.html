@@ -2423,7 +2423,7 @@ function renderRelocResult(assignmentResult,unmatched,overflow,totalCount){
 function exportRelocPlan(){
   if(!window._relocPlan){alert('請先執行儲位釋放');return;}
   const{assignmentResult,unmatched,overflow}=window._relocPlan;
-  const MAX_ROWS=58, COLS_PER_PAGE=4;
+  const MAX_ROWS=62, COLS_PER_PAGE=4;
 
   // 1. 收集所有要釋放的 SKU（商品編號 + 儲位）
   const allItems=[];
@@ -2642,14 +2642,18 @@ function exportRelocPlan(){
     const rows=buildPageRows(pageCols);
     const ws=XLSX.utils.aoa_to_sheet(rows);
 
-    // 設定欄寬
+    // 設定欄寬（對齊手動版：商品編號9、儲位9、間隔2，A4橫向恰好放4組）
     const colDefs=[];
     pageCols.forEach((col,ci)=>{
-      colDefs.push({wch:11.6}); // 商品編號（固定）
-      colDefs.push({wch:11});   // 儲位（固定）
-      if(ci<pageCols.length-1) colDefs.push({wch:4}); // 間隔（固定）
+      colDefs.push({wch:9.5}); // 商品編號
+      colDefs.push({wch:9});   // 儲位
+      if(ci<pageCols.length-1) colDefs.push({wch:2}); // 間隔
     });
     ws['!cols']=colDefs;
+
+    // 列高（壓縮到 14pt，塞更多列）
+    const rowCount=XLSX.utils.decode_range(ws['!ref']||'A1').e.r+1;
+    ws['!rows']=Array(rowCount).fill({hpt:14});
 
     // 設定置中對齊 + 框線（xlsx-js-style 支援）
     const thinBorder={style:'thin',color:{rgb:'000000'}};
@@ -2665,7 +2669,7 @@ function exportRelocPlan(){
         ws[addr].s={
           alignment:{horizontal:'center',vertical:'center'},
           border:allBorders,
-          font:R===0?{bold:true,name:'Microsoft JhengHei',sz:11}:{name:'Microsoft JhengHei',sz:11}
+          font:R===0?{bold:true,name:'Microsoft JhengHei',sz:9}:{name:'Microsoft JhengHei',sz:9}
         };
         if(R===0){
           ws[addr].s.border={...allBorders,bottom:headerBottom};
@@ -2677,6 +2681,18 @@ function exportRelocPlan(){
     // 隱藏格線
     if(!ws['!sheetViews']) ws['!sheetViews']=[{}];
     ws['!sheetViews'][0].showGridLines=false;
+
+    // 列印設定：A4 直向、縮放符合頁寬
+    ws['!pageSetup']={
+      paperSize:9,        // A4
+      orientation:'portrait',
+      fitToPage:true,
+      fitToWidth:1,
+      fitToHeight:0,
+      horizontalDpi:300,
+      verticalDpi:300
+    };
+    ws['!margins']={left:0.3,right:0.3,top:0.5,bottom:0.5,header:0.2,footer:0.2};
 
     const sheetName=pages.length>1?`儲位釋放_${pi+1}`:'儲位釋放';
     XLSX.utils.book_append_sheet(wb,ws,sheetName);
