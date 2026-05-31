@@ -390,13 +390,8 @@
         <div class="alert-header" style="background:#fdf5f2"><span style="width:7px;height:7px;border-radius:50%;background:var(--red);display:inline-block"></span> 保留值 &gt; 6</div>
         <div class="alert-body">
           <div style="font-size:16px;font-weight:700;color:var(--red);margin-bottom:4px;text-align:center" id="reserve-warn-count">—</div>
-          <table id="tbl-reserve-warn" style="width:100%;font-size:11px;border-collapse:collapse"><tbody></tbody></table>
-          <div style="margin-top:6px;font-size:10px;color:var(--text2);text-align:center" id="reserve-note"></div>
+          <div id="tbl-reserve-warn"></div>
         </div>
-      </div>
-      <div class="alert-box" style="border-color:#d0e8d8">
-        <div class="alert-header" style="background:#f2fdf5"><span style="width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block"></span> 可賣數量 &lt; 0</div>
-        <div class="alert-body" style="font-size:18px;font-weight:700;color:var(--green);text-align:center" id="neg-avail-count">—</div>
       </div>
     </div>
   </div>
@@ -1299,9 +1294,89 @@ function renderSalesStats(){
   const oldUG=tot-totNewUG;setText('sp-new-pct',tot>0?pct(totNewUG/tot):'—');setText('sp-old-pct',tot>0?pct(oldUG/tot):'—');
   const newT=f1newUG+f2newUG;setText('sp-new-1f',newT>0?pct(f1newUG/newT):'—');setText('sp-new-2f',newT>0?pct(f2newUG/newT):'—');
   setText('reserve-warn-count',highReserve.length+' 筆');
-  const rTbody=document.querySelector('#tbl-reserve-warn tbody');
-  if(rTbody){rTbody.innerHTML='';const groups={};highReserve.forEach(r=>{const style=(r.商品編號||'').substring(0,5);if(!groups[style])groups[style]={count:0,reserve:r.保留數量};groups[style].count++;});Object.entries(groups).forEach(([style,g])=>{const tr=document.createElement('tr');tr.innerHTML='<td style="font-size:11px;padding:3px 4px">'+style+'</td><td style="font-size:11px;padding:3px 4px">'+g.count+'筆</td><td style="font-size:11px;padding:3px 4px;color:var(--red)">保留='+g.reserve+'</td>';rTbody.appendChild(tr);});}
-  const noteEl=document.getElementById('reserve-note');if(noteEl)noteEl.textContent='68000 3筆 — 原因：保留拉到10件';
+  const rWrap=document.getElementById('tbl-reserve-warn');
+  if(rWrap){
+    rWrap.innerHTML='';
+    // 依款號（前5碼）分組
+    const groups={};
+    highReserve.forEach(r=>{
+      const style=(r.商品編號||'').substring(0,5);
+      if(!groups[style])groups[style]={count:0,items:[],maxReserve:0};
+      groups[style].count++;
+      groups[style].items.push(r);
+      if((r.保留數量||0)>groups[style].maxReserve) groups[style].maxReserve=r.保留數量;
+    });
+    // 讀取已儲存的原因
+    let reserveReasons={};
+    try{reserveReasons=JSON.parse(localStorage.getItem('reserve_reasons')||'{}');}catch(e){}
+
+    Object.entries(groups).forEach(([style,g])=>{
+      const reason=reserveReasons[style]||'';
+      const row=document.createElement('div');
+      row.style.cssText='border-bottom:1px solid var(--border);padding:4px 2px;';
+
+      // 摘要列：款號 + 筆數 + 保留值 + 展開箭頭
+      const summary=document.createElement('div');
+      summary.style.cssText='display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;';
+      summary.innerHTML=`
+        <span style="font-weight:700;min-width:44px">${style}</span>
+        <span style="color:var(--text2)">${g.count} 筆</span>
+        <span style="color:var(--red);flex:1">保留=${g.maxReserve}</span>
+        <span class="expand-arrow" style="color:var(--text3);font-size:10px;transition:transform 0.2s">▶</span>`;
+
+      // 原因列（雙擊編輯）
+      const reasonDiv=document.createElement('div');
+      reasonDiv.style.cssText='font-size:10px;color:var(--text2);margin-top:2px;cursor:text;min-height:14px;';
+      reasonDiv.title='雙擊編輯原因';
+      reasonDiv.textContent=reason||'雙擊新增原因...';
+      if(!reason) reasonDiv.style.fontStyle='italic';
+
+      reasonDiv.ondblclick=(e)=>{
+        e.stopPropagation();
+        const input=document.createElement('input');
+        input.value=reason;
+        input.style.cssText='width:100%;font-size:10px;border:1px solid var(--accent);border-radius:3px;padding:2px 4px;outline:none;font-family:var(--font)';
+        input.placeholder='輸入原因（Enter 儲存）';
+        reasonDiv.replaceWith(input);
+        input.focus();
+        const save=()=>{
+          const newReason=input.value.trim();
+          try{
+            const r=JSON.parse(localStorage.getItem('reserve_reasons')||'{}');
+            r[style]=newReason;
+            localStorage.setItem('reserve_reasons',JSON.stringify(r));
+          }catch(e){}
+          reasonDiv.textContent=newReason||'雙擊新增原因...';
+          reasonDiv.style.fontStyle=newReason?'normal':'italic';
+          input.replaceWith(reasonDiv);
+        };
+        input.addEventListener('keydown',e2=>{if(e2.key==='Enter')save();if(e2.key==='Escape'){input.replaceWith(reasonDiv);}});
+        input.addEventListener('blur',save);
+      };
+
+      // 展開詳細列表
+      const detail=document.createElement('div');
+      detail.style.cssText='display:none;margin-top:4px;padding-left:6px;border-left:2px solid var(--border);';
+      g.items.forEach(r=>{
+        const d=document.createElement('div');
+        d.style.cssText='font-size:10px;color:var(--text2);padding:1px 0;display:flex;gap:8px;';
+        d.innerHTML=`<span style="color:var(--text)">${r.商品編號}</span><span>${r.顏色}</span><span>${r.尺寸}</span><span style="color:var(--red);font-weight:700">保留=${r.保留數量}</span>`;
+        detail.appendChild(d);
+      });
+
+      summary.addEventListener('click',()=>{
+        const arrow=summary.querySelector('.expand-arrow');
+        const open=detail.style.display==='none';
+        detail.style.display=open?'block':'none';
+        arrow.style.transform=open?'rotate(90deg)':'';
+      });
+
+      row.appendChild(summary);
+      row.appendChild(reasonDiv);
+      row.appendChild(detail);
+      rWrap.appendChild(row);
+    });
+  }
   const negEl=document.getElementById('neg-avail-count');if(negEl){negEl.textContent=negAvail+' 筆';negEl.style.color=negAvail>0?'var(--red)':'var(--green)';}
 }
 function renderSeasonProgress(){
@@ -2423,7 +2498,7 @@ function renderRelocResult(assignmentResult,unmatched,overflow,totalCount){
 function exportRelocPlan(){
   if(!window._relocPlan){alert('請先執行儲位釋放');return;}
   const{assignmentResult,unmatched,overflow}=window._relocPlan;
-  const MAX_ROWS=62, COLS_PER_PAGE=4;
+  const MAX_ROWS=58, COLS_PER_PAGE=4;
 
   // 1. 收集所有要釋放的 SKU（商品編號 + 儲位）
   const allItems=[];
@@ -2642,18 +2717,14 @@ function exportRelocPlan(){
     const rows=buildPageRows(pageCols);
     const ws=XLSX.utils.aoa_to_sheet(rows);
 
-    // 設定欄寬（對齊手動版：商品編號9、儲位9、間隔2，A4橫向恰好放4組）
+    // 設定欄寬
     const colDefs=[];
     pageCols.forEach((col,ci)=>{
-      colDefs.push({wch:9.5}); // 商品編號
-      colDefs.push({wch:9});   // 儲位
-      if(ci<pageCols.length-1) colDefs.push({wch:2}); // 間隔
+      colDefs.push({wch:11.6}); // 商品編號（固定）
+      colDefs.push({wch:11});   // 儲位（固定）
+      if(ci<pageCols.length-1) colDefs.push({wch:4}); // 間隔（固定）
     });
     ws['!cols']=colDefs;
-
-    // 列高（壓縮到 14pt，塞更多列）
-    const rowCount=XLSX.utils.decode_range(ws['!ref']||'A1').e.r+1;
-    ws['!rows']=Array(rowCount).fill({hpt:14});
 
     // 設定置中對齊 + 框線（xlsx-js-style 支援）
     const thinBorder={style:'thin',color:{rgb:'000000'}};
@@ -2669,7 +2740,7 @@ function exportRelocPlan(){
         ws[addr].s={
           alignment:{horizontal:'center',vertical:'center'},
           border:allBorders,
-          font:R===0?{bold:true,name:'Microsoft JhengHei',sz:9}:{name:'Microsoft JhengHei',sz:9}
+          font:R===0?{bold:true,name:'Microsoft JhengHei',sz:11}:{name:'Microsoft JhengHei',sz:11}
         };
         if(R===0){
           ws[addr].s.border={...allBorders,bottom:headerBottom};
