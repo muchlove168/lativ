@@ -1598,20 +1598,26 @@ function renderArrangeCompare(){
     if(FW26_FILTER_DATA&&FW26_FILTER_DATA.length){
       FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])fw26Lookup[r[0]]=r[3];});
     }
-    // 款號 (前5碼) → 類別 lookup
+    // 款號 (前5碼) → 類別 lookup（從 26FW 名單建立）
     const styleToCat={};
     Object.entries(fw26Lookup).forEach(([code,cat])=>{
       const style=String(code).substring(0,5);
       if(!styleToCat[style])styleToCat[style]=cat;
     });
-    // 類別 → 儲區
+    // 類別 → 儲區 lookup
     const catZoneLookup={};
     if(typeof FW26_CATS!=='undefined'&&FW26_CATS.length){
       FW26_CATS.forEach(c=>{if(c.類別)catZoneLookup[c.類別]=c.儲區||'';});
     }
-    // 商品編號 → 倉位（從 ARRANGE_DATA 取「預計倉位」，按類別匯總成集合）
-    const codeToPlannedSlot={};
-    (ARRANGE_DATA||[]).forEach(r=>{if(r.code)codeToPlannedSlot[r.code]=r.plannedSlot||'';});
+    // ★ 從儲位安排建立：款號 (前5碼) → { skuCount, plannedSlots:Set }
+    const arrangeByStyle={};
+    (ARRANGE_DATA||[]).forEach(ar=>{
+      const style=String(ar.code||'').substring(0,5);
+      if(!style)return;
+      if(!arrangeByStyle[style])arrangeByStyle[style]={skuCount:0,plannedSlots:new Set()};
+      arrangeByStyle[style].skuCount++;
+      if(ar.plannedSlot)arrangeByStyle[style].plannedSlots.add(ar.plannedSlot);
+    });
 
     // 第一步：按 (進倉日期 + 進口編號 + 櫃號) 分組
     const groups={};
@@ -1621,40 +1627,52 @@ function renderArrangeCompare(){
         arrivalDate:r.arrivalDate||'—',
         importNo:r.importNo||'—',
         containerType:r.containerType||'—',
-        items:[],
+        styles:[],
         priorityTotal:0,
         arrivalNotifySet:new Set(),
       };
-      groups[key].items.push(r);
+      groups[key].styles.push(String(r.style||'').substring(0,5));
       const pri=Number(r.priority);if(!isNaN(pri))groups[key].priorityTotal+=pri;
       if(r.arrival!=='')groups[key].arrivalNotifySet.add(String(r.arrival));
     });
 
     // 第二步：每個進倉單內，按類別統計
     Object.values(groups).forEach(grp=>{
-      const catStats={};  // {類別: {skuCount, plannedSlots:Set}}
-      grp.items.forEach(r=>{
-        const style=String(r.style||'').substring(0,5);
-        const cat=styleToCat[style]||'未匹配';
-        if(!catStats[cat])catStats[cat]={skuCount:0,plannedSlots:new Set()};
-        catStats[cat].skuCount++;
-        // 從 ARRANGE_DATA 找對應商品編號的預計倉位（用款號比對）
-        (ARRANGE_DATA||[]).forEach(ar=>{
-          if(String(ar.code||'').substring(0,5)===style&&ar.plannedSlot){
-            catStats[cat].plannedSlots.add(ar.plannedSlot);
+      const catStats={};  // {類別: {skuCount, plannedSlots:Set, unmatchedStyles:[]}}
+      grp.styles.forEach(style=>{
+        if(!style)return;
+        const cat=styleToCat[style];
+        // 從 ARRANGE_DATA 找該款號的 SKU 數
+        const arr=arrangeByStyle[style];
+        const skuNum=arr?arr.skuCount:0;
+
+        if(cat){
+          // 在 26FW 名單中
+          if(!catStats[cat])catStats[cat]={skuCount:0,plannedSlots:new Set()};
+          catStats[cat].skuCount+=skuNum;
+          if(arr)arr.plannedSlots.forEach(s=>catStats[cat].plannedSlots.add(s));
+        }else{
+          // 不在 26FW 名單：74/75 開頭才顯示為「未匹配」，其他舊品不顯示
+          if(style.startsWith('74')||style.startsWith('75')){
+            if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,plannedSlots:new Set(),unmatchedStyles:new Set()};
+            catStats['未匹配'].skuCount+=skuNum;
+            catStats['未匹配'].unmatchedStyles.add(style);
+            if(arr)arr.plannedSlots.forEach(s=>catStats['未匹配'].plannedSlots.add(s));
           }
-        });
+          // else 舊品 → 直接略過
+        }
       });
 
       const catEntries=Object.entries(catStats);
-      const totalRows=catEntries.length||1;
-      // 第一列才顯示合併欄位
+      // 若整個進倉單都沒有顯示資料（全部都是舊品），則跳過
+      if(catEntries.length===0)return;
+      const totalRows=catEntries.length;
       const arrivalNotify=Array.from(grp.arrivalNotifySet).filter(x=>x&&x!=='0').join(',')||'—';
 
       catEntries.forEach(([cat,s],idx)=>{
         const tr=document.createElement('tr');
         tr.style.borderBottom=idx===catEntries.length-1?'2px solid var(--border)':'1px solid rgba(221,216,208,.3)';
-        const zone=catZoneLookup[cat]||'—';
+        const zone=cat==='未匹配'?'—':(catZoneLookup[cat]||'—');
         const slots=Array.from(s.plannedSlots).filter(x=>x).join(',')||'—';
 
         let html='';
@@ -1664,8 +1682,9 @@ function renderArrangeCompare(){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.containerType}</td>`;
         }
         const catColor=cat==='未匹配'?'color:var(--red)':'';
-        html+=`<td style="padding:4px 8px;text-align:center;${catColor}">${cat}</td>`;
-        html+=`<td style="padding:4px 8px;text-align:right">${s.skuCount}</td>`;
+        const catTitle=cat==='未匹配'&&s.unmatchedStyles?'未匹配款號: '+Array.from(s.unmatchedStyles).join(', '):'';
+        html+=`<td style="padding:4px 8px;text-align:center;${catColor}" title="${catTitle}">${cat}</td>`;
+        html+=`<td style="padding:4px 8px;text-align:right">${s.skuCount||'—'}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-weight:600;color:var(--accent)">${zone}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2)">${slots}</td>`;
         if(idx===0){
@@ -4048,8 +4067,8 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
           <tbody id="slot-monthly-body"></tbody>
           <tfoot id="slot-monthly-foot"></tfoot>
         </table></div>
-        <div id="season-sku-last-update" style="margin-top:6px;font-size:11px;color:var(--text3);text-align:right;padding:0 4px"></div>
       </div>
+      <div id="season-sku-last-update" style="margin-top:6px;font-size:11px;color:var(--text3);text-align:right;padding:0 4px"></div>
     </div>
 
   </div>
