@@ -863,6 +863,24 @@ function switchTab(name){
 // ============================================================
 // UPLOAD
 // ============================================================
+// ============================================================
+// 上傳防呆：驗證 Excel 標題列必含的欄位
+// ============================================================
+function validateReportFormat(raw, requiredCols, reportName){
+  if(!raw || !raw.length){
+    return { ok:false, msg:`「${reportName}」檔案內容為空，請確認檔案是否正確` };
+  }
+  const headers = Object.keys(raw[0]);
+  const missing = requiredCols.filter(c => !headers.includes(c));
+  if(missing.length){
+    return {
+      ok: false,
+      msg: `❌ 檔案格式不符 — 不像是「${reportName}」\n\n缺少必要欄位：${missing.join('、')}\n\n偵測到的欄位：${headers.slice(0,8).join('、')}${headers.length>8?' ...':''}\n\n請確認上傳的檔案是否正確。`
+    };
+  }
+  return { ok:true };
+}
+
 async function handleUpload(event){
   const file=event.target.files[0]; if(!file)return;
   showLoading('讀取 EPR 報表中...');
@@ -871,6 +889,9 @@ async function handleUpload(event){
     const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];
     const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
+    // ★ 格式驗證
+    const validate = validateReportFormat(raw, ['商品編號','商品名稱','儲位','銷售庫存','倉庫庫存'], 'EPR 主報表');
+    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
     DB=raw.map(r=>{
       const code=String(r['商品編號']||'').trim();
       return{
@@ -1433,6 +1454,9 @@ async function handleArrangeUpload(event){
     const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];
     const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
+    // ★ 格式驗證
+    const validate = validateReportFormat(raw, ['商品編號','商品名稱','尺寸','材積','預計倉位'], '匯出儲位安排報表');
+    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
     ARRANGE_DATA=raw.map(r=>({
       code:String(r['商品編號']||'').trim(),
       name:String(r['商品名稱']||''),
@@ -1462,6 +1486,9 @@ async function handleForecastUpload(event){
     const ws=wb.Sheets[wb.SheetNames[0]];
     // 第一列是標題，第二列是日期合計（跳過），第三列起才是真資料
     const raw=XLSX.utils.sheet_to_json(ws,{defval:'',range:0});
+    // ★ 格式驗證
+    const validate = validateReportFormat(raw, ['款號','商品名稱','進口編號','櫃號櫃型','貨到通知'], '匯出預告進貨表');
+    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
     FORECAST_DATA=raw.filter(r=>r['款號']).map(r=>({
       buyer:String(r['採購人員']||''),
       vendor:String(r['廠商']||''),
@@ -1550,6 +1577,12 @@ function renderArrangeCompare(){
       }
     });
 
+    // 統計未匹配中 74/75 開頭的（屬於 26FW 但不在名單，應顯示在類別表）
+    const newSeasonUnmatched=unmatched.filter(r=>{
+      const c=String(r.code||'');
+      return c.startsWith('74')||c.startsWith('75');
+    });
+
     document.getElementById('arrange-total').textContent=ARRANGE_DATA.length.toLocaleString();
     document.getElementById('arrange-matched').textContent=matchedCount.toLocaleString();
     document.getElementById('arrange-unmatched').textContent=unmatched.length.toLocaleString();
@@ -1557,7 +1590,7 @@ function renderArrangeCompare(){
     // 類別表格
     catBody.innerHTML='';
     const sorted=Object.entries(catStats).sort((a,b)=>b[1].skuCount-a[1].skuCount);
-    if(!sorted.length){
+    if(!sorted.length && !newSeasonUnmatched.length){
       catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未比對到 26FW 新品（請先確認已上傳 26FW 報表）</td></tr>';
     }else{
       sorted.forEach(([cat,s])=>{
@@ -1567,7 +1600,17 @@ function renderArrangeCompare(){
         tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td><td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}</td><td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--accent)">${zone}</td>`;
         catBody.appendChild(tr);
       });
-      const totalSku=sorted.reduce((a,[,s])=>a+s.skuCount,0);
+      // ★ 新增「未匹配」列（僅 74/75 開頭）
+      if(newSeasonUnmatched.length){
+        const styles=[...new Set(newSeasonUnmatched.map(r=>String(r.code||'').substring(0,5)))];
+        const tr=document.createElement('tr');
+        tr.style.borderBottom='1px solid var(--border)';
+        tr.style.background='rgba(192,57,43,0.04)';
+        tr.title='款號：'+styles.join(', ');
+        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600;color:var(--red)">未匹配</td><td style="padding:6px 10px;text-align:right;color:var(--red)">${newSeasonUnmatched.length.toLocaleString()}</td><td style="padding:6px 10px;text-align:center;color:var(--text3)">—</td>`;
+        catBody.appendChild(tr);
+      }
+      const totalSku=sorted.reduce((a,[,s])=>a+s.skuCount,0)+newSeasonUnmatched.length;
       const trTotal=document.createElement('tr');
       trTotal.style.background='var(--surface2)';
       trTotal.innerHTML=`<td style="padding:8px 10px;text-align:left;font-weight:700;border-top:2px solid var(--accent)">合計</td><td style="padding:8px 10px;text-align:right;font-weight:700;border-top:2px solid var(--accent)">${totalSku.toLocaleString()}</td><td style="padding:8px 10px;border-top:2px solid var(--accent)"></td>`;
@@ -1636,35 +1679,47 @@ function renderArrangeCompare(){
       if(r.arrival!=='')groups[key].arrivalNotifySet.add(String(r.arrival));
     });
 
+    // ★ 找出跨櫃重複款號：建立 款號 → [櫃號列表]
+    const styleContainerMap={};
+    Object.values(groups).forEach(grp=>{
+      const uniqStyles=new Set(grp.styles.filter(s=>s));
+      uniqStyles.forEach(style=>{
+        if(!styleContainerMap[style])styleContainerMap[style]=[];
+        styleContainerMap[style].push(grp.containerType);
+      });
+    });
+    const dupStyles={};  // {款號: [櫃號1, 櫃號2...]}
+    Object.entries(styleContainerMap).forEach(([style,containers])=>{
+      if(containers.length>1)dupStyles[style]=containers;
+    });
+
     // 第二步：每個進倉單內，按類別統計
     Object.values(groups).forEach(grp=>{
-      const catStats={};  // {類別: {skuCount, plannedSlots:Set, unmatchedStyles:[]}}
+      const catStats={};  // {類別: {skuCount, plannedSlots:Set, styles:Set (用於提示), unmatchedStyles:Set}}
       grp.styles.forEach(style=>{
         if(!style)return;
         const cat=styleToCat[style];
-        // 從 ARRANGE_DATA 找該款號的 SKU 數
         const arr=arrangeByStyle[style];
         const skuNum=arr?arr.skuCount:0;
 
         if(cat){
-          // 在 26FW 名單中
-          if(!catStats[cat])catStats[cat]={skuCount:0,plannedSlots:new Set()};
+          if(!catStats[cat])catStats[cat]={skuCount:0,plannedSlots:new Set(),styles:new Set()};
           catStats[cat].skuCount+=skuNum;
+          catStats[cat].styles.add(style);
           if(arr)arr.plannedSlots.forEach(s=>catStats[cat].plannedSlots.add(s));
         }else{
           // 不在 26FW 名單：74/75 開頭才顯示為「未匹配」，其他舊品不顯示
           if(style.startsWith('74')||style.startsWith('75')){
-            if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,plannedSlots:new Set(),unmatchedStyles:new Set()};
+            if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};
             catStats['未匹配'].skuCount+=skuNum;
             catStats['未匹配'].unmatchedStyles.add(style);
+            catStats['未匹配'].styles.add(style);
             if(arr)arr.plannedSlots.forEach(s=>catStats['未匹配'].plannedSlots.add(s));
           }
-          // else 舊品 → 直接略過
         }
       });
 
       const catEntries=Object.entries(catStats);
-      // 若整個進倉單都沒有顯示資料（全部都是舊品），則跳過
       if(catEntries.length===0)return;
       const totalRows=catEntries.length;
       const arrivalNotify=Array.from(grp.arrivalNotifySet).filter(x=>x&&x!=='0').join(',')||'—';
@@ -1675,6 +1730,19 @@ function renderArrangeCompare(){
         const zone=cat==='未匹配'?'—':(catZoneLookup[cat]||'—');
         const slots=Array.from(s.plannedSlots).filter(x=>x).join(',')||'—';
 
+        // ★ 跨櫃重複款號提醒：找出此類別內有哪些款號是跨櫃的
+        const dupInThisCat=[];
+        s.styles.forEach(st=>{
+          if(dupStyles[st]){
+            const skuNum=(arrangeByStyle[st]||{}).skuCount||0;
+            // 列出其他櫃（排除本櫃）
+            const otherContainers=dupStyles[st].filter((c,i,a)=>a.indexOf(c)===i&&c!==grp.containerType);
+            dupInThisCat.push(`款號 ${st} (${skuNum} 筆) 也出現於：${otherContainers.join('、')||'其他櫃'}`);
+          }
+        });
+        const dupAlert=dupInThisCat.length>0?`⚠`:'';
+        const dupTitle=dupInThisCat.length>0?'⚠ 跨櫃重複款號（可能重複計算）\n'+dupInThisCat.join('\n'):'';
+
         let html='';
         if(idx===0){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.arrivalDate}</td>`;
@@ -1684,7 +1752,11 @@ function renderArrangeCompare(){
         const catColor=cat==='未匹配'?'color:var(--red)':'';
         const catTitle=cat==='未匹配'&&s.unmatchedStyles?'未匹配款號: '+Array.from(s.unmatchedStyles).join(', '):'';
         html+=`<td style="padding:4px 8px;text-align:center;${catColor}" title="${catTitle}">${cat}</td>`;
-        html+=`<td style="padding:4px 8px;text-align:right">${s.skuCount||'—'}</td>`;
+        // SKU 數欄位：含跨櫃重複提醒
+        const skuCell=dupAlert
+          ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${s.skuCount||'—'}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
+          : `${s.skuCount||'—'}`;
+        html+=`<td style="padding:4px 8px;text-align:right">${skuCell}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-weight:600;color:var(--accent)">${zone}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2)">${slots}</td>`;
         if(idx===0){
@@ -1713,6 +1785,9 @@ async function handleFW26Upload(event){
     const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];
     const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
+    // ★ 格式驗證
+    const validate = validateReportFormat(raw, ['商品編號','商品名稱','類別','預計交期','款號'], '26FW 新品報表');
+    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
     // A~M: 採購人員,採購單季別,分類,款號,商品編號,商品名稱,顏色名稱,尺寸,預計交期,顏色數,尺寸段,包裝耗材,類別
     FW26_FILTER_DATA=raw.map(r=>[
       String(r['商品編號']||'').trim(),
@@ -2407,6 +2482,9 @@ async function handleXXUpload(event){
   try{
     const buf=await file.arrayBuffer();const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
+    // ★ 格式驗證
+    const validate = validateReportFormat(raw, ['商品編號','商品名稱','儲位','銷售庫存','架上數量'], 'XX/TX EPR 報表');
+    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
     XX_DB=raw.map(r=>({
       商品編號:String(r['商品編號']||'').trim(),商品名稱:r['商品名稱']||'',
       顏色:r['顏色']||'',尺寸:r['尺寸']||'',儲位:(r['儲位']||'').trim(),
@@ -2427,6 +2505,9 @@ async function handleZZUpload(event){
   try{
     const buf=await file.arrayBuffer();const wb=XLSX.read(buf,{type:'array'});
     const ws=wb.Sheets[wb.SheetNames[0]];const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
+    // ★ 格式驗證
+    const validate = validateReportFormat(raw, ['商品編號','刷讀商品數量'], '作帳刷讀明細');
+    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
     ZZ_DB=raw.map(r=>({商品編號:String(r['商品編號']||'').trim(),刷讀商品數量:+r['刷讀商品數量']||0})).filter(r=>r.商品編號&&r.刷讀商品數量>0);
     applyZZToXX();
     const st=document.getElementById('xx-upload-status');st.textContent+=` | 已整合 ${ZZ_DB.length} 筆刷讀資料`;
