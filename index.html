@@ -237,6 +237,7 @@
   <div class="tab" onclick="switchTab('reloc')">儲位釋放</div>
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
   <div class="tab" onclick="switchTab('arrange')">新品儲位安排</div>
+  <div class="tab" onclick="switchTab('compare')">銷售比對</div>
 </div>
 
 <div class="content">
@@ -841,12 +842,13 @@ function getXXStatus(r) {
 // TAB SWITCHING
 // ============================================================
 function switchTab(name){
-  const tabs=['sku','sales','fw26','db','xx','reloc','slotdata','arrange'];
+  const tabs=['sku','sales','fw26','db','xx','reloc','slotdata','arrange','compare'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='slotdata'){renderSlotData();return;}
   if(name==='arrange'){renderArrangeCompare();return;}
+  if(name==='compare'){renderSalesCompare();return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
     if(name==='sales'){renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();}
@@ -868,15 +870,12 @@ function switchTab(name){
 // ============================================================
 function validateReportFormat(raw, requiredCols, reportName){
   if(!raw || !raw.length){
-    return { ok:false, msg:`「${reportName}」檔案內容為空，請確認檔案是否正確` };
+    return { ok:false, msg:`檔案格式不符\n\n請確認上傳的檔案是否正確。` };
   }
   const headers = Object.keys(raw[0]);
   const missing = requiredCols.filter(c => !headers.includes(c));
   if(missing.length){
-    return {
-      ok: false,
-      msg: `❌ 檔案格式不符 — 不像是「${reportName}」\n\n缺少必要欄位：${missing.join('、')}\n\n偵測到的欄位：${headers.slice(0,8).join('、')}${headers.length>8?' ...':''}\n\n請確認上傳的檔案是否正確。`
-    };
+    return { ok:false, msg:`檔案格式不符\n\n請確認上傳的檔案是否正確。` };
   }
   return { ok:true };
 }
@@ -1445,6 +1444,185 @@ function loadManualEdits(){
 // ============================================================
 let ARRANGE_DATA = [];
 let FORECAST_DATA = [];
+
+// ============================================================
+// ★ 銷售比對 TAB
+// 上傳歷史 ERP 報表，與當前 DB 比對，估算這段期間每個 SKU 的銷售量
+// 公式：估算銷售 = (歷史 銷售庫存 + 歷史 未到量) - (當前 銷售庫存 + 當前 未到量)
+// 因為「未到量」會在進倉後 → 變成「銷售庫存」，所以兩者相加 = 「應有總量」
+// 銷售就是「應有總量」的減少幅度
+// 未考慮：退貨（會讓銷售量低估）、調撥損耗等
+// ============================================================
+let COMPARE_OLD_DATA = null;  // 歷史報表 → {date, rows}
+
+async function handleCompareUpload(event){
+  const file=event.target.files[0]; if(!file)return;
+  if(!DB||!DB.length){
+    alert('請先在主頁面上傳當前的 ERP 報表，再上傳歷史報表進行比對。');
+    event.target.value='';
+    return;
+  }
+  showLoading('讀取歷史 ERP 報表中...');
+  try{
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
+    const validate=validateReportFormat(raw,['商品編號','商品名稱','儲位','銷售庫存','倉庫庫存'],'EPR 主報表');
+    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
+
+    const rows=raw.map(r=>({
+      商品編號:String(r['商品編號']||'').trim(),
+      商品名稱:r['商品名稱']||'',
+      顏色:r['顏色']||'',
+      尺寸:r['尺寸']||'',
+      儲位:r['儲位']||'',
+      銷售庫存:+r['銷售庫存']||0,
+      倉庫庫存:+r['倉庫庫存']||0,
+      未到量:+r['未到量']||0,
+      未抓貨:+r['未抓貨']||0,
+      可賣數量:+r['可賣數量']||0,
+      保留數量:+r['保留數量']||0,
+    })).filter(r=>r.商品編號);
+
+    // 從檔名中嘗試抓取日期（檔名格式可能含 YYYYMMDD）
+    let detectedDate='';
+    const m=file.name.match(/(\d{8})|(\d{4}-\d{2}-\d{2})|(\d{4}\/\d{2}\/\d{2})/);
+    if(m)detectedDate=m[0];
+
+    COMPARE_OLD_DATA={date:detectedDate||file.name,rows,fileName:file.name};
+    try{await idbPut('compare_old',COMPARE_OLD_DATA);}catch(e){}
+    document.getElementById('compare-status').textContent=`歷史報表：${file.name}（${rows.length.toLocaleString()} 筆）`;
+    document.getElementById('compare-clear-btn').style.display='inline-flex';
+    hideLoading();
+    renderSalesCompare();
+  }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
+  event.target.value='';
+}
+
+async function clearCompareData(){
+  if(!confirm('確定要清除歷史 ERP 報表？'))return;
+  COMPARE_OLD_DATA=null;
+  try{await idbPut('compare_old',null);}catch(e){}
+  document.getElementById('compare-status').textContent='';
+  document.getElementById('compare-clear-btn').style.display='none';
+  renderSalesCompare();
+}
+
+function renderSalesCompare(){
+  const body=document.getElementById('compare-body');
+  if(!body)return;
+
+  // 統計卡
+  document.getElementById('compare-cur-count').textContent=DB.length?DB.length.toLocaleString():'—';
+  document.getElementById('compare-old-count').textContent=COMPARE_OLD_DATA?COMPARE_OLD_DATA.rows.length.toLocaleString():'—';
+
+  if(!COMPARE_OLD_DATA||!COMPARE_OLD_DATA.rows.length){
+    document.getElementById('compare-total-sold').textContent='—';
+    document.getElementById('compare-changed-count').textContent='—';
+    body.innerHTML='<tr><td colspan="10" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳歷史 ERP 報表</td></tr>';
+    return;
+  }
+  if(!DB||!DB.length){
+    body.innerHTML='<tr><td colspan="10" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳當前 ERP 報表</td></tr>';
+    return;
+  }
+
+  // 建 lookup
+  const curMap={};
+  DB.forEach(r=>{ curMap[r.商品編號]=r; });
+  const oldMap={};
+  COMPARE_OLD_DATA.rows.forEach(r=>{ oldMap[r.商品編號]=r; });
+
+  // 收集所有商品編號（聯集）
+  const allCodes=new Set([...Object.keys(curMap),...Object.keys(oldMap)]);
+
+  // 計算差異
+  const diffs=[];
+  let totalSold=0,changedCount=0;
+  allCodes.forEach(code=>{
+    const cur=curMap[code];
+    const old=oldMap[code];
+    const oldStock=old?(old.銷售庫存+old.未到量):0;
+    const curStock=cur?(cur.銷售庫存+cur.未到量):0;
+    const sold=oldStock-curStock;
+    const remark=[];
+    if(!old)remark.push('新品（歷史報表沒有）');
+    if(!cur)remark.push('已下架（當前報表沒有）');
+    if(sold<0)remark.push(`數量增加 ${Math.abs(sold)}（可能進貨或調撥）`);
+    const ref=cur||old||{};
+    if(sold>0)totalSold+=sold;
+    if(sold!==0||!old||!cur)changedCount++;
+    diffs.push({
+      code,
+      name:ref.商品名稱||'',
+      color:ref.顏色||'',
+      size:ref.尺寸||'',
+      oldStock:old?old.銷售庫存:null,
+      oldPending:old?old.未到量:null,
+      curStock:cur?cur.銷售庫存:null,
+      curPending:cur?cur.未到量:null,
+      sold,
+      remark:remark.join('；')||'',
+    });
+  });
+
+  document.getElementById('compare-total-sold').textContent=totalSold.toLocaleString();
+  document.getElementById('compare-changed-count').textContent=changedCount.toLocaleString();
+
+  // 套用篩選/排序
+  const searchVal=(document.getElementById('compare-search')||{}).value||'';
+  const onlySold=(document.getElementById('compare-only-sold')||{}).checked;
+  const onlyChanged=(document.getElementById('compare-only-changed')||{}).checked;
+  const sortBy=(document.getElementById('compare-sort')||{}).value||'sold-desc';
+
+  let filtered=diffs;
+  if(searchVal){
+    const s=searchVal.toLowerCase();
+    filtered=filtered.filter(d=>(d.code||'').toLowerCase().includes(s)||(d.name||'').toLowerCase().includes(s));
+  }
+  if(onlySold)filtered=filtered.filter(d=>d.sold>0);
+  if(onlyChanged)filtered=filtered.filter(d=>d.sold!==0||d.remark);
+
+  if(sortBy==='sold-desc')filtered.sort((a,b)=>b.sold-a.sold);
+  else if(sortBy==='sold-asc')filtered.sort((a,b)=>a.sold-b.sold);
+  else if(sortBy==='code-asc')filtered.sort((a,b)=>(a.code||'').localeCompare(b.code||''));
+
+  if(!filtered.length){
+    body.innerHTML='<tr><td colspan="10" style="padding:32px;text-align:center;color:var(--text3)">符合條件的資料為 0 筆</td></tr>';
+    return;
+  }
+
+  // 大量資料：限制 1000 筆 + 顯示提示
+  const MAX=1000;
+  const limited=filtered.slice(0,MAX);
+  const frag=document.createDocumentFragment();
+  limited.forEach(d=>{
+    const tr=document.createElement('tr');
+    tr.style.borderBottom='1px solid var(--border)';
+    const soldColor=d.sold>0?'color:var(--green);font-weight:700':(d.sold<0?'color:var(--red)':'color:var(--text3)');
+    const fmtN=v=>v===null?'—':v.toLocaleString();
+    tr.innerHTML=`
+      <td style="padding:4px 8px;font-family:monospace">${d.code}</td>
+      <td style="padding:4px 8px">${d.name}</td>
+      <td style="padding:4px 8px;text-align:center">${d.color}</td>
+      <td style="padding:4px 8px;text-align:center">${d.size}</td>
+      <td style="padding:4px 8px;text-align:right;color:var(--text2)">${fmtN(d.oldStock)}</td>
+      <td style="padding:4px 8px;text-align:right;color:var(--text2)">${fmtN(d.oldPending)}</td>
+      <td style="padding:4px 8px;text-align:right">${fmtN(d.curStock)}</td>
+      <td style="padding:4px 8px;text-align:right">${fmtN(d.curPending)}</td>
+      <td style="padding:4px 8px;text-align:right;background:rgba(45,122,74,0.05);${soldColor}">${d.sold>0?'+':''}${d.sold===0?'0':d.sold.toLocaleString()}</td>
+      <td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2)">${d.remark}</td>`;
+    frag.appendChild(tr);
+  });
+  body.innerHTML='';
+  body.appendChild(frag);
+  if(filtered.length>MAX){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td colspan="10" style="padding:8px;text-align:center;color:var(--text3);font-size:11px;background:var(--surface2)">⚠ 結果共 ${filtered.length.toLocaleString()} 筆，已顯示前 ${MAX.toLocaleString()} 筆（請使用篩選縮小範圍）</td>`;
+    body.appendChild(tr);
+  }
+}
 
 async function handleArrangeUpload(event){
   const file=event.target.files[0];if(!file)return;
@@ -3874,12 +4052,13 @@ async function exportAllData(){
   showLoading('準備匯出資料...');
   try{
     // 1. 收集 IndexedDB 資料
-    let eprRows=[],fw26Rows=[],arrangeRows=[],forecastRows=[],eprDate='';
+    let eprRows=[],fw26Rows=[],arrangeRows=[],forecastRows=[],compareOld=null,eprDate='';
     try{eprRows=await idbGet('epr_rows')||[];}catch(e){}
     try{eprDate=await idbGet('epr_date')||'';}catch(e){}
     try{fw26Rows=await idbGet('fw26_rows')||[];}catch(e){}
     try{arrangeRows=await idbGet('arrange_rows')||[];}catch(e){}
     try{forecastRows=await idbGet('forecast_rows')||[];}catch(e){}
+    try{compareOld=await idbGet('compare_old')||null;}catch(e){}
 
     // 2. 收集所有 localStorage 設定
     const settings={};
@@ -3905,6 +4084,7 @@ async function exportAllData(){
       fw26Data:{rows:fw26Rows,count:fw26Rows.length},
       arrangeData:{rows:arrangeRows,count:arrangeRows.length},
       forecastData:{rows:forecastRows,count:forecastRows.length},
+      compareOldData:compareOld,
       settings:settings,
       history:history,
     };
@@ -3963,6 +4143,9 @@ async function importAllData(file){
       if(pkg.forecastData&&pkg.forecastData.rows){
         await idbPut('forecast_rows',pkg.forecastData.rows);
         imported.forecast=pkg.forecastData.rows.length;
+      }
+      if(pkg.compareOldData&&pkg.compareOldData.rows){
+        await idbPut('compare_old',pkg.compareOldData);
       }
 
       // 2. 還原設定
@@ -4033,6 +4216,15 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       FORECAST_DATA=fc;
       document.getElementById('forecast-status').textContent=`已載入 ${fc.length} 筆預告進貨資料`;
       document.getElementById('arrange-clear-btn').style.display='inline-flex';
+    }
+  }catch(e){}
+  // 載入歷史 ERP（銷售比對）
+  try{
+    const cmp=await idbGet('compare_old');
+    if(cmp&&cmp.rows&&cmp.rows.length){
+      COMPARE_OLD_DATA=cmp;
+      document.getElementById('compare-status').textContent=`歷史報表：${cmp.fileName||cmp.date}（${cmp.rows.length.toLocaleString()} 筆）`;
+      document.getElementById('compare-clear-btn').style.display='inline-flex';
     }
   }catch(e){}
   console.log('FW26_FILTER_DATA.length after load:',FW26_FILTER_DATA.length);
@@ -4245,6 +4437,68 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">貨到通知</th>
           </tr></thead>
           <tbody id="forecast-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 銷售比對 TAB ═══ -->
+<div class="tab-panel" id="tab-compare">
+  <div style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <button class="upload-btn" onclick="document.getElementById('compare-file-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳歷史 ERP 報表（起始日）</button>
+    <input type="file" id="compare-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleCompareUpload(event)">
+    <span id="compare-status" style="font-size:12px;color:var(--text3)"></span>
+    <span style="font-size:12px;color:var(--text3);margin-left:8px">→ 與當前 ERP 比對</span>
+    <button class="upload-btn" onclick="clearCompareData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto;display:none" id="compare-clear-btn">✖ 清除歷史報表</button>
+  </div>
+
+  <div class="stats-bar" style="padding:0 18px">
+    <div class="stat-box"><div class="label">當前 ERP 筆數</div><div class="val" id="compare-cur-count">—</div></div>
+    <div class="stat-box"><div class="label">歷史 ERP 筆數</div><div class="val" id="compare-old-count">—</div></div>
+    <div class="stat-box"><div class="label">期間總銷售（估算）</div><div class="val good" id="compare-total-sold">—</div></div>
+    <div class="stat-box"><div class="label">變動 SKU 筆數</div><div class="val warn" id="compare-changed-count">—</div></div>
+  </div>
+
+  <div style="padding:0 18px 14px">
+    <div class="card">
+      <div class="card-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="dot"></span>SKU 銷售差異明細
+        <span style="font-size:11px;color:var(--text3);font-weight:400;margin-left:auto">
+          公式：估算銷售 = (歷史 銷售庫存 + 歷史 未到量) - (當前 銷售庫存 + 當前 未到量)
+        </span>
+      </div>
+
+      <!-- 篩選列 -->
+      <div style="display:flex;gap:8px;align-items:center;padding:8px 4px;flex-wrap:wrap;font-size:12px">
+        <span style="color:var(--text2)">篩選：</span>
+        <input id="compare-search" type="text" placeholder="搜尋商品編號或名稱..." style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;width:200px;font-family:var(--font)" oninput="renderSalesCompare()">
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="compare-only-sold" onchange="renderSalesCompare()"> 只顯示有銷售的</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="compare-only-changed" onchange="renderSalesCompare()" checked> 只顯示有變動的</label>
+        <label style="display:flex;align-items:center;gap:4px;margin-left:auto">排序：
+          <select id="compare-sort" onchange="renderSalesCompare()" style="padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--font)">
+            <option value="sold-desc">估算銷售（多→少）</option>
+            <option value="sold-asc">估算銷售（少→多）</option>
+            <option value="code-asc">商品編號</option>
+          </select>
+        </label>
+      </div>
+
+      <div style="max-height:calc(100vh - 360px);min-height:400px;overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品編號</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">顏色</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">尺寸</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right" title="歷史報表的銷售庫存">歷史 銷庫</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right" title="歷史報表的未到量">歷史 未到</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right" title="當前報表的銷售庫存">當前 銷庫</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right" title="當前報表的未到量">當前 未到</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08)" title="估算銷售：(歷史銷庫+歷史未到) - (當前銷庫+當前未到)">估算銷售</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">備註</th>
+          </tr></thead>
+          <tbody id="compare-body"><tr><td colspan="10" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳歷史 ERP 報表</td></tr></tbody>
         </table>
       </div>
     </div>
