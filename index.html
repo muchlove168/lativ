@@ -396,10 +396,6 @@
           <div style="margin-top:6px;font-size:10px;color:var(--text2);text-align:center" id="reserve-note"></div>
         </div>
       </div>
-      <div class="alert-box" style="border-color:#d0e8d8">
-        <div class="alert-header" style="background:#f2fdf5"><span style="width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block"></span> 可賣數量 &lt; 0</div>
-        <div class="alert-body" style="font-size:18px;font-weight:700;color:var(--green);text-align:center" id="neg-avail-count">—</div>
-      </div>
     </div>
   </div>
 </div>
@@ -465,7 +461,6 @@
     <div class="stat-box"><div class="label">總筆數</div><div class="val" id="db-total-rows">—</div></div>
     <div class="stat-box"><div class="label">26FW 新品</div><div class="val" id="db-current-season">—</div></div>
     <div class="stat-box"><div class="label">保留值 &gt;6 筆數</div><div class="val warn" id="db-reserve-warn">—</div></div>
-    <div class="stat-box"><div class="label">可賣數量 &lt;0 筆數</div><div class="val bad" id="db-neg-avail">—</div></div>
   </div>
   <div class="card">
     <div class="card-title" style="gap:6px;flex-wrap:wrap">
@@ -1611,9 +1606,18 @@ function renderSalesCompare(){
     });
   }
 
-  // TOP 模式 - 預設按估算銷售（多→少）
+  // TOP 模式 — 鎖定後仍可按欄位排序
+  // 統一排序輔助
+  const applyCmpSort=(arr)=>{
+    const {col,asc}=CMP_SORT;
+    if(col==='code')arr.sort((a,b)=>(a.code||'').localeCompare(b.code||'')*(asc?1:-1));
+    else if(col==='slot')arr.sort((a,b)=>(a.slot||'').localeCompare(b.slot||'','zh-TW')*(asc?1:-1));
+    else /* col==='sold' (預設) */ arr.sort((a,b)=>asc?a.sold-b.sold:b.sold-a.sold);
+  };
   if(CMP_TOP_N){
+    // 先依估算銷售取 TOP N，再依使用者排序欄位排序
     filtered=filtered.slice().sort((a,b)=>b.sold-a.sold).slice(0,CMP_TOP_N);
+    applyCmpSort(filtered);
   }else if(CMP_TOP_STYLE){
     // TOP N 款：前5碼相同為同款，分組內加分隔列（比照資料庫 tab）
     const styleMap={};
@@ -1628,7 +1632,7 @@ function renderSalesCompare(){
       .slice(0,CMP_TOP_STYLE);
     filtered=[];
     topStyles.forEach(([style,{total,skus,name}],idx)=>{
-      skus.sort((a,b)=>b.sold-a.sold);
+      applyCmpSort(skus);
       const totStr=(total>=0?'+':'')+total.toLocaleString();
       filtered.push({_separator:true,_label:`TOP ${idx+1} 款：${name}（款號 ${style},總估算銷售 ${totStr}）`,_colspan:11});
       skus.forEach(s=>filtered.push(s));
@@ -1647,7 +1651,7 @@ function renderSalesCompare(){
       .slice(0,CMP_TOP_COLOR);
     filtered=[];
     topColors.forEach(([key,{total,skus,name,styleCode,colorCode}],idx)=>{
-      skus.sort((a,b)=>b.sold-a.sold);
+      applyCmpSort(skus);
       const colorName=skus[0].color||colorCode;
       const totStr=(total>=0?'+':'')+total.toLocaleString();
       filtered.push({_separator:true,_label:`TOP ${idx+1} 色：${name} — ${colorName}（款${styleCode} 色碼${colorCode},總估算銷售 ${totStr}）`,_colspan:11});
@@ -1655,17 +1659,14 @@ function renderSalesCompare(){
     });
   }else{
     // 一般模式 — 套用點選的排序欄位
-    const {col,asc}=CMP_SORT;
-    if(col==='code')filtered.sort((a,b)=>(a.code||'').localeCompare(b.code||'')*(asc?1:-1));
-    else if(col==='slot')filtered.sort((a,b)=>(a.slot||'').localeCompare(b.slot||'','zh-TW')*(asc?1:-1));
-    else /* col==='sold' (預設) */ filtered.sort((a,b)=>asc?a.sold-b.sold:b.sold-a.sold);
+    applyCmpSort(filtered);
   }
 
   // 更新排序箭頭
   ['code','slot','sold'].forEach(c=>{
     const el=document.getElementById('cmp-sort-'+c);
     if(!el)return;
-    if(CMP_SORT.col===c&&!CMP_TOP_N&&!CMP_TOP_STYLE&&!CMP_TOP_COLOR){el.textContent=CMP_SORT.asc?'▲':'▼';el.style.color='var(--accent)';}
+    if(CMP_SORT.col===c){el.textContent=CMP_SORT.asc?'▲':'▼';el.style.color='var(--accent)';}
     else if(c==='sold'){el.textContent='▼';el.style.color='var(--text3)';}
     else{el.textContent='';}
   });
@@ -1732,10 +1733,7 @@ let CMP_SORT={col:'sold',asc:false};
 function sortCmpBy(col){
   if(CMP_SORT.col===col)CMP_SORT.asc=!CMP_SORT.asc;
   else{CMP_SORT.col=col;CMP_SORT.asc=(col==='sold'?false:true);}
-  // 點欄位排序時，自動關閉所有 TOP 模式
-  if(CMP_TOP_N){CMP_TOP_N=0;const b=document.getElementById('cmp-top-btn');if(b){b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.border='1px solid var(--border)';}}
-  if(CMP_TOP_STYLE){CMP_TOP_STYLE=0;const b=document.getElementById('cmp-top-style-btn');if(b){b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.border='1px solid var(--border)';}}
-  if(CMP_TOP_COLOR){CMP_TOP_COLOR=0;const b=document.getElementById('cmp-top-color-btn');if(b){b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.border='1px solid var(--border)';}}
+  // ★ TOP 鎖定後排序：保留 TOP 篩選，只在結果內排序
   renderSalesCompare();
 }
 
@@ -1848,7 +1846,9 @@ async function handleArrangeUpload(event){
       arrival:String(r['貨到通知']||''),
     })).filter(r=>r.code);
     try{await idbPut('arrange_rows',ARRANGE_DATA);}catch(e){}
-    document.getElementById('arrange-status').textContent=`已載入 ${ARRANGE_DATA.length} 筆儲位安排資料`;
+    const _arrDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+    try{localStorage.setItem('arrange_upload_date',_arrDate);}catch(e){}
+    document.getElementById('arrange-status').textContent=`已載入 ${ARRANGE_DATA.length} 筆儲位安排資料（上傳日期：${_arrDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     renderArrangeCompare();
@@ -1884,7 +1884,9 @@ async function handleForecastUpload(event){
       arrivalDate:findArrivalDate(r),
     }));
     try{await idbPut('forecast_rows',FORECAST_DATA);}catch(e){}
-    document.getElementById('forecast-status').textContent=`已載入 ${FORECAST_DATA.length} 筆預告進貨資料`;
+    const _fcDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+    try{localStorage.setItem('forecast_upload_date',_fcDate);}catch(e){}
+    document.getElementById('forecast-status').textContent=`已載入 ${FORECAST_DATA.length} 筆預告進貨資料（上傳日期：${_fcDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     renderArrangeCompare();
@@ -1907,6 +1909,7 @@ async function clearArrangeData(){
   ARRANGE_DATA=[];
   FORECAST_DATA=[];
   try{await idbPut('arrange_rows',[]);await idbPut('forecast_rows',[]);}catch(e){}
+  try{localStorage.removeItem('arrange_upload_date');localStorage.removeItem('forecast_upload_date');}catch(e){}
   document.getElementById('arrange-status').textContent='';
   document.getElementById('forecast-status').textContent='';
   document.getElementById('arrange-clear-btn').style.display='none';
@@ -1956,11 +1959,8 @@ function renderArrangeCompare(){
       }
     });
 
-    // 統計未匹配中 74/75 開頭的（屬於 26FW 但不在名單，應顯示在類別表）
-    const newSeasonUnmatched=unmatched.filter(r=>{
-      const c=String(r.code||'');
-      return c.startsWith('74')||c.startsWith('75');
-    });
+    // ★ 全部未匹配都列入（不限 74/75），讓使用者能看見所有需手動處理的品項
+    const newSeasonUnmatched=unmatched;
 
     document.getElementById('arrange-total').textContent=ARRANGE_DATA.length.toLocaleString();
     document.getElementById('arrange-matched').textContent=matchedCount.toLocaleString();
@@ -1979,7 +1979,7 @@ function renderArrangeCompare(){
         tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td><td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}</td><td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--accent)">${zone}</td>`;
         catBody.appendChild(tr);
       });
-      // ★ 新增「未匹配」列（僅 74/75 開頭）
+      // ★ 新增「未匹配」列（全部未匹配品項）
       if(newSeasonUnmatched.length){
         const styles=[...new Set(newSeasonUnmatched.map(r=>String(r.code||'').substring(0,5)))];
         const tr=document.createElement('tr');
@@ -2087,14 +2087,12 @@ function renderArrangeCompare(){
           catStats[cat].styles.add(style);
           if(arr)arr.plannedSlots.forEach(s=>catStats[cat].plannedSlots.add(s));
         }else{
-          // 不在 26FW 名單：74/75 開頭才顯示為「未匹配」，其他舊品不顯示
-          if(style.startsWith('74')||style.startsWith('75')){
-            if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};
-            catStats['未匹配'].skuCount+=skuNum;
-            catStats['未匹配'].unmatchedStyles.add(style);
-            catStats['未匹配'].styles.add(style);
-            if(arr)arr.plannedSlots.forEach(s=>catStats['未匹配'].plannedSlots.add(s));
-          }
+          // 不在 26FW 名單：全部歸為「未匹配」（含 73 等其他季別前綴）
+          if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};
+          catStats['未匹配'].skuCount+=skuNum;
+          catStats['未匹配'].unmatchedStyles.add(style);
+          catStats['未匹配'].styles.add(style);
+          if(arr)arr.plannedSlots.forEach(s=>catStats['未匹配'].plannedSlots.add(s));
         }
       });
 
@@ -2849,7 +2847,6 @@ function renderDBTable(){
   document.getElementById('db-total-rows').textContent=num(DB.length);
   document.getElementById('db-current-season').textContent=num(DB.filter(r=>is26FW(r.商品編號)).length);
   document.getElementById('db-reserve-warn').textContent=num(DB.filter(r=>r.保留數量>6).length);
-  document.getElementById('db-neg-avail').textContent=num(DB.filter(r=>r.可賣數量<0).length);
 }
 
 // ============================================================
@@ -4263,7 +4260,7 @@ async function exportAllData(){
 
     // 2. 收集所有 localStorage 設定
     const settings={};
-    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','reserve_reasons','fw26_last_update','slot_season_last_update'];
+    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','reserve_reasons','fw26_last_update','slot_season_last_update','arrange_upload_date','forecast_upload_date'];
     settingKeys.forEach(k=>{
       try{const v=localStorage.getItem(k);if(v!==null)settings[k]=JSON.parse(v);}catch(e){
         try{const v=localStorage.getItem(k);if(v!==null)settings[k]=v;}catch(e2){}
@@ -4407,7 +4404,8 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     const arr=await idbGet('arrange_rows');
     if(arr&&arr.length){
       ARRANGE_DATA=arr;
-      document.getElementById('arrange-status').textContent=`已載入 ${arr.length} 筆儲位安排資料`;
+      const _arrDate=localStorage.getItem('arrange_upload_date')||'';
+      document.getElementById('arrange-status').textContent=`已載入 ${arr.length} 筆儲位安排資料${_arrDate?'（上傳日期：'+_arrDate+'）':''}`;
       document.getElementById('arrange-clear-btn').style.display='inline-flex';
     }
   }catch(e){}
@@ -4415,7 +4413,8 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     const fc=await idbGet('forecast_rows');
     if(fc&&fc.length){
       FORECAST_DATA=fc;
-      document.getElementById('forecast-status').textContent=`已載入 ${fc.length} 筆預告進貨資料`;
+      const _fcDate=localStorage.getItem('forecast_upload_date')||'';
+      document.getElementById('forecast-status').textContent=`已載入 ${fc.length} 筆預告進貨資料${_fcDate?'（上傳日期：'+_fcDate+'）':''}`;
       document.getElementById('arrange-clear-btn').style.display='inline-flex';
     }
   }catch(e){}
