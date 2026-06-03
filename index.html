@@ -1483,6 +1483,8 @@ async function handleCompareUpload(event){
       未抓貨:+r['未抓貨']||0,
       可賣數量:+r['可賣數量']||0,
       保留數量:+r['保留數量']||0,
+      總進貨量:+r['總進貨量']||0,
+      總採購量:+r['總採購量']||0,
     })).filter(r=>r.商品編號);
 
     // 從檔名中嘗試抓取日期（檔名格式可能含 YYYYMMDD）
@@ -1613,27 +1615,44 @@ function renderSalesCompare(){
   if(CMP_TOP_N){
     filtered=filtered.slice().sort((a,b)=>b.sold-a.sold).slice(0,CMP_TOP_N);
   }else if(CMP_TOP_STYLE){
-    // 按款號（前5碼）匯總，取 TOP N 款
-    const styleAgg={};
+    // TOP N 款：前5碼相同為同款，分組內加分隔列（比照資料庫 tab）
+    const styleMap={};
     filtered.forEach(d=>{
-      const sty=(d.code||'').substring(0,5);
-      if(!styleAgg[sty])styleAgg[sty]=0;
-      styleAgg[sty]+=Math.max(0,d.sold);
+      const style=(d.code||'').substring(0,5);
+      if(!styleMap[style])styleMap[style]={total:0,skus:[],name:d.name};
+      styleMap[style].total+=d.sold;
+      styleMap[style].skus.push(d);
     });
-    const topStyles=new Set(Object.entries(styleAgg).sort((a,b)=>b[1]-a[1]).slice(0,CMP_TOP_STYLE).map(x=>x[0]));
-    filtered=filtered.filter(d=>topStyles.has((d.code||'').substring(0,5)));
-    filtered.sort((a,b)=>b.sold-a.sold);
+    const topStyles=Object.entries(styleMap)
+      .sort((a,b)=>b[1].total-a[1].total)
+      .slice(0,CMP_TOP_STYLE);
+    filtered=[];
+    topStyles.forEach(([style,{total,skus,name}],idx)=>{
+      skus.sort((a,b)=>b.sold-a.sold);
+      const totStr=(total>=0?'+':'')+total.toLocaleString();
+      filtered.push({_separator:true,_label:`TOP ${idx+1} 款：${name}（款號 ${style},總估算銷售 ${totStr}）`,_colspan:11});
+      skus.forEach(s=>filtered.push(s));
+    });
   }else if(CMP_TOP_COLOR){
-    // 按款號+顏色匯總，取 TOP N 色
-    const colorAgg={};
+    // TOP N 色：前7碼相同為同款同色（款5碼+色碼2碼）
+    const colorMap={};
     filtered.forEach(d=>{
-      const key=(d.code||'').substring(0,5)+'_'+(d.color||'');
-      if(!colorAgg[key])colorAgg[key]=0;
-      colorAgg[key]+=Math.max(0,d.sold);
+      const key=(d.code||'').substring(0,7);
+      if(!colorMap[key])colorMap[key]={total:0,skus:[],name:d.name,styleCode:(d.code||'').substring(0,5),colorCode:(d.code||'').substring(5,7)};
+      colorMap[key].total+=d.sold;
+      colorMap[key].skus.push(d);
     });
-    const topColors=new Set(Object.entries(colorAgg).sort((a,b)=>b[1]-a[1]).slice(0,CMP_TOP_COLOR).map(x=>x[0]));
-    filtered=filtered.filter(d=>topColors.has((d.code||'').substring(0,5)+'_'+(d.color||'')));
-    filtered.sort((a,b)=>b.sold-a.sold);
+    const topColors=Object.entries(colorMap)
+      .sort((a,b)=>b[1].total-a[1].total)
+      .slice(0,CMP_TOP_COLOR);
+    filtered=[];
+    topColors.forEach(([key,{total,skus,name,styleCode,colorCode}],idx)=>{
+      skus.sort((a,b)=>b.sold-a.sold);
+      const colorName=skus[0].color||colorCode;
+      const totStr=(total>=0?'+':'')+total.toLocaleString();
+      filtered.push({_separator:true,_label:`TOP ${idx+1} 色：${name} — ${colorName}（款${styleCode} 色碼${colorCode},總估算銷售 ${totStr}）`,_colspan:11});
+      skus.forEach(s=>filtered.push(s));
+    });
   }else{
     // 一般模式 — 套用點選的排序欄位
     const {col,asc}=CMP_SORT;
@@ -1656,11 +1675,17 @@ function renderSalesCompare(){
     return;
   }
 
-  // 大量資料：限制 2000 筆
-  const MAX=2000;
+  // 大量資料：限制 2000 筆（TOP 模式下不限制）
+  const MAX=(CMP_TOP_N||CMP_TOP_STYLE||CMP_TOP_COLOR)?99999:2000;
   const limited=filtered.slice(0,MAX);
   const frag=document.createDocumentFragment();
   limited.forEach(d=>{
+    if(d._separator){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td colspan="${d._colspan}" style="background:var(--surface2);color:var(--accent);font-weight:700;font-size:11px;padding:5px 10px;text-align:left!important;border-top:2px solid var(--border)">${d._label}</td>`;
+      frag.appendChild(tr);
+      return;
+    }
     const tr=document.createElement('tr');
     tr.style.borderBottom='1px solid var(--border)';
     const soldColor=d.sold>0?'color:var(--green);font-weight:700':(d.sold<0?'color:var(--red)':'color:var(--text3)');
