@@ -1556,11 +1556,12 @@ function renderSalesCompare(){
     const curPending=cur?(+cur.未到量||0):0;
     const curPurchased=cur?(+cur.總進貨量||0):0;
 
-    // ★ 特例：當前已下架(查無) + 歷史報表「庫存已進完」(總進貨量 ≥ 總採購量 且 未到量=0)
-    //   → 銷售量 = 歷史 銷售庫存（這段期間就是把剩下的全賣完才下架）
-    //   避免標準公式因 curPurchased=0 vs 大量 oldPurchased 而算出負數
+    // ★ 特例：當前已下架(查無) → 銷售 = 歷史 銷售庫存
+    //   原因：lativ ERP 的「總採購量」是累計含取消訂單，「總進貨量」是實際進貨，
+    //   兩者比較不能可靠判斷「庫存已進完」。已下架就直接以歷史銷售庫存當作這段期間的銷售量
+    //   （這是合理上限：你不可能賣超過下架前還剩多少）
     let sold;
-    const isSoldOutDelisted = old && !cur && oldPurchased >= oldOrdered && oldPending === 0;
+    const isSoldOutDelisted = old && !cur;
     if(isSoldOutDelisted){
       sold = oldSell;
     }else{
