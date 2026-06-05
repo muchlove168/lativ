@@ -1896,6 +1896,7 @@ async function handleForecastUpload(event){
       priority:r['優先箱數']!==''?r['優先箱數']:'',
       arrival:r['貨到通知']!==''?r['貨到通知']:'',
       arrivalDate:findArrivalDate(r),
+      boxCount:findArrivalBoxCount(r),
     }));
     try{await idbPut('forecast_rows',FORECAST_DATA);}catch(e){}
     const _fcDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
@@ -1916,6 +1917,16 @@ function findArrivalDate(r){
     if(v>0)return d;
   }
   return '';
+}
+
+// 抓進倉日期欄對應的箱數（與 findArrivalDate 找同一格）
+function findArrivalBoxCount(r){
+  const dateCols=Object.keys(r).filter(k=>/^\d{1,2}\/\d{1,2}$/.test(k));
+  for(const d of dateCols){
+    const v=Number(r[d]);
+    if(v>0)return v;
+  }
+  return 0;
 }
 
 async function clearArrangeData(){
@@ -2064,10 +2075,13 @@ function renderArrangeCompare(){
         importNo:r.importNo||'—',
         containerType:r.containerType||'—',
         styles:[],
+        rowBoxList:[],
         priorityTotal:0,
         arrivalNotifySet:new Set(),
       };
-      groups[key].styles.push(String(r.style||'').substring(0,5));
+      const _s5=String(r.style||'').substring(0,5);
+      groups[key].styles.push(_s5);
+      groups[key].rowBoxList.push({style:_s5, boxCount:Number(r.boxCount)||0});
       const pri=Number(r.priority);if(!isNaN(pri))groups[key].priorityTotal+=pri;
       if(r.arrival!=='')groups[key].arrivalNotifySet.add(String(r.arrival));
     });
@@ -2089,6 +2103,13 @@ function renderArrangeCompare(){
     // 第二步：每個進倉單內，按類別統計
     Object.values(groups).forEach(grp=>{
       const catStats={};  // {類別: {skuCount, plannedSlots:Set, styles:Set (用於提示), unmatchedStyles:Set}}
+      const catBoxes={};  // {類別: 箱數加總}
+      // ★ 先按 rowBoxList 累計箱數到類別（不去重款號，因為多 PO 同款各自有獨立箱數）
+      grp.rowBoxList.forEach(({style,boxCount})=>{
+        if(!style)return;
+        const cat=styleToCat[style]||'未匹配';
+        catBoxes[cat]=(catBoxes[cat]||0)+boxCount;
+      });
       grp.styles.forEach(style=>{
         if(!style)return;
         const cat=styleToCat[style];
@@ -2153,6 +2174,9 @@ function renderArrangeCompare(){
         html+=`<td style="padding:4px 8px;text-align:right">${skuCell}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-weight:600;color:var(--accent)">${zone}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2)">${slots}</td>`;
+        // ★ 箱數（該類別總箱數）
+        const boxNum=catBoxes[cat]||0;
+        html+=`<td style="padding:4px 8px;text-align:right;font-weight:600">${boxNum?boxNum.toLocaleString():'—'}</td>`;
         if(idx===0){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:right;border-left:1px solid var(--border);vertical-align:middle">${grp.priorityTotal||'—'}</td>`;
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;vertical-align:middle">${arrivalNotify}</td>`;
@@ -4650,6 +4674,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">SKU 數</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">儲區</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">倉位</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">箱數</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">優先箱數</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">貨到通知</th>
           </tr></thead>
