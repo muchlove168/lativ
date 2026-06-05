@@ -1891,6 +1891,7 @@ async function handleForecastUpload(event){
       batch:String(r['進倉批次']||''),
       importNo:String(r['進口編號']||''),
       containerType:String(r['櫃號櫃型']||''),
+      arrivalReminder:String(r['進倉提醒']||''),
       slot:String(r['儲位安排']||''),
       plannedSlot:String(r['預計倉位']||''),
       priority:r['優先箱數']!==''?r['優先箱數']:'',
@@ -1927,6 +1928,23 @@ function findArrivalBoxCount(r){
     if(v>0)return v;
   }
   return 0;
+}
+
+// 根據櫃號/進口/進倉提醒/廠商 推斷顯示用的容器資訊
+// Case 1: 櫃有, 進口空 → 進口=廠商
+// Case 2a: 兩空 + 進倉提醒含「散貨」 → 櫃號="散貨", 進口=廠商
+// Case 2b: 兩空 + 進倉提醒也空 → 櫃號=廠商, 進口="—" (本地廠商)
+function resolveContainerInfo(r){
+  const ct=(r.containerType||'').trim();
+  const im=(r.importNo||'').trim();
+  const vd=(r.vendor||'').trim();
+  const rm=(r.arrivalReminder||'').trim();
+  if(ct&&!im) return {containerType:ct, importNo:vd||'—'};
+  if(!ct&&!im){
+    if(rm.indexOf('散貨')>=0) return {containerType:'散貨', importNo:vd||'—'};
+    return {containerType:vd||'—', importNo:'—'};
+  }
+  return {containerType:ct||'—', importNo:im||'—'};
 }
 
 async function clearArrangeData(){
@@ -2067,13 +2085,16 @@ function renderArrangeCompare(){
     });
 
     // 第一步：按 (進倉日期 + 進口編號 + 櫃號) 分組
+    //   套用補空規則：櫃號有/進口空 → 進口=廠商；兩空+散貨提醒 → 櫃號=散貨,進口=廠商；兩空無提醒 → 櫃號=廠商
     const groups={};
     FORECAST_DATA.forEach(r=>{
-      const key=`${r.arrivalDate||'—'}||${r.importNo||'—'}||${r.containerType||'—'}`;
+      const _ci=resolveContainerInfo(r);
+      const _ct=_ci.containerType, _in=_ci.importNo;
+      const key=`${r.arrivalDate||'—'}||${_in}||${_ct}`;
       if(!groups[key])groups[key]={
         arrivalDate:r.arrivalDate||'—',
-        importNo:r.importNo||'—',
-        containerType:r.containerType||'—',
+        importNo:_in,
+        containerType:_ct,
         styles:[],
         rowBoxList:[],
         priorityTotal:0,
