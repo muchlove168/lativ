@@ -788,7 +788,7 @@ function is26FW(code){
 
 function aisleNum(name){const m=name.match(/\d+$/);return m?parseInt(m[0]):0;}
 function countByAisle(prefix){return DB.filter(r=>(r.儲位||'').trim().startsWith(prefix)).length;}
-function countLowStock(prefix,threshold){return DB.filter(r=>(r.儲位||'').trim().startsWith(prefix)&&(r.未到量||0)<=10&&(r.銷售庫存||0)<=threshold).length;}
+function countLowStock(prefix,threshold){return DB.filter(r=>(r.儲位||'').trim().startsWith(prefix)&&(r.未到量||0)<10&&(r.銷售庫存||0)<=threshold).length;}
 // 新品比分子：依當季(currentSeason)的前綴動態判斷，不再硬寫 26FW(74/75)
 function countCurrentSeasonByAisle(prefix){
   // 取得當季前綴（CACHE 建立前 fallback 到 26SS: 72/73）
