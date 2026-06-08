@@ -1102,11 +1102,13 @@ function buildCache(){
 function renderMergedGroup(tableId,groupId,zoneLetters){
   const tbody=document.querySelector('#'+tableId+' tbody');if(!tbody)return{avail:0,used:0};
   tbody.innerHTML='';const thr=THRESHOLDS[groupId];let totalAvail=0,totalUsed=0;
+  const zoneTotals={};  // {zoneLetter: {avail, used, empty, low}}
   zoneLetters.forEach(zoneLetter=>{
     const aisles=AISLE_CONFIG[groupId].filter(a=>a.走道.startsWith(zoneLetter)).sort((a,b)=>parseInt(b.走道.replace(/\D/g,''))-parseInt(a.走道.replace(/\D/g,'')));
     const visibleAisles=aisles.filter(a=>{const used=DB.length>0?countByAisle(a.走道):0;return!(a.可用===0&&used===0&&!showHiddenAisles);});
     if(!visibleAisles.length)return;
     const sepTr=document.createElement('tr');sepTr.className='sku-zone-sep';sepTr.innerHTML='<td colspan="6" style="text-align:center !important">'+zoneLetter+' 區</td>';tbody.appendChild(sepTr);
+    let zAvail=0,zUsed=0,zEmpty=0,zLow=0;
     aisles.forEach(row=>{
       const prefix=row['走道'],avail=row['可用'];
       const used=DB.length>0?countByAisle(prefix):0;const empty=avail-used;
@@ -1115,6 +1117,7 @@ function renderMergedGroup(tableId,groupId,zoneLetters){
       const newRatio=used>0?newSKU/used:0;const isHidden=(avail===0&&used===0);
       if(isHidden&&!showHiddenAisles)return;
       totalAvail+=avail;totalUsed+=used;
+      zAvail+=avail;zUsed+=used;zEmpty+=empty;zLow+=lowStock;
       const emptyColor=empty<0?'bad':empty<10?'warn':'good';const lowClass=lowStock>0?'warn':'';
       // avail=0 但有 SKU（空儲位為負）→ 整列反色警示
       const needsConfig=avail===0&&used>0;
@@ -1124,7 +1127,23 @@ function renderMergedGroup(tableId,groupId,zoneLetters){
       tr.innerHTML='<td style="text-align:left !important;font-weight:500;padding:4px 5px">'+prefix+'</td>'+'<td class="num editable" style="padding:4px 5px" ondblclick="editAvail(\''+groupId+'\',\''+prefix+'\',this)">'+num(avail)+'</td>'+'<td class="num" style="padding:4px 5px">'+(DB.length>0?num(used):'—')+'</td>'+'<td class="num" style="padding:4px 5px;'+(empty<0?'color:'+(needsConfig?'#ffdddd':'var(--red)'):'')+'\">'+(DB.length>0?num(empty):'—')+'</td>'+'<td class="num '+lowClass+'" style="padding:4px 5px">'+(DB.length>0?num(lowStock):'—')+'</td>'+'<td class="pct" style="padding:4px 5px">'+(DB.length>0?(used>0?pct(newRatio):'0.0%'):'—')+'</td>';
       tbody.appendChild(tr);
     });
+    zoneTotals[zoneLetter]={avail:zAvail,used:zUsed,empty:zEmpty,low:zLow};
   });
+  // ★ 4 個欄位標題加 tooltip：顯示該框架內各區的加總（按表格儲區順序）
+  const thr2=THRESHOLDS[groupId];
+  const headRow=document.querySelector('#'+tableId+' thead tr');
+  if(headRow&&headRow.cells.length>=5){
+    const fmt=(key,label)=>zoneLetters.filter(z=>zoneTotals[z]).map(z=>z+' 區'+label+': '+num(zoneTotals[z][key])+' 個').join('\n');
+    const hasData=DB.length>0;
+    headRow.cells[1].title=fmt('avail','可用儲位');
+    headRow.cells[2].title=hasData?fmt('used','已用'):'';
+    headRow.cells[3].title=hasData?fmt('empty','空儲位'):'';
+    headRow.cells[4].title=hasData?fmt('low','低庫存(≤'+thr2+')'):'';
+    headRow.cells[1].style.cursor='help';
+    headRow.cells[2].style.cursor='help';
+    headRow.cells[3].style.cursor='help';
+    headRow.cells[4].style.cursor='help';
+  }
   return{avail:totalAvail,used:totalUsed};
 }
 function renderSKUTables(){
