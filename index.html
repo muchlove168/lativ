@@ -2163,12 +2163,10 @@ function renderPlanner(){
     const skuCnt=prefixSkuCount[prefix]||0;
     const totalCnt=prefixSlotCount[prefix]||0;
     const empty=totalCnt-skuCnt;
-    const usagePct=totalCnt>0?(skuCnt/totalCnt*100):0;
     grandEmpty+=Math.max(0,empty);
     const zone=plannerGetZoneLetter(prefix);
     const cats=categoriesForZone(zone);
     const catsStr=cats.length?cats.join('、'):'<span style="color:var(--text3)">（儲區 '+zone+' 無對應類別）</span>';
-    const usageColor=usagePct>=90?'var(--red)':(usagePct>=70?'var(--accent)':'var(--green)');
     const emptyColor=empty<5?'var(--red)':(empty<20?'var(--accent)':'var(--green)');
     const totalCntStr=totalCnt>0?totalCnt.toLocaleString():'<span style="color:var(--text3)">（儲位總表未載入或無對應）</span>';
     const tr=document.createElement('tr');
@@ -2177,11 +2175,191 @@ function renderPlanner(){
       +`<td style="padding:6px 10px;text-align:right">${skuCnt.toLocaleString()}</td>`
       +`<td style="padding:6px 10px;text-align:right">${totalCntStr}</td>`
       +`<td style="padding:6px 10px;text-align:right;color:${totalCnt>0?emptyColor:'var(--text3)'};font-weight:${totalCnt>0?'700':'400'}">${totalCnt>0?empty.toLocaleString():'—'}</td>`
-      +`<td style="padding:6px 10px;text-align:right;color:${totalCnt>0?usageColor:'var(--text3)'}">${totalCnt>0?usagePct.toFixed(1)+'%':'—'}</td>`
       +`<td style="padding:6px 10px;font-size:11px;color:var(--text2)">${catsStr}</td>`;
     tbody.appendChild(tr);
   });
   document.getElementById('planner-stat-empty').textContent=grandEmpty.toLocaleString();
+  renderPlannerPhase2();
+}
+
+// ═══ Phase 2: 移位建議 ═══
+function renderPlannerPhase2(){
+  const container=document.getElementById('planner-phase2-container');
+  if(!container)return;
+  container.innerHTML='';
+  if(!AISLE_REPORT_DATA.length){
+    container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px">尚未上傳走道報表</div>';
+    return;
+  }
+  if(!ARRANGE_DATA.length){
+    container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px">「新品儲位安排」tab 尚無資料</div>';
+    return;
+  }
+  if(!Object.keys(STORAGE_MASTER||{}).length){
+    container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px">尚未上傳儲位總表</div>';
+    return;
+  }
+  // 商品編號 → 類別 lookup
+  const codeToCat=Object.assign({},window.EMBEDDED_FW26_LOOKUP||{});
+  if(FW26_FILTER_DATA&&FW26_FILTER_DATA.length){
+    FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])codeToCat[r[0]]=r[3];});
+  }
+  // 類別 → 儲區 lookup
+  const catToZone={};
+  FW26_CATS.forEach(c=>{if(c.類別)catToZone[c.類別]=String(c.儲區||'');});
+  // 走道內 SKU 分組
+  const aisleGroups={};
+  AISLE_REPORT_DATA.forEach(r=>{
+    const p=plannerGetAislePrefix(r['儲位']);
+    if(!p)return;
+    if(!aisleGroups[p])aisleGroups[p]=[];
+    aisleGroups[p].push(r);
+  });
+  // 各走道空儲位數（從儲位總表主要 sheet 計）
+  const prefixSlotCount={};
+  Object.keys(STORAGE_MASTER||{}).forEach(sn=>{
+    const norm=plannerNormalizeSheetName(sn);
+    if(!plannerIsPrimarySheet(norm))return;
+    (STORAGE_MASTER[sn]||[]).forEach(({slot})=>{
+      const p=plannerGetAislePrefix(slot);
+      prefixSlotCount[p]=(prefixSlotCount[p]||0)+1;
+    });
+  });
+  // ARRANGE_DATA 依 zone 分組
+  const zoneToArrange={};
+  ARRANGE_DATA.forEach(r=>{
+    const cat=codeToCat[r.code]||'';
+    const zone=catToZone[cat]||'';
+    if(!zone)return;
+    zone.split('.').forEach(z=>{
+      z=z.trim();if(!z)return;
+      if(!zoneToArrange[z])zoneToArrange[z]=[];
+      zoneToArrange[z].push(Object.assign({},r,{_cat:cat,_zone:z}));
+    });
+  });
+  // 對每個走道渲染卡片
+  const sortedPrefixes=Object.keys(aisleGroups).sort();
+  let renderedCount=0;
+  sortedPrefixes.forEach(prefix=>{
+    const zone=plannerGetZoneLetter(prefix);
+    const currentSkus=aisleGroups[prefix];
+    const totalSlots=prefixSlotCount[prefix]||0;
+    const empty=Math.max(0,totalSlots-currentSkus.length);
+    const newSkus=zoneToArrange[zone]||[];
+    if(!newSkus.length)return;
+    const needed=newSkus.length;
+    const deficit=Math.max(0,needed-empty);
+    const moveCandidates=plannerComputeMoveCandidates(currentSkus,deficit);
+    const card=document.createElement('div');
+    card.className='card';
+    card.innerHTML=`
+      <div class="card-title" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 14px">
+        <span style="font-weight:700;font-size:14px;color:var(--accent)">${prefix} 走道</span>
+        <span style="font-size:11px;color:var(--text2)">儲區 ${zone}</span>
+        <span style="font-size:11px;color:var(--text2)">|</span>
+        <span style="font-size:11px;color:var(--accent)">待安排新品: <b>${needed}</b></span>
+        <span style="font-size:11px;color:${empty<5?'var(--red)':'var(--text2)'}">空儲位: <b>${empty}</b></span>
+        ${deficit>0?`<span style="font-size:11px;color:var(--red);font-weight:700">需移走: ${deficit}</span>`:'<span style="font-size:11px;color:var(--green);font-weight:600">✓ 空間足夠</span>'}
+      </div>
+      <div style="padding:0 14px 14px 14px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">待安排新品 SKU（${needed}）</div>
+          <div style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:4px">${plannerRenderNewSkuTable(newSkus)}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">候選移走 SKU（${moveCandidates.length}，★ 為建議優先移走）</div>
+          <div style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:4px">${plannerRenderMoveCandidateTable(moveCandidates,deficit)}</div>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+    renderedCount++;
+  });
+  if(!renderedCount){
+    container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px">走道報表內的走道無對應的「新品儲位安排」新品（類別不匹配）</div>';
+  }
+}
+
+function plannerComputeMoveCandidates(skus,deficit){
+  // 統計同款 SKU 數（同走道內）
+  const styleCount={};
+  skus.forEach(r=>{
+    const style=String(r['商品編號']||'').substring(0,5);
+    if(style)styleCount[style]=(styleCount[style]||0)+1;
+  });
+  return skus.map(r=>{
+    const style=String(r['商品編號']||'').substring(0,5);
+    const sales=Number(r['銷售庫存']||0);
+    const pending=Number(r['未到量']||0);
+    const sameStyleCnt=styleCount[style]||1;
+    let priority=99,target='',reason='';
+    if(pending===0&&sales<=3){
+      priority=1;target='XX 零碼區';reason='已進貨完且即將售完';
+    }else{
+      priority=2;target='其他走道';reason=`庫存 ${sales} / 未到 ${pending} / 同款 ${sameStyleCnt}`;
+    }
+    return Object.assign({},r,{_priority:priority,_target:target,_reason:reason,_sameStyleCnt:sameStyleCnt,_sales:sales,_pending:pending});
+  }).sort((a,b)=>{
+    if(a._priority!==b._priority)return a._priority-b._priority;
+    if(a._sales!==b._sales)return a._sales-b._sales;
+    if(a._pending!==b._pending)return a._pending-b._pending;
+    return a._sameStyleCnt-b._sameStyleCnt;
+  });
+}
+
+function plannerRenderNewSkuTable(skus){
+  if(!skus.length)return '<div style="padding:14px;text-align:center;color:var(--text3);font-size:11px">無</div>';
+  const esc=s=>String(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  let html='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--surface2);position:sticky;top:0;z-index:1">'
+    +'<th style="padding:5px 6px;text-align:left;border-bottom:1px solid var(--border)">商品編號</th>'
+    +'<th style="padding:5px 6px;text-align:left;border-bottom:1px solid var(--border)">商品名稱</th>'
+    +'<th style="padding:5px 6px;text-align:center;border-bottom:1px solid var(--border)">尺寸</th>'
+    +'<th style="padding:5px 6px;text-align:left;border-bottom:1px solid var(--border)">類別</th>'
+    +'<th style="padding:5px 6px;text-align:right;border-bottom:1px solid var(--border)">未到量</th>'
+    +'</tr></thead><tbody>';
+  skus.forEach(r=>{
+    html+=`<tr style="border-bottom:1px solid rgba(221,216,208,.3)">`
+      +`<td style="padding:3px 6px">${esc(r.code)}</td>`
+      +`<td style="padding:3px 6px">${esc(r.name)}</td>`
+      +`<td style="padding:3px 6px;text-align:center">${esc(r.size)}</td>`
+      +`<td style="padding:3px 6px;color:var(--accent)">${esc(r._cat)}</td>`
+      +`<td style="padding:3px 6px;text-align:right">${r.pending||0}</td>`
+      +`</tr>`;
+  });
+  html+='</tbody></table>';
+  return html;
+}
+
+function plannerRenderMoveCandidateTable(candidates,deficit){
+  if(!candidates.length)return '<div style="padding:14px;text-align:center;color:var(--text3);font-size:11px">無</div>';
+  const esc=s=>String(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  let html='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--surface2);position:sticky;top:0;z-index:1">'
+    +'<th style="padding:5px 6px;text-align:left;border-bottom:1px solid var(--border)">商品編號</th>'
+    +'<th style="padding:5px 6px;text-align:left;border-bottom:1px solid var(--border)">商品名稱</th>'
+    +'<th style="padding:5px 6px;text-align:center;border-bottom:1px solid var(--border)">顏色</th>'
+    +'<th style="padding:5px 6px;text-align:center;border-bottom:1px solid var(--border)">尺寸</th>'
+    +'<th style="padding:5px 6px;text-align:right;border-bottom:1px solid var(--border)">銷庫</th>'
+    +'<th style="padding:5px 6px;text-align:right;border-bottom:1px solid var(--border)">未到</th>'
+    +'<th style="padding:5px 6px;text-align:center;border-bottom:1px solid var(--border)">同款</th>'
+    +'<th style="padding:5px 6px;text-align:left;border-bottom:1px solid var(--border)">建議</th>'
+    +'</tr></thead><tbody>';
+  candidates.forEach((r,idx)=>{
+    const isPicked=idx<deficit;
+    const bgStyle=isPicked?'background:rgba(192,57,43,0.06)':'';
+    const targetColor=r._target.indexOf('XX')>=0?'var(--green)':'var(--accent)';
+    html+=`<tr style="border-bottom:1px solid rgba(221,216,208,.3);${bgStyle}">`
+      +`<td style="padding:3px 6px;font-weight:${isPicked?'700':'400'}">${isPicked?'★ ':''}${esc(r['商品編號'])}</td>`
+      +`<td style="padding:3px 6px">${esc(r['商品名稱'])}</td>`
+      +`<td style="padding:3px 6px;text-align:center;font-size:10px">${esc(r['顏色'])}</td>`
+      +`<td style="padding:3px 6px;text-align:center;font-size:10px">${esc(r['尺寸'])}</td>`
+      +`<td style="padding:3px 6px;text-align:right">${r._sales}</td>`
+      +`<td style="padding:3px 6px;text-align:right">${r._pending}</td>`
+      +`<td style="padding:3px 6px;text-align:center">${r._sameStyleCnt}</td>`
+      +`<td style="padding:3px 6px;color:${targetColor};font-size:10px">${esc(r._target)}<div style="color:var(--text3);font-size:10px">${esc(r._reason)}</div></td>`
+      +`</tr>`;
+  });
+  html+='</tbody></table>';
+  return html;
 }
 
 function renderArrangeCompare(){
@@ -5068,17 +5246,18 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
           <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">目前 SKU 數</th>
           <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">儲位總格數</th>
           <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">空儲位數</th>
-          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">使用率</th>
           <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:left">可放類別（依儲區）</th>
         </tr></thead>
-        <tbody id="planner-aisle-tbody"><tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳走道報表</td></tr></tbody>
+        <tbody id="planner-aisle-tbody"><tr><td colspan="5" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳走道報表</td></tr></tbody>
       </table>
     </div>
 
-    <!-- Phase 2 預留區塊 -->
-    <div class="card" style="opacity:0.55">
-      <div class="card-title" style="color:var(--text3)"><span class="dot" style="background:var(--text3)"></span>移位建議（Phase 2 開發中）</div>
-      <div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">下一階段：依據比對「新品儲位安排」中可放入這些走道的新品 SKU + 走道內候選應移走 SKU，產出移位草案</div>
+    <!-- Phase 2: 移位建議 -->
+    <div id="planner-phase2-section">
+      <div style="font-size:13px;font-weight:600;margin:8px 0 6px 0;color:var(--accent)">移位建議</div>
+      <div id="planner-phase2-container" style="display:flex;flex-direction:column;gap:12px">
+        <div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px">需上傳走道報表 + 儲位總表，並且「新品儲位安排」tab 已有資料</div>
+      </div>
     </div>
   </div>
 </div>
