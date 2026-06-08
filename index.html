@@ -2098,13 +2098,14 @@ function renderArrangeCompare(){
         styles:[],
         rowBoxList:[],
         priorityTotal:0,
-        arrivalNotifySet:new Set(),
+        arrivalNotifyTotal:0,
       };
       const _s5=String(r.style||'').substring(0,5);
       groups[key].styles.push(_s5);
-      groups[key].rowBoxList.push({style:_s5, boxCount:Number(r.boxCount)||0});
+      groups[key].rowBoxList.push({style:_s5, boxCount:Number(r.boxCount)||0, slot:String(r.slot||''), plannedSlot:String(r.plannedSlot||'')});
       const pri=Number(r.priority);if(!isNaN(pri))groups[key].priorityTotal+=pri;
-      if(r.arrival!=='')groups[key].arrivalNotifySet.add(String(r.arrival));
+      const _av=Number(r.arrival);
+      if(r.arrival!==''&&!isNaN(_av))groups[key].arrivalNotifyTotal+=_av;
     });
 
     // ★ 找出跨櫃重複款號：建立 款號 → [櫃號列表]
@@ -2125,11 +2126,29 @@ function renderArrangeCompare(){
     Object.values(groups).forEach(grp=>{
       const catStats={};  // {類別: {skuCount, plannedSlots:Set, styles:Set (用於提示), unmatchedStyles:Set}}
       const catBoxes={};  // {類別: 箱數加總}
-      // ★ 先按 rowBoxList 累計箱數到類別（不去重款號，因為多 PO 同款各自有獨立箱數）
-      grp.rowBoxList.forEach(({style,boxCount})=>{
+      const catSlotZones={};       // {類別: Set of 儲區首字（如 'C', 'D'）} — 來自預告進貨表 slot
+      const catFcPlannedSlots={};  // {類別: Set of 倉位（如 '1F','2F'）} — 來自預告進貨表 plannedSlot
+      // ★ 先按 rowBoxList 累計箱數 + 儲區/倉位 到類別
+      grp.rowBoxList.forEach(({style,boxCount,slot,plannedSlot})=>{
         if(!style)return;
         const cat=styleToCat[style]||'未匹配';
         catBoxes[cat]=(catBoxes[cat]||0)+boxCount;
+        // 儲區：取 slot 首字（C09 → C），只取字母 A-Z
+        if(slot){
+          const _c=String(slot).charAt(0).toUpperCase();
+          if(/[A-Z]/.test(_c)){
+            if(!catSlotZones[cat])catSlotZones[cat]=new Set();
+            catSlotZones[cat].add(_c);
+          }
+        }
+        // 倉位：plannedSlot 原值（去頭尾空白）
+        if(plannedSlot){
+          const _p=String(plannedSlot).trim();
+          if(_p){
+            if(!catFcPlannedSlots[cat])catFcPlannedSlots[cat]=new Set();
+            catFcPlannedSlots[cat].add(_p);
+          }
+        }
       });
       grp.styles.forEach(style=>{
         if(!style)return;
@@ -2155,13 +2174,21 @@ function renderArrangeCompare(){
       const catEntries=Object.entries(catStats);
       if(catEntries.length===0)return;
       const totalRows=catEntries.length;
-      const arrivalNotify=Array.from(grp.arrivalNotifySet).filter(x=>x&&x!=='0').join(',')||'—';
+      const arrivalNotify=(grp.arrivalNotifyTotal>0)?grp.arrivalNotifyTotal.toLocaleString():'—';
 
       catEntries.forEach(([cat,s],idx)=>{
         const tr=document.createElement('tr');
         tr.style.borderBottom=idx===catEntries.length-1?'2px solid var(--border)':'1px solid rgba(221,216,208,.3)';
-        const zone=cat==='未匹配'?'—':(catZoneLookup[cat]||'—');
-        const slots=Array.from(s.plannedSlots).filter(x=>x).join(',')||'—';
+        // ★ 無待安排儲位 列 → 儲區/倉位 改用預告進貨表自己的欄位聚合
+        const isNoArrange=(cat==='未匹配'&&(s.skuCount||0)===0);
+        let zone, slots;
+        if(isNoArrange){
+          zone=catSlotZones[cat]?Array.from(catSlotZones[cat]).sort().join(','):'—';
+          slots=catFcPlannedSlots[cat]?Array.from(catFcPlannedSlots[cat]).sort().join(','):'—';
+        }else{
+          zone=cat==='未匹配'?'—':(catZoneLookup[cat]||'—');
+          slots=Array.from(s.plannedSlots).filter(x=>x).join(',')||'—';
+        }
 
         // ★ 跨櫃重複款號提醒：找出此類別內有哪些款號是跨櫃的
         const dupInThisCat=[];
@@ -2183,7 +2210,6 @@ function renderArrangeCompare(){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.containerType}</td>`;
         }
         // ★ 未匹配 + skuCount=0（不在儲位安排報表內）→ 顯示為「無待安排儲位」
-        const isNoArrange=(cat==='未匹配'&&(s.skuCount||0)===0);
         const displayCat=isNoArrange?'無待安排儲位':cat;
         const catColor=isNoArrange?'color:var(--text3)':(cat==='未匹配'?'color:var(--red)':'');
         const catTitle=cat==='未匹配'&&s.unmatchedStyles?(isNoArrange?'此貨櫃內款號未被列入儲位安排，可能為既有商品續進，沿用原儲位':'未匹配款號: '+Array.from(s.unmatchedStyles).join(', ')):'';
