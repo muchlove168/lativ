@@ -238,6 +238,7 @@
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
   <div class="tab" onclick="switchTab('arrange')">新品儲位安排</div>
   <div class="tab" onclick="switchTab('compare')">銷售比對</div>
+  <div class="tab" onclick="switchTab('planner')">儲位調整建議</div>
 </div>
 
 <div class="content">
@@ -837,13 +838,14 @@ function getXXStatus(r) {
 // TAB SWITCHING
 // ============================================================
 function switchTab(name){
-  const tabs=['sku','sales','fw26','db','xx','reloc','slotdata','arrange','compare'];
+  const tabs=['sku','sales','fw26','db','xx','reloc','slotdata','arrange','compare','planner'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='slotdata'){renderSlotData();return;}
   if(name==='arrange'){renderArrangeCompare();return;}
   if(name==='compare'){renderSalesCompare();return;}
+  if(name==='planner'){renderPlanner();return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
     if(name==='sales'){renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();}
@@ -1477,6 +1479,9 @@ function loadManualEdits(){
 // 上傳「匯出儲位安排.xlsx」+「匯出預告進貨表.xlsx」→ 比對 26FW 新品
 // ============================================================
 let ARRANGE_DATA = [];
+// 儲位調整建議 tab
+let AISLE_REPORT_DATA = [];   // 走道報表（庫存查詢 SKU 列表）
+let STORAGE_MASTER = {};       // 儲位總表 {sheetName: [{slot, layout}]}
 let FORECAST_DATA = [];
 
 // ============================================================
@@ -1996,6 +2001,187 @@ async function clearArrangeData(){
   document.getElementById('forecast-status').textContent='';
   document.getElementById('arrange-clear-btn').style.display='none';
   renderArrangeCompare();
+}
+
+// ═══════════════════════════════════════════════════════
+// ★ 儲位調整建議 TAB
+// ═══════════════════════════════════════════════════════
+// sheet 名稱正規化：全形→半形 + trim
+function plannerNormalizeSheetName(sn){
+  let s=String(sn||'').trim();
+  let out='';
+  for(let i=0;i<s.length;i++){
+    const code=s.charCodeAt(i);
+    out+=(code>=0xFF21&&code<=0xFF5A)?String.fromCharCode(code-0xFEE0):s[i];
+  }
+  return out;
+}
+// 取儲位前綴：E01-100-1 → E01, XX-011 → XX-, A03-001-3 → A03
+function plannerGetAislePrefix(slot){const s=String(slot||'').trim();return s.length>=3?s.substring(0,3):s;}
+// 走道 → 儲區字母（E01 → E, A03 → A, XX- → XX, TX- → TX）
+function plannerGetZoneLetter(prefix){const s=String(prefix||'');if(s.startsWith('XX')||s.startsWith('TX'))return s.substring(0,2);return s.charAt(0);}
+// Phase 1 主要 sheet 集合：A/B/C/D/E/F/L/M/P/XX
+function plannerIsPrimarySheet(normName){return ['A','B','C','D','E','F','L','M','P','XX'].includes(normName);}
+
+async function handlePlannerAisleUpload(event){
+  const file=event.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async(e)=>{
+    try{
+      const data=new Uint8Array(e.target.result);
+      const wb=XLSX.read(data,{type:'array'});
+      // 抓所有 sheet（使用者可能多走道合併成多 sheet 或單 sheet）
+      const rows=[];
+      wb.SheetNames.forEach(sn=>{
+        const ws=wb.Sheets[sn];
+        const arr=XLSX.utils.sheet_to_json(ws,{defval:''});
+        arr.forEach(r=>{if(r['商品編號']||r['儲位'])rows.push(r);});
+      });
+      if(!rows.length){alert('走道報表為空');return;}
+      AISLE_REPORT_DATA=rows;
+      try{await idbPut('aisle_report_rows',rows);}catch(err){}
+      const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+      try{localStorage.setItem('planner_aisle_upload_date',today);}catch(err){}
+      renderPlanner();
+    }catch(err){alert('解析失敗：'+err.message);}
+    event.target.value='';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function handlePlannerMasterUpload(event){
+  const file=event.target.files[0];if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async(e)=>{
+    try{
+      const data=new Uint8Array(e.target.result);
+      const wb=XLSX.read(data,{type:'array'});
+      const sheets={};
+      wb.SheetNames.forEach(sn=>{
+        const ws=wb.Sheets[sn];
+        const grid=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        if(grid.length<2)return;
+        const headers=grid[0].map(h=>String(h||''));
+        const dataRows=grid.slice(1);
+        // 找所有「儲位」開頭的欄位 index（含 儲位.1、儲位(鐵架) 等）
+        const slotColIdx=[];
+        headers.forEach((h,i)=>{if(h.indexOf('儲位')===0)slotColIdx.push(i);});
+        const slots=[];
+        slotColIdx.forEach(sci=>{
+          const layoutIdx=sci+1<headers.length?sci+1:-1;
+          dataRows.forEach(row=>{
+            const slot=String(row[sci]||'').trim();
+            const layout=layoutIdx>=0?String(row[layoutIdx]||'').trim():'';
+            if(slot&&slot.length>=3)slots.push({slot,layout});
+          });
+        });
+        if(slots.length)sheets[sn]=slots;
+      });
+      if(!Object.keys(sheets).length){alert('儲位總表為空');return;}
+      STORAGE_MASTER=sheets;
+      try{await idbPut('storage_master_sheets',sheets);}catch(err){}
+      const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+      try{localStorage.setItem('planner_master_upload_date',today);}catch(err){}
+      renderPlanner();
+    }catch(err){alert('解析失敗：'+err.message);}
+    event.target.value='';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function clearPlannerAisle(){
+  if(!confirm('確定清除走道報表？'))return;
+  AISLE_REPORT_DATA=[];
+  try{await idbPut('aisle_report_rows',[]);}catch(e){}
+  try{localStorage.removeItem('planner_aisle_upload_date');}catch(e){}
+  renderPlanner();
+}
+async function clearPlannerMaster(){
+  if(!confirm('確定清除儲位總表？'))return;
+  STORAGE_MASTER={};
+  try{await idbPut('storage_master_sheets',{});}catch(e){}
+  try{localStorage.removeItem('planner_master_upload_date');}catch(e){}
+  renderPlanner();
+}
+
+function renderPlanner(){
+  // 狀態列
+  const aisleDate=localStorage.getItem('planner_aisle_upload_date')||'';
+  const masterDate=localStorage.getItem('planner_master_upload_date')||'';
+  document.getElementById('planner-aisle-status').textContent=AISLE_REPORT_DATA.length?`已載入 ${AISLE_REPORT_DATA.length.toLocaleString()} 筆${aisleDate?'（上傳日期：'+aisleDate+'）':''}`:'未上傳';
+  document.getElementById('planner-aisle-clear-btn').style.display=AISLE_REPORT_DATA.length?'inline-flex':'none';
+  const masterSheets=Object.keys(STORAGE_MASTER||{});
+  const totalSlots=masterSheets.reduce((a,k)=>a+(STORAGE_MASTER[k]||[]).length,0);
+  document.getElementById('planner-master-status').textContent=masterSheets.length?`已載入 ${masterSheets.length} 個 sheet / ${totalSlots.toLocaleString()} 個儲位${masterDate?'（上傳日期：'+masterDate+'）':''}`:'未上傳';
+  document.getElementById('planner-master-clear-btn').style.display=masterSheets.length?'inline-flex':'none';
+  // 共用 ARRANGE_DATA 狀態
+  document.getElementById('planner-arrange-status').textContent=ARRANGE_DATA.length?`（已載入 ${ARRANGE_DATA.length.toLocaleString()} 筆）`:'（未上傳）';
+
+  // 統計卡片
+  const aislePrefixes=new Set();
+  AISLE_REPORT_DATA.forEach(r=>{const p=plannerGetAislePrefix(r['儲位']);if(p)aislePrefixes.add(p);});
+  document.getElementById('planner-stat-aisles').textContent=aislePrefixes.size||'—';
+  document.getElementById('planner-stat-skus').textContent=AISLE_REPORT_DATA.length?AISLE_REPORT_DATA.length.toLocaleString():'—';
+  document.getElementById('planner-stat-sheets').textContent=masterSheets.length||'—';
+
+  // 走道現況表
+  const tbody=document.getElementById('planner-aisle-tbody');
+  tbody.innerHTML='';
+  if(!AISLE_REPORT_DATA.length){
+    tbody.innerHTML='<tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳走道報表</td></tr>';
+    document.getElementById('planner-stat-empty').textContent='—';
+    return;
+  }
+  // 從 STORAGE_MASTER 主要 sheet 建立 prefix → 格數 map
+  const prefixSlotCount={};
+  masterSheets.forEach(sn=>{
+    const norm=plannerNormalizeSheetName(sn);
+    if(!plannerIsPrimarySheet(norm))return;
+    (STORAGE_MASTER[sn]||[]).forEach(({slot})=>{
+      const p=plannerGetAislePrefix(slot);
+      prefixSlotCount[p]=(prefixSlotCount[p]||0)+1;
+    });
+  });
+  // 走道內 SKU 數
+  const prefixSkuCount={};
+  AISLE_REPORT_DATA.forEach(r=>{
+    const p=plannerGetAislePrefix(r['儲位']);
+    if(p)prefixSkuCount[p]=(prefixSkuCount[p]||0)+1;
+  });
+  // 可放類別查詢：用 FW26_CATS（儲區 → 類別）
+  function categoriesForZone(zone){
+    if(!zone)return [];
+    return FW26_CATS.filter(c=>{
+      const z=String(c.儲區||'');
+      return z===zone||z.split('.').includes(zone);
+    }).map(c=>c.類別);
+  }
+
+  const sortedPrefixes=[...aislePrefixes].sort();
+  let grandEmpty=0;
+  sortedPrefixes.forEach(prefix=>{
+    const skuCnt=prefixSkuCount[prefix]||0;
+    const totalCnt=prefixSlotCount[prefix]||0;
+    const empty=totalCnt-skuCnt;
+    const usagePct=totalCnt>0?(skuCnt/totalCnt*100):0;
+    grandEmpty+=Math.max(0,empty);
+    const zone=plannerGetZoneLetter(prefix);
+    const cats=categoriesForZone(zone);
+    const catsStr=cats.length?cats.join('、'):'<span style="color:var(--text3)">（儲區 '+zone+' 無對應類別）</span>';
+    const usageColor=usagePct>=90?'var(--red)':(usagePct>=70?'var(--accent)':'var(--green)');
+    const emptyColor=empty<5?'var(--red)':(empty<20?'var(--accent)':'var(--green)');
+    const totalCntStr=totalCnt>0?totalCnt.toLocaleString():'<span style="color:var(--text3)">（儲位總表未載入或無對應）</span>';
+    const tr=document.createElement('tr');
+    tr.style.borderBottom='1px solid var(--border)';
+    tr.innerHTML=`<td style="padding:6px 10px;font-weight:600">${prefix}</td>`
+      +`<td style="padding:6px 10px;text-align:right">${skuCnt.toLocaleString()}</td>`
+      +`<td style="padding:6px 10px;text-align:right">${totalCntStr}</td>`
+      +`<td style="padding:6px 10px;text-align:right;color:${totalCnt>0?emptyColor:'var(--text3)'};font-weight:${totalCnt>0?'700':'400'}">${totalCnt>0?empty.toLocaleString():'—'}</td>`
+      +`<td style="padding:6px 10px;text-align:right;color:${totalCnt>0?usageColor:'var(--text3)'}">${totalCnt>0?usagePct.toFixed(1)+'%':'—'}</td>`
+      +`<td style="padding:6px 10px;font-size:11px;color:var(--text2)">${catsStr}</td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('planner-stat-empty').textContent=grandEmpty.toLocaleString();
 }
 
 function renderArrangeCompare(){
@@ -4394,7 +4580,7 @@ async function exportAllData(){
 
     // 2. 收集所有 localStorage 設定
     const settings={};
-    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','reserve_reasons','fw26_last_update','slot_season_last_update','arrange_upload_date','forecast_upload_date'];
+    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','reserve_reasons','fw26_last_update','slot_season_last_update','arrange_upload_date','forecast_upload_date','planner_aisle_upload_date','planner_master_upload_date'];
     settingKeys.forEach(k=>{
       try{const v=localStorage.getItem(k);if(v!==null)settings[k]=JSON.parse(v);}catch(e){
         try{const v=localStorage.getItem(k);if(v!==null)settings[k]=v;}catch(e2){}
@@ -4560,6 +4746,15 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       document.getElementById('compare-status').textContent=`歷史報表：${cmp.fileName||cmp.date}（${cmp.rows.length.toLocaleString()} 筆）`;
       document.getElementById('compare-clear-btn').style.display='inline-flex';
     }
+  }catch(e){}
+  // 載入 儲位調整建議 tab 的資料
+  try{
+    const ar=await idbGet('aisle_report_rows');
+    if(ar&&ar.length){AISLE_REPORT_DATA=ar;}
+  }catch(e){}
+  try{
+    const sm=await idbGet('storage_master_sheets');
+    if(sm&&typeof sm==='object'){STORAGE_MASTER=sm;}
   }catch(e){}
   console.log('FW26_FILTER_DATA.length after load:',FW26_FILTER_DATA.length);
   try{initFW26();}catch(e){console.warn('initFW26 failed:',e);}
@@ -4834,6 +5029,56 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
           <tbody id="compare-body"><tr><td colspan="11" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳歷史 ERP 報表</td></tr></tbody>
         </table>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 儲位調整建議 TAB ═══ -->
+<div class="tab-panel" id="tab-planner">
+  <div style="padding:14px 18px;display:flex;flex-direction:column;gap:10px">
+    <!-- 上傳區 -->
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding-bottom:8px;border-bottom:1px solid var(--border)">
+      <button class="upload-btn" onclick="document.getElementById('planner-aisle-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳走道報表</button>
+      <input type="file" id="planner-aisle-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerAisleUpload(event)">
+      <span id="planner-aisle-status" style="font-size:12px;color:var(--text3)">未上傳</span>
+      <button class="upload-btn" id="planner-aisle-clear-btn" onclick="clearPlannerAisle()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖ 清除</button>
+
+      <button class="upload-btn" onclick="document.getElementById('planner-master-input').click()" style="background:var(--accent);color:#fff;margin-left:18px">⬆ 上傳儲位總表</button>
+      <input type="file" id="planner-master-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerMasterUpload(event)">
+      <span id="planner-master-status" style="font-size:12px;color:var(--text3)">未上傳</span>
+      <button class="upload-btn" id="planner-master-clear-btn" onclick="clearPlannerMaster()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖ 清除</button>
+
+      <span style="margin-left:auto;font-size:11px;color:var(--text3)">匯出儲位安排：共用「新品儲位安排」tab 的資料 <span id="planner-arrange-status"></span></span>
+    </div>
+
+    <!-- 統計卡片 -->
+    <div class="stats-bar" style="padding:4px 0">
+      <div class="stat-box"><div class="label">走道數</div><div class="val" id="planner-stat-aisles">—</div></div>
+      <div class="stat-box"><div class="label">走道報表 SKU 數</div><div class="val" id="planner-stat-skus">—</div></div>
+      <div class="stat-box"><div class="label">總空儲位</div><div class="val" id="planner-stat-empty">—</div></div>
+      <div class="stat-box"><div class="label">儲位總表 sheet 數</div><div class="val" id="planner-stat-sheets">—</div></div>
+    </div>
+
+    <!-- 走道現況表 -->
+    <div class="card">
+      <div class="card-title"><span class="dot"></span>走道現況</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:left">走道</th>
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">目前 SKU 數</th>
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">儲位總格數</th>
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">空儲位數</th>
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">使用率</th>
+          <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:left">可放類別（依儲區）</th>
+        </tr></thead>
+        <tbody id="planner-aisle-tbody"><tr><td colspan="6" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳走道報表</td></tr></tbody>
+      </table>
+    </div>
+
+    <!-- Phase 2 預留區塊 -->
+    <div class="card" style="opacity:0.55">
+      <div class="card-title" style="color:var(--text3)"><span class="dot" style="background:var(--text3)"></span>移位建議（Phase 2 開發中）</div>
+      <div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">下一階段：依據比對「新品儲位安排」中可放入這些走道的新品 SKU + 走道內候選應移走 SKU，產出移位草案</div>
     </div>
   </div>
 </div>
