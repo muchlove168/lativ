@@ -2225,31 +2225,48 @@ function renderPlannerPhase2(){
       prefixSlotCount[p]=(prefixSlotCount[p]||0)+1;
     });
   });
-  // ARRANGE_DATA 依 zone 分組
-  const zoneToArrange={};
-  ARRANGE_DATA.forEach(r=>{
-    const cat=codeToCat[r.code]||'';
-    const zone=catToZone[cat]||'';
-    if(!zone)return;
-    zone.split('.').forEach(z=>{
-      z=z.trim();if(!z)return;
-      if(!zoneToArrange[z])zoneToArrange[z]=[];
-      zoneToArrange[z].push(Object.assign({},r,{_cat:cat,_zone:z}));
-    });
+  // 各走道空位數（給分配演算法用）
+  const aisleEmptyMap={};
+  Object.keys(aisleGroups).forEach(p=>{
+    const total=prefixSlotCount[p]||0;
+    aisleEmptyMap[p]=Math.max(0,total-aisleGroups[p].length);
   });
-  // 對每個走道渲染卡片
-  const sortedPrefixes=Object.keys(aisleGroups).sort();
+  // 走道分群（按 zone）
+  const presentAislesByZone={};
+  Object.keys(aisleGroups).forEach(p=>{
+    const z=plannerGetZoneLetter(p);
+    if(!presentAislesByZone[z])presentAislesByZone[z]=[];
+    presentAislesByZone[z].push(p);
+  });
+  // ★ Phase 3.1: 款級別分配演算法
+  const styleGroups=plannerGroupArrangeByStyle();
+  const assignments=plannerAssignStyles(styleGroups,aisleEmptyMap,presentAislesByZone);
+  // 渲染計畫摘要 card
+  renderPlannerPlanSummary(assignments,container);
+  // 依走道分組 assignments
+  const assignmentsByAisle={};
+  assignments.forEach(a=>{
+    if(!a.aisle)return;
+    if(!assignmentsByAisle[a.aisle])assignmentsByAisle[a.aisle]=[];
+    assignmentsByAisle[a.aisle].push(a);
+  });
+  // 對每個有分配的走道渲染卡片
+  const sortedPrefixes=Object.keys(assignmentsByAisle).sort();
   let renderedCount=0;
   sortedPrefixes.forEach(prefix=>{
     const zone=plannerGetZoneLetter(prefix);
-    const currentSkus=aisleGroups[prefix];
+    const currentSkus=aisleGroups[prefix]||[];
     const totalSlots=prefixSlotCount[prefix]||0;
     const empty=Math.max(0,totalSlots-currentSkus.length);
-    const newSkus=zoneToArrange[zone]||[];
-    if(!newSkus.length)return;
-    const needed=newSkus.length;
-    const deficit=Math.max(0,needed-empty);
-    const moveCandidates=plannerComputeMoveCandidates(currentSkus,deficit);
+    const aisleAssigns=assignmentsByAisle[prefix];
+    const totalNeed=aisleAssigns.reduce((s,a)=>s+a.skus.length,0);
+    const totalDeficit=aisleAssigns.reduce((s,a)=>s+(a.deficit||0),0);
+    // 攤平本走道分配的所有 SKU（加上 _cat 註記）
+    const newSkus=[];
+    aisleAssigns.forEach(a=>{a.skus.forEach(s=>newSkus.push(Object.assign({},s,{_cat:a.cat,_style:a.style})));});
+    const moveCandidates=plannerComputeMoveCandidates(currentSkus,totalDeficit);
+    // 列出本走道分配的款摘要（顯示在標題列）
+    const styleBrief=aisleAssigns.map(a=>`${a.style}×${a.skus.length}`).join(', ');
     const card=document.createElement('div');
     card.className='card';
     card.innerHTML=`
@@ -2257,18 +2274,19 @@ function renderPlannerPhase2(){
         <span style="font-weight:700;font-size:14px;color:var(--accent)">${prefix} 走道</span>
         <span style="font-size:11px;color:var(--text2)">儲區 ${zone}</span>
         <span style="font-size:11px;color:var(--text2)">|</span>
-        <span style="font-size:11px;color:var(--accent)">待安排新品: <b>${needed}</b></span>
+        <span style="font-size:11px;color:var(--accent)">分配 <b>${aisleAssigns.length}</b> 款 / <b>${totalNeed}</b> SKU</span>
         <span style="font-size:11px;color:${empty<5?'var(--red)':'var(--text2)'}">空儲位: <b>${empty}</b></span>
-        ${deficit>0?`<span style="font-size:11px;color:var(--red);font-weight:700">需移走: ${deficit}</span>`:'<span style="font-size:11px;color:var(--green);font-weight:600">✓ 空間足夠</span>'}
+        ${totalDeficit>0?`<span style="font-size:11px;color:var(--red);font-weight:700">需移走: ${totalDeficit}</span>`:'<span style="font-size:11px;color:var(--green);font-weight:600">✓ 空間足夠</span>'}
+        <span style="font-size:10px;color:var(--text3)">${styleBrief}</span>
       </div>
       <div style="padding:0 14px 14px 14px;display:grid;grid-template-columns:1fr 1fr;gap:14px">
         <div>
-          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">待安排新品 SKU（${needed}）</div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">待安排新品 SKU（${totalNeed}）</div>
           <div style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:4px">${plannerRenderNewSkuTable(newSkus)}</div>
         </div>
         <div>
           <div style="font-size:11px;color:var(--text2);margin-bottom:6px;font-weight:600">候選移走 SKU（${moveCandidates.length}，★ 為建議優先移走）</div>
-          <div style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:4px">${plannerRenderMoveCandidateTable(moveCandidates,deficit)}</div>
+          <div style="max-height:300px;overflow:auto;border:1px solid var(--border);border-radius:4px">${plannerRenderMoveCandidateTable(moveCandidates,totalDeficit)}</div>
         </div>
       </div>
     `;
@@ -2276,8 +2294,156 @@ function renderPlannerPhase2(){
     renderedCount++;
   });
   if(!renderedCount){
-    container.innerHTML='<div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px">走道報表內的走道無對應的「新品儲位安排」新品（類別不匹配）</div>';
+    const note=document.createElement('div');
+    note.style.cssText='padding:16px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px';
+    note.textContent='走道報表內的走道無對應的「新品儲位安排」新品（類別不匹配）';
+    container.appendChild(note);
   }
+}
+
+// ═══ Phase 3.1: 款級別分配演算法 ═══
+// 擺法 → 儲位材積 lookup (Phase 3.3 後續使用)
+const LAYOUT_VOLUMES={A:1.334,B:0.909,C:1.819,D:2.214,E:2.316,F:2.316,G:2.669,H:1.334,I:4.66,J:2.316,K:5.747,L:2.57,M:7.625,N:10.166,O:20.333,P:2.002,Q:3.389,R:2.57,S:0.141,T:3.389,U:0,V:172.088,W:3.53,X:4.236,Y:63.54,Z:0.035};
+
+// 將 ARRANGE_DATA 按款（前 5 碼）分組
+function plannerGroupArrangeByStyle(){
+  const codeToCat=Object.assign({},window.EMBEDDED_FW26_LOOKUP||{});
+  if(FW26_FILTER_DATA&&FW26_FILTER_DATA.length){
+    FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])codeToCat[r[0]]=r[3];});
+  }
+  const catToZone={};
+  FW26_CATS.forEach(c=>{if(c.類別)catToZone[c.類別]=String(c.儲區||'');});
+  const groups={};
+  ARRANGE_DATA.forEach(r=>{
+    const style=String(r.code||'').substring(0,5);
+    if(!style)return;
+    const cat=codeToCat[r.code]||'';
+    const zone=catToZone[cat]||'';
+    if(!groups[style]){
+      // 商品名稱去掉「-顏色」尾巴，方便顯示
+      const baseName=String(r.name||'').replace(/-[^-]+$/,'').trim();
+      groups[style]={style,name:baseName||r.name||'',cat,zone,skus:[]};
+    }
+    groups[style].skus.push(r);
+  });
+  return Object.values(groups);
+}
+
+// 款 → 走道分配演算法
+// Round 1: best-fit (剩餘最少) / Round 2: most-empty (允許 deficit)
+function plannerAssignStyles(styleGroups,aisleEmptyMap,presentAislesByZone){
+  const remain=Object.assign({},aisleEmptyMap);
+  const assignments=[];
+  // 按 SKU 數降冪（大的先放）
+  const sorted=[...styleGroups].sort((a,b)=>b.skus.length-a.skus.length);
+  const pending=[];
+  sorted.forEach(sg=>{
+    const need=sg.skus.length;
+    if(!sg.cat){assignments.push(Object.assign({},sg,{aisle:null,status:'no-cat',deficit:0}));return;}
+    if(!sg.zone){assignments.push(Object.assign({},sg,{aisle:null,status:'no-zone',deficit:0}));return;}
+    const candidateZones=sg.zone.split('.').map(z=>z.trim()).filter(z=>z);
+    let eligible=[];
+    candidateZones.forEach(z=>{
+      (presentAislesByZone[z]||[]).forEach(p=>{
+        if((remain[p]||0)>=need)eligible.push({prefix:p,leftover:(remain[p]||0)-need});
+      });
+    });
+    if(eligible.length){
+      // best-fit: 剩餘最少（最節省）
+      eligible.sort((a,b)=>a.leftover-b.leftover);
+      const chosen=eligible[0].prefix;
+      remain[chosen]-=need;
+      assignments.push(Object.assign({},sg,{aisle:chosen,status:'direct',deficit:0}));
+    }else{
+      // 檢查 zone 是否有走道
+      let hasZoneAisle=false;
+      candidateZones.forEach(z=>{if((presentAislesByZone[z]||[]).length>0)hasZoneAisle=true;});
+      if(!hasZoneAisle){
+        assignments.push(Object.assign({},sg,{aisle:null,status:'no-zone-aisle',deficit:0}));
+      }else{
+        pending.push(sg);
+      }
+    }
+  });
+  // Round 2: 剩下的款 → 找剩餘最多的走道
+  pending.forEach(sg=>{
+    const need=sg.skus.length;
+    const candidateZones=sg.zone.split('.').map(z=>z.trim()).filter(z=>z);
+    let candAisles=[];
+    candidateZones.forEach(z=>{
+      (presentAislesByZone[z]||[]).forEach(p=>{candAisles.push({prefix:p,empty:remain[p]||0});});
+    });
+    if(!candAisles.length){
+      assignments.push(Object.assign({},sg,{aisle:null,status:'no-zone-aisle',deficit:0}));
+      return;
+    }
+    candAisles.sort((a,b)=>b.empty-a.empty);
+    const chosen=candAisles[0].prefix;
+    const emptyHere=remain[chosen]||0;
+    const deficit=Math.max(0,need-emptyHere);
+    remain[chosen]=Math.max(0,emptyHere-need);
+    assignments.push(Object.assign({},sg,{aisle:chosen,status:deficit>0?'needs-move':'direct',deficit:deficit}));
+  });
+  return assignments;
+}
+
+// 渲染「分配計畫摘要」card
+function renderPlannerPlanSummary(assignments,container){
+  if(!assignments.length)return;
+  const totalStyles=assignments.length;
+  const totalSkus=assignments.reduce((s,a)=>s+a.skus.length,0);
+  const directCount=assignments.filter(a=>a.status==='direct').length;
+  const moveCount=assignments.filter(a=>a.status==='needs-move').length;
+  const noFitCount=assignments.filter(a=>['no-cat','no-zone','no-zone-aisle','no-fit'].indexOf(a.status)>=0).length;
+  const esc=s=>String(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  // 排序：已配置走道優先（按走道排），未配置在後
+  const sorted=[...assignments].sort((a,b)=>{
+    if(a.aisle&&!b.aisle)return -1;
+    if(!a.aisle&&b.aisle)return 1;
+    if(a.aisle!==b.aisle)return (a.aisle||'').localeCompare(b.aisle||'');
+    return (a.style||'').localeCompare(b.style||'');
+  });
+  let html=`<div class="card-title" style="padding:10px 14px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid var(--border)">
+    <span style="font-weight:700;font-size:14px;color:var(--accent)">分配計畫摘要</span>
+    <span style="font-size:11px;color:var(--text2)">總款數 <b>${totalStyles}</b> / 總 SKU <b>${totalSkus}</b></span>
+    <span style="font-size:11px;color:var(--green)">直接安排 <b>${directCount}</b></span>
+    ${moveCount>0?`<span style="font-size:11px;color:var(--accent)">需移位 <b>${moveCount}</b></span>`:''}
+    ${noFitCount>0?`<span style="font-size:11px;color:var(--red)">未配置 <b>${noFitCount}</b></span>`:''}
+  </div>
+  <div style="max-height:340px;overflow:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
+        <th style="padding:5px 10px;text-align:left;border-bottom:1px solid var(--border)">款號</th>
+        <th style="padding:5px 10px;text-align:left;border-bottom:1px solid var(--border)">商品名稱</th>
+        <th style="padding:5px 10px;text-align:center;border-bottom:1px solid var(--border)">類別</th>
+        <th style="padding:5px 10px;text-align:right;border-bottom:1px solid var(--border)">SKU 數</th>
+        <th style="padding:5px 10px;text-align:center;border-bottom:1px solid var(--border)">走道</th>
+        <th style="padding:5px 10px;text-align:left;border-bottom:1px solid var(--border)">狀態</th>
+      </tr></thead>
+      <tbody>`;
+  sorted.forEach(a=>{
+    let statusHtml='';
+    if(a.status==='direct')statusHtml='<span style="color:var(--green)">✓ 直接安排</span>';
+    else if(a.status==='needs-move')statusHtml=`<span style="color:var(--accent);font-weight:700">需移位 ${a.deficit} 個</span>`;
+    else if(a.status==='no-cat')statusHtml='<span style="color:var(--text3)">— 無類別對應</span>';
+    else if(a.status==='no-zone')statusHtml='<span style="color:var(--text3)">— 類別未設儲區</span>';
+    else if(a.status==='no-zone-aisle')statusHtml='<span style="color:var(--text3)">— 儲區無對應走道（未上傳走道報表）</span>';
+    else if(a.status==='no-fit')statusHtml='<span style="color:var(--red)">無空間</span>';
+    const bg=a.status==='needs-move'?'background:rgba(192,57,43,0.04)':(a.status==='direct'?'':'background:rgba(0,0,0,0.02)');
+    html+=`<tr style="border-bottom:1px solid rgba(221,216,208,.3);${bg}">
+      <td style="padding:4px 10px;font-weight:600">${esc(a.style)}</td>
+      <td style="padding:4px 10px;font-size:11px">${esc(a.name)}</td>
+      <td style="padding:4px 10px;text-align:center;color:var(--accent);font-size:11px">${esc(a.cat||'—')}</td>
+      <td style="padding:4px 10px;text-align:right">${a.skus.length}</td>
+      <td style="padding:4px 10px;text-align:center;font-weight:600">${a.aisle||'—'}</td>
+      <td style="padding:4px 10px;font-size:11px">${statusHtml}</td>
+    </tr>`;
+  });
+  html+=`</tbody></table></div>`;
+  const card=document.createElement('div');
+  card.className='card';
+  card.innerHTML=html;
+  container.appendChild(card);
 }
 
 function plannerComputeMoveCandidates(skus,deficit){
@@ -5258,6 +5424,12 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <div id="planner-phase2-container" style="display:flex;flex-direction:column;gap:12px">
         <div style="padding:20px;text-align:center;color:var(--text3);font-size:12px;background:var(--surface);border:1px dashed var(--border);border-radius:6px">需上傳走道報表 + 儲位總表，並且「新品儲位安排」tab 已有資料</div>
       </div>
+    </div>
+
+    <!-- Phase 3: 完整移位計畫 -->
+    <div id="planner-phase3-section">
+      <div style="font-size:13px;font-weight:600;margin:14px 0 6px 0;color:var(--accent)">完整移位計畫（Phase 3）</div>
+      <div id="planner-phase3-container"></div>
     </div>
   </div>
 </div>
