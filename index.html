@@ -2208,17 +2208,18 @@ function plnValidCols(cells,aisle){
   return [...cols].sort((a,b)=>a-b);
 }
 
-// ═══ Phase 1: 來源 SKU 挑選 (★ 款集中演算法 v3) ═══
+// ═══ Phase 1: 來源 SKU 挑選 (★ 演算法 v5: 過半擴展 + 平均競爭 + 拆色填餘) ═══
 // 邏輯:
-//   1. 計算每個 SKU 的分數、viable(銷售≥150)、Tier1(未到≥50+架上=0)
-//   2. 按款(5碼)分組
-//   3. 每款分類:
-//      - V≥2 個 viable → 形成 atomic block (一起挑)
-//      - V==1 + 同款其他多在 100-149 → 整款留下
-//      - V==1 + 同款其他多<100 → 1 viable 進 individual pool
-//      - V==0 → 進 individual pool
-//   4. 排序: blocks 按 (size DESC, total_score DESC); individuals 按 (Tier1 DESC, score DESC)
-//   5. 挑選: 整批 blocks 優先 (塞不下整批就跳過該款), 剩餘額度 fill individuals
+//   1. 每 SKU 計算 _total = 銷售庫存 + 未到量 (=「庫存件數」)
+//   2. 按款(5碼)分組. 對每款 K:
+//      - K_high = K 內 _total ≥ 100 的 SKU
+//      - 若 K_high 比例 ≥ 50% (該款過半 SKU 庫存達標)
+//      - 形成候選款, 平均 = K_high 平均 _total
+//   3. 候選款按 平均 DESC 排序
+//   4. 依序挑款:
+//      - 整款 K_high 塞得下 → 整款挑
+//      - 塞不下 → 拆款色(7碼), 款色內按色平均 DESC 排序, 能塞的色就挑, 不能塞跳過, 繼續下個款
+//   5. 還有餘額 → 散戶補 (Tier1 優先, 然後 _total DESC)
 function plnSelectSourceSKUs(config){
   const srcPrefixes=config.source.map(a=>a+'-');
   let rows=AISLE_REPORT_DATA.filter(r=>{
@@ -2232,15 +2233,16 @@ function plnSelectSourceSKUs(config){
     if(seen.has(sku))return false;
     seen.add(sku);return true;
   });
-  // 計算 metrics + 拷貝
+  // 計算 metrics
   rows=rows.map(r=>{
     const sales=Number(r['銷售庫存']||0),arr=Number(r['未到量']||0),sh=Number(r['架上數量']||0);
     return Object.assign({},r,{
       _sales:sales,
+      _total:sales+arr,                            // ★ 庫存件數 = 銷售 + 未到
       _score:sales+arr-sh,
       _tier1:(arr>=50)&&(sh<=0),
-      _viable:sales>=150,
-      _kuan:String(r['商品編號']||'').substring(0,5)
+      _kuan:String(r['商品編號']||'').substring(0,5),
+      _kc:String(r['商品編號']||'').substring(0,7)
     });
   });
   // 按款分組
@@ -2249,49 +2251,54 @@ function plnSelectSourceSKUs(config){
     if(!byKuan[r._kuan])byKuan[r._kuan]=[];
     byKuan[r._kuan].push(r);
   });
-  // 分類: blocks / individuals / 整款留下
-  const blocks=[]; const individuals=[];
+  // 候選款判定 (≥100 件 SKU 過半 + 平均庫存)
+  const candidates=[];
   Object.entries(byKuan).forEach(([k,group])=>{
-    const viable=group.filter(r=>r._viable);
-    const nonViable=group.filter(r=>!r._viable);
-    const V=viable.length;
-    if(V===0){
-      individuals.push(...group);
-    } else if(V===1){
-      if(nonViable.length===0){
-        // 單款只有 1 SKU → 個別挑
-        individuals.push(...viable);
-      } else {
-        // 看同款 non-viable 的分佈
-        const closeToThreshold=nonViable.filter(r=>r._sales>=100).length;
-        if(closeToThreshold/nonViable.length>=0.5){
-          // 同款其他大多在 100-149 → 整款留下 (不挑)
-        } else {
-          // 同款其他大多 <100 → 1 viable 可單獨挑
-          individuals.push(...viable);
-          individuals.push(...nonViable);
-        }
-      }
-    } else {
-      // V≥2: viable subset 形成 atomic block
-      blocks.push({kuan:k,skus:viable,size:V,score:viable.reduce((s,r)=>s+r._score,0)});
-      individuals.push(...nonViable);
+    const highSkus=group.filter(r=>r._total>=100);
+    if(highSkus.length===0)return;
+    if(highSkus.length/group.length>=0.5){
+      const avg=highSkus.reduce((s,r)=>s+r._total,0)/highSkus.length;
+      candidates.push({kuan:k,skus:highSkus,count:highSkus.length,avg});
     }
   });
-  // 排序
-  blocks.sort((a,b)=>(b.size-a.size)||(b.score-a.score));
-  individuals.sort((a,b)=>{
-    if(a._tier1!==b._tier1)return b._tier1-a._tier1;
-    return b._score-a._score;
-  });
-  // 挑選
+  candidates.sort((a,b)=>b.avg-a.avg);
+  // 競爭挑選: 整款 fit 整批挑, 不 fit 拆色挑
   const n=config.nToPick;
   const selected=[];
-  for(const b of blocks){
-    if(selected.length+b.size<=n)selected.push(...b.skus);
+  const selSet=new Set();
+  for(const K of candidates){
+    const remaining=n-selected.length;
+    if(remaining<=0)break;
+    if(K.count<=remaining){
+      K.skus.forEach(r=>{selected.push(r);selSet.add(r['商品編號']);});
+    } else {
+      // 拆款色
+      const byColor={};
+      K.skus.forEach(r=>{if(!byColor[r._kc])byColor[r._kc]=[];byColor[r._kc].push(r);});
+      const colorGroups=Object.entries(byColor).map(([kc,sks])=>({
+        kc,skus:sks,count:sks.length,
+        avg:sks.reduce((s,r)=>s+r._total,0)/sks.length
+      }));
+      colorGroups.sort((a,b)=>b.avg-a.avg);
+      for(const cg of colorGroups){
+        const rem=n-selected.length;
+        if(rem<=0)break;
+        if(cg.count<=rem){
+          cg.skus.forEach(r=>{selected.push(r);selSet.add(r['商品編號']);});
+        }
+      }
+    }
   }
-  const remaining=n-selected.length;
-  if(remaining>0)selected.push(...individuals.slice(0,remaining));
+  // 散戶補餘: 只挑 _total>=150 (避免誤挑 sub-100 邏輯 V SKU)
+  const rem2=n-selected.length;
+  if(rem2>0){
+    const others=rows.filter(r=>!selSet.has(r['商品編號'])&&r._total>=150);
+    others.sort((a,b)=>{
+      if(a._tier1!==b._tier1)return b._tier1-a._tier1;
+      return b._total-a._total;
+    });
+    others.slice(0,rem2).forEach(r=>selected.push(r));
+  }
   return selected;
 }
 
@@ -2422,7 +2429,7 @@ function plnPlaceGroup(cells,skusLayers,config,moves,opts){
       const dispSku=cells[cell].sku;
       const dispDest=plnFindDispDest(cells,cell,config,groupCells);  // ★ 排除 group cells
       if(dispDest){
-        moves.push({phase:'INTERNAL_DISPLACEMENT',sku:dispSku,src:cell,dst:dispDest});
+        moves.push({phase:'INTERNAL_DISPLACEMENT',sku:dispSku,src:cell,dst:dispDest,dstLayout:(cells[dispDest]||{}).layout||''});
         cells[dispDest].sku=dispSku;cells[dispDest].locked=true;
         cells[cell].sku=null;
       }
@@ -2431,7 +2438,7 @@ function plnPlaceGroup(cells,skusLayers,config,moves,opts){
     if(srcCell){cells[srcCell].sku=null;cells[srcCell].info=null;}
     cells[cell].sku=sku;
     cells[cell].locked=true;
-    moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:cell});
+    moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:cell,dstLayout:(cells[cell]||{}).layout||''});
   });
   return res;
 }
@@ -2454,7 +2461,7 @@ function plnRunEngine(config,xxSalesMaxOverride){
     xxEmpties.sort();
     cands.forEach((c,i)=>{
       if(i>=xxEmpties.length)return;
-      moves.push({phase:'XX_OVERFLOW',sku:c.sku,src:c.cell,dst:xxEmpties[i]});
+      moves.push({phase:'XX_OVERFLOW',sku:c.sku,src:c.cell,dst:xxEmpties[i],dstLayout:(cells[xxEmpties[i]]||{}).layout||''});
       cells[c.cell].sku=null;cells[c.cell].info=null;
       cells[xxEmpties[i]].sku=c.sku;cells[xxEmpties[i]].locked=true;  // ★ 鎖定
     });
@@ -2642,8 +2649,7 @@ function plannerExportResult(){
       s['未到量']||0,s['未抓貨']||0,s['保留數量']||0,s['銷售庫存']||0,s['架上數量']||0]);
   });
   // === Sheet 2: 待移 (順序: XX → 內部 → 主要) ===
-  const masterLayouts={};
-  Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(({slot,layout})=>{masterLayouts[slot]=layout||'';}));
+  // ★ 擺法用 moves 內 dstLayout (引擎產生時抓 cells[dst].layout, 避免 STORAGE_MASTER 跨 sheet 衝突)
   const phaseOrder=['XX_OVERFLOW','INTERNAL_DISPLACEMENT','SOURCE_TO_DEST'];
   const sortedMoves=[];
   phaseOrder.forEach(ph=>{
@@ -2664,7 +2670,7 @@ function plannerExportResult(){
     for(let g=0;g<GROUPS;g++){
       const idx=g*rpg+i;
       const m=sortedMoves[idx];
-      if(m)row.push(m.sku,m.dst,masterLayouts[m.dst]||'',m.src||'');
+      if(m)row.push(m.sku,m.dst,m.dstLayout||'',m.src||'');
       else row.push('','','','');
       if(g<GROUPS-1)row.push('');
     }
