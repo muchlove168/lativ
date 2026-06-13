@@ -2208,33 +2208,91 @@ function plnValidCols(cells,aisle){
   return [...cols].sort((a,b)=>a-b);
 }
 
-// ═══ Phase 1: 來源 SKU 挑選 (★ 加入 dedup) ═══
+// ═══ Phase 1: 來源 SKU 挑選 (★ 款集中演算法 v3) ═══
+// 邏輯:
+//   1. 計算每個 SKU 的分數、viable(銷售≥150)、Tier1(未到≥50+架上=0)
+//   2. 按款(5碼)分組
+//   3. 每款分類:
+//      - V≥2 個 viable → 形成 atomic block (一起挑)
+//      - V==1 + 同款其他多在 100-149 → 整款留下
+//      - V==1 + 同款其他多<100 → 1 viable 進 individual pool
+//      - V==0 → 進 individual pool
+//   4. 排序: blocks 按 (size DESC, total_score DESC); individuals 按 (Tier1 DESC, score DESC)
+//   5. 挑選: 整批 blocks 優先 (塞不下整批就跳過該款), 剩餘額度 fill individuals
 function plnSelectSourceSKUs(config){
   const srcPrefixes=config.source.map(a=>a+'-');
   let rows=AISLE_REPORT_DATA.filter(r=>{
     const c=String(r['儲位']||'');
     return srcPrefixes.some(p=>c.startsWith(p));
   });
-  // ★ dedup by 商品編號 (防止資料有重複列)
+  // dedup by 商品編號
   const seen=new Set();
   rows=rows.filter(r=>{
     const sku=String(r['商品編號']||'');
     if(seen.has(sku))return false;
     seen.add(sku);return true;
   });
+  // 計算 metrics + 拷貝
   rows=rows.map(r=>{
     const sales=Number(r['銷售庫存']||0),arr=Number(r['未到量']||0),sh=Number(r['架上數量']||0);
-    const score=sales+arr-sh;
     return Object.assign({},r,{
-      _score:score,
-      _tier1:(arr>=50)&&(sh<=0)
+      _sales:sales,
+      _score:sales+arr-sh,
+      _tier1:(arr>=50)&&(sh<=0),
+      _viable:sales>=150,
+      _kuan:String(r['商品編號']||'').substring(0,5)
     });
-  }).sort((a,b)=>{
+  });
+  // 按款分組
+  const byKuan={};
+  rows.forEach(r=>{
+    if(!byKuan[r._kuan])byKuan[r._kuan]=[];
+    byKuan[r._kuan].push(r);
+  });
+  // 分類: blocks / individuals / 整款留下
+  const blocks=[]; const individuals=[];
+  Object.entries(byKuan).forEach(([k,group])=>{
+    const viable=group.filter(r=>r._viable);
+    const nonViable=group.filter(r=>!r._viable);
+    const V=viable.length;
+    if(V===0){
+      individuals.push(...group);
+    } else if(V===1){
+      if(nonViable.length===0){
+        // 單款只有 1 SKU → 個別挑
+        individuals.push(...viable);
+      } else {
+        // 看同款 non-viable 的分佈
+        const closeToThreshold=nonViable.filter(r=>r._sales>=100).length;
+        if(closeToThreshold/nonViable.length>=0.5){
+          // 同款其他大多在 100-149 → 整款留下 (不挑)
+        } else {
+          // 同款其他大多 <100 → 1 viable 可單獨挑
+          individuals.push(...viable);
+          individuals.push(...nonViable);
+        }
+      }
+    } else {
+      // V≥2: viable subset 形成 atomic block
+      blocks.push({kuan:k,skus:viable,size:V,score:viable.reduce((s,r)=>s+r._score,0)});
+      individuals.push(...nonViable);
+    }
+  });
+  // 排序
+  blocks.sort((a,b)=>(b.size-a.size)||(b.score-a.score));
+  individuals.sort((a,b)=>{
     if(a._tier1!==b._tier1)return b._tier1-a._tier1;
     return b._score-a._score;
   });
-  if(config.nToPick>0)rows=rows.slice(0,config.nToPick);
-  return rows;
+  // 挑選
+  const n=config.nToPick;
+  const selected=[];
+  for(const b of blocks){
+    if(selected.length+b.size<=n)selected.push(...b.skus);
+  }
+  const remaining=n-selected.length;
+  if(remaining>0)selected.push(...individuals.slice(0,remaining));
+  return selected;
 }
 
 function plnAuditCapacity(cells,config){
@@ -2326,12 +2384,14 @@ function plnFindSkuCell(cells,sku,sourceAisles){
   return null;  // ★ 不再 fallback 到 C01，避免找到剛放置的 SKU
 }
 
-// ★ displacement 目的地: 只找 empty (非 locked) cells
-function plnFindDispDest(cells,srcCell,config){
+// ★ displacement 目的地: 只找 empty (非 locked) cells, 排除 group 預定要佔的 cells
+function plnFindDispDest(cells,srcCell,config,excludeCells){
+  excludeCells=excludeCells||new Set();
   const src=cells[srcCell];
   const cands=[];
   Object.values(cells).forEach(cs=>{
-    if(cs.sku||cs.locked)return;  // ★ skip locked
+    if(cs.sku||cs.locked)return;
+    if(excludeCells.has(cs.cell))return;  // ★ 排除 group 預定 cells (避免 chained displacement)
     if(!config.destination.includes(cs.aisle))return;
     let dist=999;
     if(cs.aisle===src.aisle && config.aisleGeometry[cs.aisle]){
@@ -2346,26 +2406,31 @@ function plnFindDispDest(cells,srcCell,config){
   return cands[0].cell;
 }
 
-// ★ 放置: 每個 cell 放完後立即 locked=true
+// ★ 放置: 每個 cell 放完後立即 locked=true; displace dest 排除 group 預定 cells (防 chain)
 function plnPlaceGroup(cells,skusLayers,config,moves,opts){
   const res=plnFindBestCol(cells,skusLayers,config,opts);
   if(!res)return null;
+  // ★ 算出 group 預定要佔的 cells (find_disp_dest 排除這些)
+  const groupCells=new Set();
+  Object.values(res.assignments).forEach(L=>{
+    groupCells.add(plnCellId(res.aisle,res.col,L));
+  });
   Object.entries(res.assignments).forEach(([sku,L])=>{
     const cell=plnCellId(res.aisle,res.col,L);
     if(cells[cell].sku){
       // 此 cell 還有原 C01 SKU (不會 locked，因為 find_col 已排除 locked)
       const dispSku=cells[cell].sku;
-      const dispDest=plnFindDispDest(cells,cell,config);
+      const dispDest=plnFindDispDest(cells,cell,config,groupCells);  // ★ 排除 group cells
       if(dispDest){
         moves.push({phase:'INTERNAL_DISPLACEMENT',sku:dispSku,src:cell,dst:dispDest});
-        cells[dispDest].sku=dispSku;cells[dispDest].locked=true;  // ★ 鎖定
+        cells[dispDest].sku=dispSku;cells[dispDest].locked=true;
         cells[cell].sku=null;
       }
     }
     const srcCell=plnFindSkuCell(cells,sku,config.source);
     if(srcCell){cells[srcCell].sku=null;cells[srcCell].info=null;}
     cells[cell].sku=sku;
-    cells[cell].locked=true;  // ★ 鎖定剛放置的 cell
+    cells[cell].locked=true;
     moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:cell});
   });
   return res;
@@ -2569,15 +2634,14 @@ function plannerRenderResult(r){
 function plannerExportResult(){
   if(!PLN_LAST_RESULT){alert('先執行計畫');return;}
   const r=PLN_LAST_RESULT;
-  // === Sheet 1: 挑選清單 ===
-  const cols1=['商品編號','商品名稱','顏色','尺寸','儲位','未到量','未抓貨','保留數量','銷售庫存','架上數量','分數','Tier1'];
+  // === Sheet 1: 挑選清單 (★ 按商品編號升冪排序, 刪除分數+Tier1 兩欄) ===
+  const cols1=['商品編號','商品名稱','顏色','尺寸','儲位','未到量','未抓貨','保留數量','銷售庫存','架上數量'];
   const aoa1=[cols1];
-  [...r.selected].sort((a,b)=>b._score-a._score).forEach(s=>{
+  [...r.selected].sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號']))).forEach(s=>{
     aoa1.push([s['商品編號'],s['商品名稱'],s['顏色'],s['尺寸'],s['儲位'],
-      s['未到量']||0,s['未抓貨']||0,s['保留數量']||0,s['銷售庫存']||0,s['架上數量']||0,
-      s._score,s._tier1?'★':'']);
+      s['未到量']||0,s['未抓貨']||0,s['保留數量']||0,s['銷售庫存']||0,s['架上數量']||0]);
   });
-  // === Sheet 2: 待移 (★ 順序: XX → 內部 → 主要) ===
+  // === Sheet 2: 待移 (順序: XX → 內部 → 主要) ===
   const masterLayouts={};
   Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(({slot,layout})=>{masterLayouts[slot]=layout||'';}));
   const phaseOrder=['XX_OVERFLOW','INTERNAL_DISPLACEMENT','SOURCE_TO_DEST'];
@@ -2606,14 +2670,28 @@ function plannerExportResult(){
     }
     aoa2.push(row);
   }
+  // ★ 套用字體 Microsoft JhengHei 11 (用 xlsx-js-style 設 cell.s)
+  function applyFont(ws){
+    if(!ws['!ref'])return;
+    const range=XLSX.utils.decode_range(ws['!ref']);
+    for(let R=range.s.r;R<=range.e.r;R++){
+      for(let C=range.s.c;C<=range.e.c;C++){
+        const ref=XLSX.utils.encode_cell({r:R,c:C});
+        if(!ws[ref])ws[ref]={t:'s',v:''};
+        ws[ref].s={font:{name:'Microsoft JhengHei',sz:11}};
+      }
+    }
+  }
   const wb=XLSX.utils.book_new();
   const ws1=XLSX.utils.aoa_to_sheet(aoa1);
-  ws1['!cols']=[{wch:11},{wch:30},{wch:8},{wch:6},{wch:11},{wch:7},{wch:7},{wch:8},{wch:8},{wch:8},{wch:7},{wch:6}];
+  ws1['!cols']=[{wch:11},{wch:30},{wch:8},{wch:6},{wch:11},{wch:7},{wch:7},{wch:8},{wch:8},{wch:8}];
+  applyFont(ws1);
   XLSX.utils.book_append_sheet(wb,ws1,'挑選清單');
   const ws2=XLSX.utils.aoa_to_sheet(aoa2);
   const cw=[];
   for(let g=0;g<GROUPS;g++){cw.push({wch:11},{wch:11},{wch:6},{wch:11});if(g<GROUPS-1)cw.push({wch:2});}
   ws2['!cols']=cw;
+  applyFont(ws2);
   XLSX.utils.book_append_sheet(wb,ws2,'待移');
   const t=new Date();
   const dateStr=t.getFullYear()+String(t.getMonth()+1).padStart(2,'0')+String(t.getDate()).padStart(2,'0');
