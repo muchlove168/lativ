@@ -2220,12 +2220,25 @@ function plnValidCols(cells,aisle){
 //      - 整款 K_high 塞得下 → 整款挑
 //      - 塞不下 → 拆款色(7碼), 款色內按色平均 DESC 排序, 能塞的色就挑, 不能塞跳過, 繼續下個款
 //   5. 還有餘額 → 散戶補 (Tier1 優先, 然後 _total DESC)
-function plnSelectSourceSKUs(config){
-  const srcPrefixes=config.source.map(a=>a+'-');
-  let rows=AISLE_REPORT_DATA.filter(r=>{
-    const c=String(r['儲位']||'');
-    return srcPrefixes.some(p=>c.startsWith(p));
-  });
+function plnSelectSourceSKUs(config,cells){
+  // ★ 多步驟: 從 cells 取目前在 source 走道內的 SKU; cells 缺時 (測試/單步) fallback 到 AISLE_REPORT_DATA
+  let rows;
+  if(cells){
+    rows=[];
+    Object.values(cells).forEach(cs=>{
+      if(!cs.sku)return;
+      if(!config.source.includes(cs.aisle))return;
+      const info=cs.info||{};
+      // 重建 row: info 內含原 ABC 元數據, 補上目前儲位
+      rows.push(Object.assign({},info,{'商品編號':cs.sku,'儲位':cs.cell}));
+    });
+  } else {
+    const srcPrefixes=config.source.map(a=>a+'-');
+    rows=AISLE_REPORT_DATA.filter(r=>{
+      const c=String(r['儲位']||'');
+      return srcPrefixes.some(p=>c.startsWith(p));
+    });
+  }
   // dedup by 商品編號
   const seen=new Set();
   rows=rows.filter(r=>{
@@ -2360,21 +2373,22 @@ function plnFindBestCol(cells,groupSL,config,opts){
   });
   const best=cands[0];
   const empties=new Set(best.empty),occ=new Set(best.occ),used=new Set();
+  const avail=new Set([...empties,...occ]);  // ★ 全部可用 layer (含 occupied, 不含 locked)
   const sorted=[...groupSL].sort((a,b)=>((a[1]||99)-(b[1]||99))||(a[0]<b[0]?-1:1));
   const assignments={};
-  // Pass 1: 尺寸→層 (only if empty)
+  // Pass 1: 尺寸→對應層 (含 occupied, 因為該 column 內 occupied cells 本來就要被 displace)
   for(const [sku,tL] of sorted){
     if(tL==null||used.has(tL))continue;
-    if(empties.has(tL)){assignments[sku]=tL;used.add(tL);}
+    if(avail.has(tL)){assignments[sku]=tL;used.add(tL);}
   }
-  // Pass 2: 任何 empty
+  // Pass 2: 剩餘 empty (對應不到的 SKU 優先拿空格, 避免製造額外 displacement)
   for(const [sku] of sorted){
     if(sku in assignments)continue;
     for(const L of [...empties].sort()){
       if(!used.has(L)){assignments[sku]=L;used.add(L);break;}
     }
   }
-  // Pass 3: 任何 occupied (=會 displacement, 但 NEVER locked)
+  // Pass 3: 剩餘 occupied (=會 displacement, 但 NEVER locked)
   for(const [sku] of sorted){
     if(sku in assignments)continue;
     for(const L of [...occ].sort()){
@@ -2392,7 +2406,7 @@ function plnFindSkuCell(cells,sku,sourceAisles){
 }
 
 // ★ displacement 目的地: 只找 empty (非 locked) cells, 排除 group 預定要佔的 cells
-function plnFindDispDest(cells,srcCell,config,excludeCells){
+function plnFindDispDest(cells,srcCell,config,excludeCells,targetLayer){
   excludeCells=excludeCells||new Set();
   const src=cells[srcCell];
   const cands=[];
@@ -2406,14 +2420,16 @@ function plnFindDispDest(cells,srcCell,config,excludeCells){
       dist=plnAisleDistance(src.col,cs.col,g.min,g.max);
     }
     const lay=cs.layout===src.layout?0:1;
-    cands.push({cell:cs.cell,sameAisle:cs.aisle===src.aisle?0:1,lay,dist,col:cs.col});
+    // ★ targetLayer 對應度 (0=match, 1=no match) — 列為最高優先級
+    const layerMatch=(targetLayer!=null && cs.layer===targetLayer)?0:1;
+    cands.push({cell:cs.cell,layerMatch,sameAisle:cs.aisle===src.aisle?0:1,lay,dist,col:cs.col});
   });
   if(!cands.length)return null;
-  cands.sort((a,b)=>(a.sameAisle-b.sameAisle)||(a.lay-b.lay)||(a.dist-b.dist)||(a.col-b.col));
+  cands.sort((a,b)=>(a.layerMatch-b.layerMatch)||(a.sameAisle-b.sameAisle)||(a.lay-b.lay)||(a.dist-b.dist)||(a.col-b.col));
   return cands[0].cell;
 }
 
-// ★ 放置: 每個 cell 放完後立即 locked=true; displace dest 排除 group 預定 cells (防 chain)
+// ★ 放置: 每個 cell 放完後立即 locked=true; displace 走 batch matching (對應 layer 數最大化)
 function plnPlaceGroup(cells,skusLayers,config,moves,opts){
   const res=plnFindBestCol(cells,skusLayers,config,opts);
   if(!res)return null;
@@ -2422,32 +2438,107 @@ function plnPlaceGroup(cells,skusLayers,config,moves,opts){
   Object.values(res.assignments).forEach(L=>{
     groupCells.add(plnCellId(res.aisle,res.col,L));
   });
+
+  // ────────────────────────────────────────────────────────────
+  // Step 1: 收集所有要被 displace 的 (sku, srcCell, targetLayer)
+  // ────────────────────────────────────────────────────────────
+  const toDisp=[];
   Object.entries(res.assignments).forEach(([sku,L])=>{
     const cell=plnCellId(res.aisle,res.col,L);
     if(cells[cell].sku){
-      // 此 cell 還有原 C01 SKU (不會 locked，因為 find_col 已排除 locked)
       const dispSku=cells[cell].sku;
-      const dispDest=plnFindDispDest(cells,cell,config,groupCells);  // ★ 排除 group cells
-      if(dispDest){
-        moves.push({phase:'INTERNAL_DISPLACEMENT',sku:dispSku,src:cell,dst:dispDest,dstLayout:(cells[dispDest]||{}).layout||''});
-        cells[dispDest].sku=dispSku;cells[dispDest].locked=true;
-        cells[cell].sku=null;
-      }
+      const dispInfo=cells[cell].info||{};
+      const dispTargetL=plnGetTargetLayer(dispSku,dispInfo['尺寸']);
+      toDisp.push({srcCell:cell,sku:dispSku,info:dispInfo,targetL:dispTargetL});
     }
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // Step 2: Batch matching — 對應 layer match 數最大化
+  // 策略: 先處理「對應 layer 候選數較少」的 SKU (避免被搶光)
+  // 對每個 SKU 計算 layer-matched candidates (= destination 走道內 layer==target 且未 used 的 empty/non-locked cells)
+  // 依序處理 SKU, 每個取 layer match 的最近 dest; 沒 layer match 則 fallthrough
+  // ────────────────────────────────────────────────────────────
+  const usedDest=new Set();
+  const dispMoves=[];  // {srcCell, sku, info, destCell}
+  if(toDisp.length>0){
+    // 收集所有候選 disp dest cells (排除 groupCells, 且非 locked 非 occupied)
+    const allDests=Object.values(cells).filter(cs=>
+      !cs.sku && !cs.locked && !groupCells.has(cs.cell) && config.destination.includes(cs.aisle)
+    );
+    // 對每個 toDisp SKU, 計算其 layer-matched dest 數量
+    const enriched=toDisp.map(d=>{
+      const matches=allDests.filter(cs=>d.targetL!=null && cs.layer===d.targetL);
+      return {...d,matchCount:matches.length};
+    });
+    // 依 matchCount asc 處理 (有對應且候選少的優先佔; matchCount=0 排最後當餘數)
+    enriched.sort((a,b)=>{
+      const ma=a.matchCount===0?9999:a.matchCount;
+      const mb=b.matchCount===0?9999:b.matchCount;
+      return (ma-mb)||(a.srcCell<b.srcCell?-1:1);
+    });
+    for(const d of enriched){
+      // 重算可用 dest (扣掉 usedDest)
+      const free=allDests.filter(cs=>!usedDest.has(cs.cell));
+      if(!free.length)continue;
+      // 排序: layerMatch → sameAisle → sameLayout → dist → col
+      const src=cells[d.srcCell];
+      const scored=free.map(cs=>{
+        const layerMatch=(d.targetL!=null && cs.layer===d.targetL)?0:1;
+        const sameAisle=cs.aisle===src.aisle?0:1;
+        const sameLay=cs.layout===src.layout?0:1;
+        let dist=999;
+        if(cs.aisle===src.aisle && config.aisleGeometry[cs.aisle]){
+          const g=config.aisleGeometry[cs.aisle];
+          dist=plnAisleDistance(src.col,cs.col,g.min,g.max);
+        }
+        return {cs,layerMatch,sameAisle,sameLay,dist,col:cs.col};
+      });
+      scored.sort((a,b)=>(a.layerMatch-b.layerMatch)||(a.sameAisle-b.sameAisle)||(a.sameLay-b.sameLay)||(a.dist-b.dist)||(a.col-b.col));
+      const pick=scored[0].cs;
+      usedDest.add(pick.cell);
+      dispMoves.push({srcCell:d.srcCell,sku:d.sku,info:d.info,destCell:pick.cell});
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // Step 3: 套用 displacement moves (info 跟著 sku 走)
+  // ────────────────────────────────────────────────────────────
+  dispMoves.forEach(dm=>{
+    moves.push({phase:'INTERNAL_DISPLACEMENT',sku:dm.sku,src:dm.srcCell,dst:dm.destCell,dstLayout:(cells[dm.destCell]||{}).layout||''});
+    cells[dm.destCell].sku=dm.sku;
+    cells[dm.destCell].info=dm.info;  // ★ info 跟著搬
+    cells[dm.destCell].locked=true;
+    cells[dm.srcCell].sku=null;
+    cells[dm.srcCell].info=null;
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // Step 4: 套用 SOURCE_TO_DEST moves (從 source 走道搬 SKU 到 res.col)
+  // ────────────────────────────────────────────────────────────
+  Object.entries(res.assignments).forEach(([sku,L])=>{
+    const cell=plnCellId(res.aisle,res.col,L);
     const srcCell=plnFindSkuCell(cells,sku,config.source);
-    if(srcCell){cells[srcCell].sku=null;cells[srcCell].info=null;}
+    let srcInfo=null;
+    if(srcCell){
+      srcInfo=cells[srcCell].info;
+      cells[srcCell].sku=null;
+      cells[srcCell].info=null;
+    }
     cells[cell].sku=sku;
+    cells[cell].info=srcInfo;  // ★ info 跟著搬到新 cell
     cells[cell].locked=true;
     moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:cell,dstLayout:(cells[cell]||{}).layout||''});
   });
   return res;
 }
 
-// 引擎主執行
-function plnRunEngine(config,xxSalesMaxOverride){
-  const cells=plnBuildState();
+// 引擎主執行 (★ 支援 initialCells: 多步驟串接時, 第 2+ step 從上一步結束狀態起算)
+function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
+  // 多步驟: 若 initialCells 提供, 用 deep clone 作為起點; 否則從 STORAGE_MASTER 重建
+  const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
   const moves=[];
-  const selected=plnSelectSourceSKUs(config);
+  const selected=initialSelected||plnSelectSourceSKUs(config,cells);
   const capacity=plnAuditCapacity(cells,config);
   const deficit=selected.length-capacity.total;
   const xxSalesMax=xxSalesMaxOverride!=null?xxSalesMaxOverride:5;
@@ -2461,9 +2552,12 @@ function plnRunEngine(config,xxSalesMaxOverride){
     xxEmpties.sort();
     cands.forEach((c,i)=>{
       if(i>=xxEmpties.length)return;
+      const xxInfo=cells[c.cell].info;  // ★ 保留 info
       moves.push({phase:'XX_OVERFLOW',sku:c.sku,src:c.cell,dst:xxEmpties[i],dstLayout:(cells[xxEmpties[i]]||{}).layout||''});
       cells[c.cell].sku=null;cells[c.cell].info=null;
-      cells[xxEmpties[i]].sku=c.sku;cells[xxEmpties[i]].locked=true;  // ★ 鎖定
+      cells[xxEmpties[i]].sku=c.sku;
+      cells[xxEmpties[i]].info=xxInfo;  // ★ info 跟著搬
+      cells[xxEmpties[i]].locked=true;
     });
   }
   
@@ -2500,10 +2594,24 @@ function plnRunEngine(config,xxSalesMaxOverride){
     }
   });
   
-  return {selected,capacity,deficit,moves,failed,config,xxSalesMax};
+  // ★ 回傳 finalCells, 供多步驟串接
+  return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells};
 }
 
-// ═══ UI ═══
+// ★ Deep clone cells (multi-step 用, 避免上一步 state 污染後續)
+function plnCloneCells(src){
+  const out={};
+  Object.entries(src).forEach(([k,v])=>{
+    out[k]={cell:v.cell,aisle:v.aisle,col:v.col,layer:v.layer,layout:v.layout,sku:v.sku,info:v.info,locked:false};
+    // locked 重置: 一個 step 內的 locked 是防 chained displacement, 跨 step 不繼承
+  });
+  return out;
+}
+
+// ═══ UI: 多步驟 (pipeline) ═══
+// PLN_STEPS: 預設 1 個 step, 使用者可加減
+let PLN_STEPS_COUNT=1;
+
 function plannerRenderConfigUI(){
   const body=document.getElementById('planner-config-body');
   if(!AISLE_REPORT_DATA.length||!Object.keys(STORAGE_MASTER||{}).length){
@@ -2522,85 +2630,165 @@ function plannerRenderConfigUI(){
     return;
   }
   
-  const mkCb=(grp,a,checked)=>`<label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;margin-right:10px;cursor:pointer"><input type="checkbox" data-grp="${grp}" value="${a}" ${checked?'checked':''}>${a}</label>`;
-  // 預設: 第一個走道 = source, 其他 = destination
-  const defaultSrc=[aisles[0]],defaultDst=aisles.slice(1);
-  const srcHtml=aisles.map(a=>mkCb('src',a,defaultSrc.includes(a))).join('');
-  const dstHtml=aisles.map(a=>mkCb('dst',a,defaultDst.includes(a))).join('');
-  const ovfNote=overflow.length?`<span style="color:var(--text3);font-size:11px">　溢位區: ${overflow.join('+')} (自動使用)</span>`:'<span style="color:var(--text3);font-size:11px">　溢位區: 無 XX 區可用</span>';
-  
+  // ★ 多步驟: 重置為 1 步, 渲染 step 容器 + 控制列
+  PLN_STEPS_COUNT=1;
+  const ovfTxt=overflow.length?`溢位區: ${overflow.join('+')} (自動)`:'溢位區: 無 XX 區';
   body.innerHTML=`
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div style="display:grid;grid-template-columns:60px 1fr;gap:6px 10px;align-items:center;font-size:12px">
-        <span style="color:var(--text2)">來源</span><div>${srcHtml}</div>
-        <span style="color:var(--text2)">目標</span><div>${dstHtml}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;padding-top:6px;border-top:1px solid var(--border)">
-        <span style="font-size:12px;color:var(--text2)">挑選數量</span>
-        <input id="pln-n-pick" type="number" value="260" style="width:80px;padding:3px 6px;font-size:12px">
-        ${ovfNote}
-        <button onclick="plannerRunScenario()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ 執行</button>
-      </div>
+    <div id="pln-steps-wrap" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div style="display:flex;align-items:center;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border)">
+      <button onclick="plannerAddStep()" class="upload-btn" style="font-size:12px;padding:4px 12px">+ 新增步驟</button>
+      <span style="color:var(--text3);font-size:11px">${ovfTxt}</span>
+      <button onclick="plannerRunAllSteps()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
     </div>
   `;
+  plannerRenderStep(1,aisles,[aisles[0]],aisles.slice(1),260);
 }
 
-function plannerCollectConfig(){
-  const collect=grp=>[...document.querySelectorAll(`#planner-config-body input[data-grp="${grp}"]:checked`)].map(x=>x.value);
+function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN){
+  const wrap=document.getElementById('pln-steps-wrap');
+  const mkCb=(grp,a,checked)=>`<label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;margin-right:8px;cursor:pointer"><input type="checkbox" data-step="${idx}" data-grp="${grp}" value="${a}" ${checked?'checked':''}>${a}</label>`;
+  const srcHtml=aisles.map(a=>mkCb('src',a,defaultSrc.includes(a))).join('');
+  const dstHtml=aisles.map(a=>mkCb('dst',a,defaultDst.includes(a))).join('');
+  const div=document.createElement('div');
+  div.id=`pln-step-${idx}`;
+  div.style.cssText='border:1px solid var(--border);border-radius:5px;padding:8px 10px;background:rgba(0,0,0,0.015)';
+  div.innerHTML=`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span style="font-weight:700;font-size:12px;color:var(--accent)">Step ${idx}</span>
+      <span id="pln-step-${idx}-status" style="font-size:11px;color:var(--text3)"></span>
+      <button onclick="plannerRemoveStep(${idx})" style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:3px;font-size:11px;padding:2px 8px;cursor:pointer" title="移除此步驟">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:50px 1fr;gap:4px 8px;align-items:center;font-size:12px">
+      <span style="color:var(--text2)">來源</span><div>${srcHtml}</div>
+      <span style="color:var(--text2)">目標</span><div>${dstHtml}</div>
+      <span style="color:var(--text2)">N</span>
+      <div><input type="number" data-step="${idx}" data-grp="n" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:12px"></div>
+    </div>
+  `;
+  wrap.appendChild(div);
+}
+
+function plannerAddStep(){
+  const aisles=plnGetAislesInReport();
+  PLN_STEPS_COUNT++;
+  // 預設 source=第一個未被前步驟用過的, 但簡化: 預設全空, 讓使用者勾
+  plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],50);
+}
+
+function plannerRemoveStep(idx){
+  if(PLN_STEPS_COUNT<=1){alert('至少要保留一個步驟');return;}
+  const el=document.getElementById(`pln-step-${idx}`);
+  if(el)el.remove();
+  // 重新編號 (簡單做法: 不重新編號, 留間隙也 OK; 但顯示會錯亂)
+  // 改為: 抓所有現存 pln-step-N, 重新賦予序號
+  const remaining=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
+  remaining.forEach((d,i)=>{
+    const newIdx=i+1;
+    d.id=`pln-step-${newIdx}`;
+    d.querySelector('span').textContent=`Step ${newIdx}`;
+    const statusSpan=d.querySelector(`[id^="pln-step-"][id$="-status"]`);
+    if(statusSpan)statusSpan.id=`pln-step-${newIdx}-status`;
+    const removeBtn=d.querySelector('button');
+    if(removeBtn)removeBtn.setAttribute('onclick',`plannerRemoveStep(${newIdx})`);
+    d.querySelectorAll('[data-step]').forEach(inp=>inp.setAttribute('data-step',String(newIdx)));
+  });
+  PLN_STEPS_COUNT=remaining.length;
+}
+
+function plannerCollectStepConfig(idx){
+  const collect=grp=>[...document.querySelectorAll(`#pln-step-${idx} input[data-step="${idx}"][data-grp="${grp}"]:checked`)].map(x=>x.value);
+  const nInp=document.querySelector(`#pln-step-${idx} input[data-grp="n"]`);
   return {
     source:collect('src'),
     destination:collect('dst'),
     overflow:plnGetOverflowAisles(),
-    nToPick:parseInt(document.getElementById('pln-n-pick').value)||0,
+    nToPick:parseInt(nInp?nInp.value:'0')||0,
     aisleGeometry:plnGetAisleGeometry(),
   };
 }
 
 let PLN_LAST_RESULT=null;
 
-function plannerRunScenario(){
-  const config=plannerCollectConfig();
-  if(!config.source.length){alert('請選擇至少一個來源走道');return;}
-  if(!config.destination.length){alert('請選擇至少一個目標走道');return;}
+function plannerRunAllSteps(){
+  // 收集所有 step 設定
+  const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
+  if(!stepDivs.length){alert('沒有步驟');return;}
+  const stepConfigs=stepDivs.map((d,i)=>{
+    const idx=parseInt(d.id.replace('pln-step-',''));
+    return {idx,config:plannerCollectStepConfig(idx)};
+  });
+  // 驗證每 step
+  for(const s of stepConfigs){
+    if(!s.config.source.length){alert(`Step ${s.idx}: 請選擇至少一個來源走道`);return;}
+    if(!s.config.destination.length){alert(`Step ${s.idx}: 請選擇至少一個目標走道`);return;}
+  }
   
-  // 預檢: 容量缺口 + XX 候選是否足夠
-  const tmpCells=plnBuildState();
-  const tmpSelected=plnSelectSourceSKUs(config);
-  const tmpCap=plnAuditCapacity(tmpCells,config);
-  const deficit=tmpSelected.length-tmpCap.total;
+  // 依序執行: 每 step 用上一 step 結束的 cells 作為起點
+  let cells=null;  // 第一步 null → plnRunEngine 內部 plnBuildState
+  const allResults=[];  // 每 step 的 result
+  const mergedMoves=[];
+  const mergedSelected=[];
   
-  let xxSalesMax=5;
-  if(deficit>0 && config.overflow.length){
-    const strict=plnIdentifyXXCandidates(tmpCells,config,999999,5);
-    if(strict.length<deficit){
-      // 嚴格條件 (銷售≤5) 不足，看放寬到多少才夠
-      const allEligible=[];
-      Object.values(tmpCells).forEach(cs=>{
-        if(!cs.sku||!config.destination.includes(cs.aisle))return;
-        const inv=cs.info||{};
-        if(Number(inv['未到量']||0)!==0)return;
-        if(Number(inv['保留數量']||0)!==0)return;
-        allEligible.push({sku:cs.sku,sales:Number(inv['銷售庫存']||0)});
-      });
-      allEligible.sort((a,b)=>a.sales-b.sales);
-      if(allEligible.length<deficit){
-        alert(`即使忽略銷售門檻，符合「無未到+保留=0」的 SKU 也只有 ${allEligible.length} 個，不足缺口 ${deficit} 個。\n\n建議: 減少挑選數量到 ${tmpSelected.length-deficit+allEligible.length} 個。`);
-        return;
+  for(let i=0;i<stepConfigs.length;i++){
+    const {idx,config}=stepConfigs[i];
+    // 預檢 + xxSalesMax 對話 (每 step 獨立)
+    const tmpCells=cells?plnCloneCells(cells):plnBuildState();
+    const tmpSelected=plnSelectSourceSKUs(config,cells?cells:null);
+    const tmpCap=plnAuditCapacity(tmpCells,config);
+    const deficit=tmpSelected.length-tmpCap.total;
+    let xxSalesMax=5;
+    if(deficit>0 && config.overflow.length){
+      const strict=plnIdentifyXXCandidates(tmpCells,config,999999,5);
+      if(strict.length<deficit){
+        const allEligible=[];
+        Object.values(tmpCells).forEach(cs=>{
+          if(!cs.sku||!config.destination.includes(cs.aisle))return;
+          const inv=cs.info||{};
+          if(Number(inv['未到量']||0)!==0)return;
+          if(Number(inv['保留數量']||0)!==0)return;
+          allEligible.push({sku:cs.sku,sales:Number(inv['銷售庫存']||0)});
+        });
+        allEligible.sort((a,b)=>a.sales-b.sales);
+        if(allEligible.length<deficit){
+          alert(`Step ${idx}: 即使忽略銷售門檻, 符合「無未到+保留=0」的 SKU 也只有 ${allEligible.length} 個, 不足缺口 ${deficit}.\n\n建議減少挑選數量到 ${tmpSelected.length-deficit+allEligible.length}.`);
+          return;
+        }
+        const need=allEligible[deficit-1].sales;
+        const ok=confirm(`【Step ${idx} 容量不足, 需放寬 XX 條件】\n\n挑選: ${tmpSelected.length}　目標空格: ${tmpCap.total}　缺口: ${deficit}\n\n嚴格 (銷售≤5) 只有 ${strict.length} 個合格\n放寬到「銷售≤${need}」才足夠\n\n是否套用「銷售≤${need}」並繼續?`);
+        if(!ok)return;
+        xxSalesMax=need;
       }
-      const need=allEligible[deficit-1].sales;
-      const ok=confirm(`【容量不足，需放寬 XX 條件】\n\n` +
-        `挑選 SKU: ${tmpSelected.length}\n` +
-        `目標空格: ${tmpCap.total}\n` +
-        `缺口: ${deficit} 個\n\n` +
-        `嚴格條件 (銷售≤5) 只有 ${strict.length} 個合格\n` +
-        `系統算出: 放寬到 銷售≤${need} 才足夠 (剛好 ${deficit} 個)\n\n` +
-        `是否套用「銷售≤${need}」並繼續執行？`);
-      if(!ok)return;
-      xxSalesMax=need;
+    }
+    // 跑此 step
+    const r=plnRunEngine(config,xxSalesMax,cells,tmpSelected);
+    r.stepIdx=idx;
+    allResults.push(r);
+    mergedMoves.push(...r.moves);
+    mergedSelected.push(...r.selected);
+    cells=r.finalCells;  // ★ 串接下一步
+    // 更新 step status
+    const statusEl=document.getElementById(`pln-step-${idx}-status`);
+    if(statusEl){
+      statusEl.textContent=`✓ 挑${r.selected.length} 移${r.moves.length} (XX${r.moves.filter(m=>m.phase==='XX_OVERFLOW').length}/內${r.moves.filter(m=>m.phase==='INTERNAL_DISPLACEMENT').length}/主${r.moves.filter(m=>m.phase==='SOURCE_TO_DEST').length})`;
+      statusEl.style.color='var(--accent)';
     }
   }
   
-  PLN_LAST_RESULT=plnRunEngine(config,xxSalesMax);
+  // 合併結果 (PLN_LAST_RESULT)
+  const totalCap={total:0,byAisle:{},byLayout:{}};
+  allResults.forEach(r=>{
+    totalCap.total+=r.capacity.total;
+  });
+  PLN_LAST_RESULT={
+    selected:mergedSelected,
+    capacity:totalCap,
+    deficit:Math.max(0,allResults.reduce((s,r)=>s+r.deficit,0)),
+    moves:mergedMoves,
+    failed:allResults.flatMap(r=>r.failed||[]),
+    config:allResults[allResults.length-1].config,
+    xxSalesMax:Math.max(...allResults.map(r=>r.xxSalesMax)),
+    stepResults:allResults,
+  };
   plannerRenderResult(PLN_LAST_RESULT);
 }
 
@@ -2648,35 +2836,91 @@ function plannerExportResult(){
     aoa1.push([s['商品編號'],s['商品名稱'],s['顏色'],s['尺寸'],s['儲位'],
       s['未到量']||0,s['未抓貨']||0,s['保留數量']||0,s['銷售庫存']||0,s['架上數量']||0]);
   });
-  // === Sheet 2: 待移 (順序: XX → 內部 → 主要) ===
-  // ★ 擺法用 moves 內 dstLayout (引擎產生時抓 cells[dst].layout, 避免 STORAGE_MASTER 跨 sheet 衝突)
+
+  // === Sheet 2: 待移 ===
+  // ★ 新排序規則:
+  //   1. phase 順序: XX_OVERFLOW → INTERNAL_DISPLACEMENT → SOURCE_TO_DEST
+  //   2. 各 phase 內按 (dst 走道, src 走道, dst cell) 排序
+  //   3. 每換一個 (dst 走道, src 走道) 對 → 空一行
+  //   4. phase 切換 → 空兩行 + 重新 header (作為段落分隔, 方便對應 A4 分頁)
+  //   5. 4 col 並排, 動態 numCols = ceil(linearRows / 50)  (每 col 落 50~58 行)
+  
+  const aisleOf=cell=>String(cell||'').substring(0,3);
+  const colOf=cell=>{const m=String(cell||'').match(/-(\d+)-/);return m?parseInt(m[1]):0;};
   const phaseOrder=['XX_OVERFLOW','INTERNAL_DISPLACEMENT','SOURCE_TO_DEST'];
-  const sortedMoves=[];
+  const phaseLabel={XX_OVERFLOW:'XX 溢位',INTERNAL_DISPLACEMENT:'內部整理',SOURCE_TO_DEST:'主要移動'};
+  
+  // ── Step 1: 建線性序列 (含分隔空行/header) ──
+  // linearRows: 每筆 = {sku, dst, layout, src} | {blank:true} | {header:true}
+  const linearRows=[];
+  let firstPhase=true;
   phaseOrder.forEach(ph=>{
     const sub=r.moves.filter(m=>m.phase===ph);
-    sub.sort((a,b)=>(a.src||'').localeCompare(b.src||''));
-    sortedMoves.push(...sub);
+    if(!sub.length)return;
+    if(!firstPhase){
+      // phase 切換: 空兩行 + 新 header
+      linearRows.push({blank:true});
+      linearRows.push({blank:true});
+      linearRows.push({header:true});
+    } else {
+      linearRows.push({header:true});
+      firstPhase=false;
+    }
+    // 排序: src 走道 → dst 走道 → dst cell col
+    // (★ src 主排序: Gordon 範例「736490130/140 src=A10, dst=B03」歸 A10 區 ⇒ src 走道是主鍵)
+    sub.sort((a,b)=>{
+      const sa=aisleOf(a.src),sb=aisleOf(b.src);
+      if(sa!==sb)return sa<sb?-1:1;
+      const da=aisleOf(a.dst),db=aisleOf(b.dst);
+      if(da!==db)return da<db?-1:1;
+      const ca=colOf(a.dst),cb=colOf(b.dst);
+      if(ca!==cb)return ca-cb;
+      return (a.dst||'').localeCompare(b.dst||'');
+    });
+    // 插入分隔空行 (每換一個 (src走道, dst走道) 對)
+    let prevKey=null;
+    sub.forEach(m=>{
+      const key=aisleOf(m.src)+'|'+aisleOf(m.dst);
+      if(prevKey!==null && key!==prevKey){linearRows.push({blank:true});}
+      linearRows.push({sku:m.sku,dst:m.dst,layout:m.dstLayout||'',src:m.src||''});
+      prevKey=key;
+    });
   });
-  const GROUPS=4;
-  const rpg=Math.ceil(sortedMoves.length/GROUPS);
-  const header=[];
-  for(let g=0;g<GROUPS;g++){
-    header.push('商品編號','NEW','擺法','儲位');
-    if(g<GROUPS-1)header.push('');
+  
+  // ── Step 2: 動態決定 numCols (每 col ~50 行) ──
+  const totalLines=linearRows.length;
+  let numCols=Math.max(1,Math.ceil(totalLines/50));
+  if(numCols>4)numCols=4;  // cap 4 col (Gordon 範例最多 4 col)
+  const rowsPerCol=Math.ceil(totalLines/numCols);
+  
+  // ── Step 3: 切分到 numCols 個欄區 ──
+  const cols=[];
+  for(let g=0;g<numCols;g++){
+    cols.push(linearRows.slice(g*rowsPerCol,(g+1)*rowsPerCol));
   }
-  const aoa2=[header];
-  for(let i=0;i<rpg;i++){
+  // 補齊長度
+  const maxLen=Math.max(...cols.map(c=>c.length),1);
+  cols.forEach(c=>{while(c.length<maxLen)c.push({blank:true});});
+  
+  // ── Step 4: 組 aoa2 (4 col 並排, 每 col 4 欄位 + 1 分隔空欄) ──
+  const aoa2=[];
+  for(let i=0;i<maxLen;i++){
     const row=[];
-    for(let g=0;g<GROUPS;g++){
-      const idx=g*rpg+i;
-      const m=sortedMoves[idx];
-      if(m)row.push(m.sku,m.dst,m.dstLayout||'',m.src||'');
-      else row.push('','','','');
-      if(g<GROUPS-1)row.push('');
+    for(let g=0;g<numCols;g++){
+      const item=cols[g][i];
+      if(item.header){
+        row.push('商品編號','NEW','擺法','儲位');
+      } else if(item.blank){
+        row.push('','','','');
+      } else {
+        row.push(item.sku,item.dst,item.layout,item.src);
+      }
+      if(g<numCols-1)row.push('');
     }
     aoa2.push(row);
   }
-  // ★ 套用字體 Microsoft JhengHei 11 (用 xlsx-js-style 設 cell.s)
+  
+  // ── 字體 + 寬度 ──
   function applyFont(ws){
     if(!ws['!ref'])return;
     const range=XLSX.utils.decode_range(ws['!ref']);
@@ -2695,7 +2939,7 @@ function plannerExportResult(){
   XLSX.utils.book_append_sheet(wb,ws1,'挑選清單');
   const ws2=XLSX.utils.aoa_to_sheet(aoa2);
   const cw=[];
-  for(let g=0;g<GROUPS;g++){cw.push({wch:11},{wch:11},{wch:6},{wch:11});if(g<GROUPS-1)cw.push({wch:2});}
+  for(let g=0;g<numCols;g++){cw.push({wch:11},{wch:11},{wch:6},{wch:11});if(g<numCols-1)cw.push({wch:2});}
   ws2['!cols']=cw;
   applyFont(ws2);
   XLSX.utils.book_append_sheet(wb,ws2,'待移');
