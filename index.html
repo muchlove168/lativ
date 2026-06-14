@@ -2739,6 +2739,26 @@ function plannerRunAllSteps(){
     let xxSalesMax=5;
     if(deficit>0 && config.overflow.length){
       const strict=plnIdentifyXXCandidates(tmpCells,config,999999,5);
+      // ★ 統計每 destination 走道空格細節 + 未勾選但有空格的走道, 防止勾錯
+      // 用換行+項目符號讓 confirm 對話框更清楚顯示 (alert 預設等寬字體看起來像表格)
+      const dstDetail=config.destination.map(a=>{
+        const n=tmpCap.byAisle[a]||0;
+        return n===0?`  ⚠ ${a}: 0 個 (已無空格!)`:`  • ${a}: ${n} 個`;
+      }).join('\n');
+      const zeroAisles=config.destination.filter(a=>(tmpCap.byAisle[a]||0)===0);
+      const allAislesWithSpace={};
+      Object.values(tmpCells).forEach(cs=>{
+        if(cs.sku)return;
+        if(config.destination.includes(cs.aisle))return;
+        if((config.overflow||[]).includes(cs.aisle))return;  // 排除 XX 區
+        allAislesWithSpace[cs.aisle]=(allAislesWithSpace[cs.aisle]||0)+1;
+      });
+      const unchecked=Object.entries(allAislesWithSpace).filter(([a,n])=>n>0).sort((a,b)=>b[1]-a[1]);
+      const uncheckedTxt=unchecked.length?`\n\n💡 未勾選但有空格的走道 (空格數降冪):\n${unchecked.map(([a,n])=>`  • ${a}: ${n} 個`).join('\n')}`:'';
+      // ★ 若有 0 空格目標走道 + 未勾選有充足空格走道, 強烈提示
+      const zeroWarn=(zeroAisles.length && unchecked.length)?
+        `\n\n🚨 警告: 目標走道 ${zeroAisles.join('、')} 沒有任何空格 (可能已被前面 step 填滿).\n   檢查是否該改勾「${unchecked[0][0]}」(有 ${unchecked[0][1]} 個空格)?`:'';
+      
       if(strict.length<deficit){
         const allEligible=[];
         Object.values(tmpCells).forEach(cs=>{
@@ -2750,11 +2770,11 @@ function plannerRunAllSteps(){
         });
         allEligible.sort((a,b)=>a.sales-b.sales);
         if(allEligible.length<deficit){
-          alert(`Step ${idx}: 即使忽略銷售門檻, 符合「無未到+保留=0」的 SKU 也只有 ${allEligible.length} 個, 不足缺口 ${deficit}.\n\n建議減少挑選數量到 ${tmpSelected.length-deficit+allEligible.length}.`);
+          alert(`Step ${idx}: 即使忽略銷售門檻, 符合「無未到+保留=0」的 SKU 也只有 ${allEligible.length} 個, 不足缺口 ${deficit}.\n\n目標走道空格:\n${dstDetail}${zeroWarn}${uncheckedTxt}\n\n建議減少挑選數量到 ${tmpSelected.length-deficit+allEligible.length}.`);
           return;
         }
         const need=allEligible[deficit-1].sales;
-        const ok=confirm(`【Step ${idx} 容量不足, 需放寬 XX 條件】\n\n挑選: ${tmpSelected.length}　目標空格: ${tmpCap.total}　缺口: ${deficit}\n\n嚴格 (銷售≤5) 只有 ${strict.length} 個合格\n放寬到「銷售≤${need}」才足夠\n\n是否套用「銷售≤${need}」並繼續?`);
+        const ok=confirm(`【Step ${idx} 容量不足】\n\n挑選: ${tmpSelected.length} 個　目標空格: ${tmpCap.total} 個　缺口: ${deficit} 個\n\n目標走道空格:\n${dstDetail}${zeroWarn}${uncheckedTxt}\n\n──────────────\n嚴格 (銷售≤5) 只有 ${strict.length} 個 XX 候選\n放寬到「銷售≤${need}」才能補足缺口\n\n確定 → 套用「銷售≤${need}」繼續\n取消 → 回去檢查走道勾選`);
         if(!ok)return;
         xxSalesMax=need;
       }
@@ -2769,7 +2789,8 @@ function plannerRunAllSteps(){
     // 更新 step status
     const statusEl=document.getElementById(`pln-step-${idx}-status`);
     if(statusEl){
-      statusEl.textContent=`✓ 挑${r.selected.length} 移${r.moves.length} (XX${r.moves.filter(m=>m.phase==='XX_OVERFLOW').length}/內${r.moves.filter(m=>m.phase==='INTERNAL_DISPLACEMENT').length}/主${r.moves.filter(m=>m.phase==='SOURCE_TO_DEST').length})`;
+      const byA=Object.entries(r.capacity.byAisle).map(([a,n])=>`${a}:${n}`).join(' ');
+      statusEl.textContent=`✓ 挑${r.selected.length} 移${r.moves.length} (XX${r.moves.filter(m=>m.phase==='XX_OVERFLOW').length}/內${r.moves.filter(m=>m.phase==='INTERNAL_DISPLACEMENT').length}/主${r.moves.filter(m=>m.phase==='SOURCE_TO_DEST').length}) | 容量 ${r.capacity.total} [${byA}]`;
       statusEl.style.color='var(--accent)';
     }
   }
@@ -2840,41 +2861,41 @@ function plannerExportResult(){
   // === Sheet 2: 待移 ===
   // ★ 新排序規則:
   //   1. phase 順序: XX_OVERFLOW → INTERNAL_DISPLACEMENT → SOURCE_TO_DEST
-  //   2. 各 phase 內按 (dst 走道, src 走道, dst cell) 排序
-  //   3. 每換一個 (dst 走道, src 走道) 對 → 空一行
-  //   4. phase 切換 → 空兩行 + 重新 header (作為段落分隔, 方便對應 A4 分頁)
-  //   5. 4 col 並排, 動態 numCols = ceil(linearRows / 50)  (每 col 落 50~58 行)
+  //   2. 各 phase 內按 (src 走道, dst 走道, src col, src layer) 排序
+  //   3. 每換一個 (src 走道, dst 走道) 對 → 空一行
+  //   4. phase 切換 → 空兩行 (不插 inline header, 由每欄頂的 forced header 處理)
+  //   5. 動態 numCols = ceil(linearRows / 50), cap 4
+  //   6. 每欄頂強制顯示「商品編號 NEW 擺法 儲位」標頭 (含 col 2+)
   
   const aisleOf=cell=>String(cell||'').substring(0,3);
   const colOf=cell=>{const m=String(cell||'').match(/-(\d+)-/);return m?parseInt(m[1]):0;};
+  const layerOf=cell=>{const m=String(cell||'').match(/-(\d+)$/);return m?parseInt(m[1]):0;};
   const phaseOrder=['XX_OVERFLOW','INTERNAL_DISPLACEMENT','SOURCE_TO_DEST'];
-  const phaseLabel={XX_OVERFLOW:'XX 溢位',INTERNAL_DISPLACEMENT:'內部整理',SOURCE_TO_DEST:'主要移動'};
   
-  // ── Step 1: 建線性序列 (含分隔空行/header) ──
-  // linearRows: 每筆 = {sku, dst, layout, src} | {blank:true} | {header:true}
+  // ── Step 1: 建線性序列 (純資料 + 空白行; 不放 inline header) ──
+  // linearRows: 每筆 = {sku, dst, layout, src} | {blank:true}
   const linearRows=[];
   let firstPhase=true;
   phaseOrder.forEach(ph=>{
     const sub=r.moves.filter(m=>m.phase===ph);
     if(!sub.length)return;
     if(!firstPhase){
-      // phase 切換: 空兩行 + 新 header
+      // phase 切換: 空兩行作分隔 (內部 → 主要 之間, 給操作員視覺斷點)
       linearRows.push({blank:true});
       linearRows.push({blank:true});
-      linearRows.push({header:true});
-    } else {
-      linearRows.push({header:true});
-      firstPhase=false;
     }
-    // 排序: src 走道 → dst 走道 → dst cell col
-    // (★ src 主排序: Gordon 範例「736490130/140 src=A10, dst=B03」歸 A10 區 ⇒ src 走道是主鍵)
+    firstPhase=false;
+    // 排序: src 走道 ASC → dst 走道 ASC → src col ASC → src layer ASC
+    // (★ 圖 3 A09→A09 區順序 026-1, 026-4, 050-1, 050-2, 050-3, 062-1, 062-2 即按 src 升冪)
     sub.sort((a,b)=>{
       const sa=aisleOf(a.src),sb=aisleOf(b.src);
       if(sa!==sb)return sa<sb?-1:1;
       const da=aisleOf(a.dst),db=aisleOf(b.dst);
       if(da!==db)return da<db?-1:1;
-      const ca=colOf(a.dst),cb=colOf(b.dst);
-      if(ca!==cb)return ca-cb;
+      const sca=colOf(a.src),scb=colOf(b.src);
+      if(sca!==scb)return sca-scb;
+      const sla=layerOf(a.src),slb=layerOf(b.src);
+      if(sla!==slb)return sla-slb;
       return (a.dst||'').localeCompare(b.dst||'');
     });
     // 插入分隔空行 (每換一個 (src走道, dst走道) 對)
@@ -2890,13 +2911,17 @@ function plannerExportResult(){
   // ── Step 2: 動態決定 numCols (每 col ~50 行) ──
   const totalLines=linearRows.length;
   let numCols=Math.max(1,Math.ceil(totalLines/50));
-  if(numCols>4)numCols=4;  // cap 4 col (Gordon 範例最多 4 col)
+  if(numCols>4)numCols=4;  // cap 4 col
   const rowsPerCol=Math.ceil(totalLines/numCols);
   
-  // ── Step 3: 切分到 numCols 個欄區 ──
+  // ── Step 3: 切分 + 每欄 strip leading/trailing blanks + 強制 header at top ──
   const cols=[];
   for(let g=0;g<numCols;g++){
-    cols.push(linearRows.slice(g*rowsPerCol,(g+1)*rowsPerCol));
+    const slice=linearRows.slice(g*rowsPerCol,(g+1)*rowsPerCol);
+    while(slice.length && slice[0].blank)slice.shift();           // 開頭空白丟掉
+    while(slice.length && slice[slice.length-1].blank)slice.pop(); // 結尾空白丟掉
+    slice.unshift({header:true});                                  // 每欄頂強制 header
+    cols.push(slice);
   }
   // 補齊長度
   const maxLen=Math.max(...cols.map(c=>c.length),1);
