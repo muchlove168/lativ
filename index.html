@@ -3061,32 +3061,132 @@ function plannerExportResult(){
     aoa2.push(row);
   }
   
-  // ── 字體 + 寬度 ──
-  function applyFont(ws){
+  // ═══════ 樣式工具: 全部置中; headerRows 加 bold + 灰底 + 下框 ═══════
+  function applyStyleFull(ws,opts){
     if(!ws['!ref'])return;
     const range=XLSX.utils.decode_range(ws['!ref']);
+    const headerSet=new Set((opts&&opts.headerRows)||[]);
     for(let R=range.s.r;R<=range.e.r;R++){
       for(let C=range.s.c;C<=range.e.c;C++){
         const ref=XLSX.utils.encode_cell({r:R,c:C});
         if(!ws[ref])ws[ref]={t:'s',v:''};
-        ws[ref].s={font:{name:'Microsoft JhengHei',sz:11}};
+        const v=ws[ref].v;
+        const isHeader=headerSet.has(R)&&v!==''&&v!=null;
+        const style={
+          alignment:{horizontal:'center',vertical:'center'},
+          font:isHeader?{name:'Microsoft JhengHei',sz:11,bold:true}:{name:'Microsoft JhengHei',sz:11}
+        };
+        if(isHeader){
+          style.fill={patternType:'solid',fgColor:{rgb:'FFEAEAEA'}};
+          style.border={bottom:{style:'medium',color:{rgb:'FF000000'}}};
+        }
+        ws[ref].s=style;
       }
     }
   }
+
+  // ═══════ 檔名: 來源_目的; 多走道同區→prefix; 多區→排序連接 prefixes; 多 step→括號連接 ═══════
+  function buildAisleLabel(aisles){
+    if(!aisles||!aisles.length)return '';
+    if(aisles.length===1)return aisles[0];
+    const prefixes=[...new Set(aisles.map(a=>String(a).replace(/\d+$/,'')))].sort();
+    return prefixes.length===1?prefixes[0]:prefixes.join('');
+  }
+  function buildFilename(){
+    const steps=r.stepResults||[];
+    if(!steps.length)return '待移.xlsx';
+    const labels=steps.map(s=>`${buildAisleLabel(s.config.source)}_${buildAisleLabel(s.config.destination)}`);
+    return labels.length===1?`${labels[0]}.xlsx`:`${labels.map(l=>`(${l})`).join('_')}.xlsx`;
+  }
+
   const wb=XLSX.utils.book_new();
+
+  // ─── Sheet 1: 挑選清單 (商品編號=13.3, 儲位=12.5 對齊新規格) ───
   const ws1=XLSX.utils.aoa_to_sheet(aoa1);
-  ws1['!cols']=[{wch:11},{wch:30},{wch:8},{wch:6},{wch:11},{wch:7},{wch:7},{wch:8},{wch:8},{wch:8}];
-  applyFont(ws1);
+  ws1['!cols']=[{wch:13.3},{wch:30},{wch:8},{wch:6},{wch:12.5},{wch:7},{wch:7},{wch:8},{wch:8},{wch:8}];
+  applyStyleFull(ws1,{headerRows:[0]});
   XLSX.utils.book_append_sheet(wb,ws1,'挑選清單');
+
+  // ─── Sheet 2: 待移 (★ 新欄寬: 13.3 / 12.3 / 5.6 / 12.5) ───
   const ws2=XLSX.utils.aoa_to_sheet(aoa2);
   const cw=[];
-  for(let g=0;g<numCols;g++){cw.push({wch:11},{wch:11},{wch:6},{wch:11});if(g<numCols-1)cw.push({wch:2});}
+  for(let g=0;g<numCols;g++){
+    cw.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});
+    if(g<numCols-1)cw.push({wch:2});
+  }
   ws2['!cols']=cw;
-  applyFont(ws2);
+  applyStyleFull(ws2,{headerRows:[0]});
   XLSX.utils.book_append_sheet(wb,ws2,'待移');
-  const t=new Date();
-  const dateStr=t.getFullYear()+String(t.getMonth()+1).padStart(2,'0')+String(t.getDate()).padStart(2,'0');
-  XLSX.writeFile(wb,`${dateStr}_待移.xlsx`);
+
+  // ─── Sheet 3+: 各走道剩餘庫存 (原報表扣掉挑選清單) ───
+  const pickedSet=new Set((r.selected||[]).map(s=>String(s['商品編號']||'')));
+  const aislesInReport=(typeof plnGetAislesInReport==='function')?plnGetAislesInReport():[];
+  const priorityCols=['商品編號','商品名稱','顏色','尺寸','儲位'];
+  const widthMap={'商品編號':13.3,'商品名稱':30,'顏色':8,'尺寸':6,'儲位':12.5,
+    '未到量':8,'未抓貨':8,'保留數量':9,'銷售庫存':9,'架上數量':9,'倉庫庫存':9,
+    '商品款號':10,'季別':8,'品牌':8,'類別':10};
+  aislesInReport.forEach(aisle=>{
+    const prefix=aisle+'-';
+    const rows=(AISLE_REPORT_DATA||[]).filter(row=>{
+      const cell=String(row['儲位']||'');
+      return cell.startsWith(prefix)&&!pickedSet.has(String(row['商品編號']||''));
+    });
+    if(!rows.length)return;
+    // 欄位順序: priority 優先, 其餘按原順序
+    const keysRemaining=new Set();
+    const allKeysInOrder=[];
+    rows.forEach(row=>{
+      Object.keys(row).forEach(k=>{
+        if(!keysRemaining.has(k)){keysRemaining.add(k);allKeysInOrder.push(k);}
+      });
+    });
+    const finalCols=[];
+    priorityCols.forEach(k=>{if(keysRemaining.has(k)){finalCols.push(k);keysRemaining.delete(k);}});
+    allKeysInOrder.forEach(k=>{if(keysRemaining.has(k))finalCols.push(k);});
+    const aoa=[finalCols];
+    rows.forEach(row=>aoa.push(finalCols.map(k=>{const v=row[k];return v==null?'':v;})));
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols']=finalCols.map(k=>({wch:widthMap[k]||10}));
+    applyStyleFull(ws,{headerRows:[0]});
+    XLSX.utils.book_append_sheet(wb,ws,aisle);
+  });
+
+  // ═══════ 凍結標頭列 ═══════
+  // xlsx-js-style@1.2.0 writer 不支援 ws['!views'] 寫出凍結窗格 (輸出 XML 永遠是空 <sheetView/>),
+  // 解法: 先 write 成 xlsx (其本質是 CFB zip), 用 X.CFB 讀回, 改 sheet*.xml 注入 <pane.../>, 再重新打包
+  // 兩階段流程: 先收集所有要改的 sheet (因為 cfb_add 會 reorder FullPaths/FileIndex), 再統一 add
+  const filename=buildFilename();
+  try{
+    const buf=XLSX.write(wb,{type:'array',bookType:'xlsx'});
+    const u8=new Uint8Array(buf);
+    const cfb=XLSX.CFB.read(u8,{type:'array'});
+    const pending=[];
+    cfb.FullPaths.forEach((fp,i)=>{
+      if(!/xl\/worksheets\/sheet\d+\.xml$/.test(fp))return;
+      const file=cfb.FileIndex[i];
+      if(!file||!file.content)return;
+      const xml=typeof file.content==='string'?file.content:new TextDecoder().decode(file.content);
+      const newXml=xml.replace(
+        /<sheetView([^/]*)\/>/,
+        '<sheetView$1><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView>'
+      );
+      if(newXml!==xml){
+        pending.push({relPath:fp.replace(/^Root Entry\//,''),newXml});
+      }
+    });
+    pending.forEach(p=>XLSX.CFB.utils.cfb_add(cfb,p.relPath,new TextEncoder().encode(p.newXml)));
+    const finalBuf=XLSX.CFB.write(cfb,{fileType:'zip',type:'array'});
+    const blob=new Blob([finalBuf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},100);
+  }catch(e){
+    console.warn('凍結窗格 post-process 失敗, fallback 直接寫檔:',e);
+    XLSX.writeFile(wb,filename);
+  }
 }
 
 function renderArrangeCompare(){
