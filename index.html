@@ -2251,6 +2251,7 @@ function plnSelectSourceSKUs(config,cells){
     const sales=Number(r['銷售庫存']||0),arr=Number(r['未到量']||0),sh=Number(r['架上數量']||0);
     return Object.assign({},r,{
       _sales:sales,
+      _arr:arr,
       _total:sales+arr,                            // ★ 庫存件數 = 銷售 + 未到
       _score:sales+arr-sh,
       _tier1:(arr>=50)&&(sh<=0),
@@ -2258,6 +2259,20 @@ function plnSelectSourceSKUs(config,cells){
       _kc:String(r['商品編號']||'').substring(0,7)
     });
   });
+  const n=config.nToPick;
+  const sortMode=config.sortMode||'high';
+
+  // ═══ 庫存低模式: 未到≤10 優先, 銷售庫存 ASC; 不夠再用未到>10 補滿 ═══
+  if(sortMode==='low'){
+    const lowArr=rows.filter(r=>r._arr<=10).sort((a,b)=>a._sales-b._sales||a._total-b._total);
+    const highArr=rows.filter(r=>r._arr>10).sort((a,b)=>a._sales-b._sales||a._total-b._total);
+    const out=[];
+    for(const r of lowArr){if(out.length>=n)break;out.push(r);}
+    for(const r of highArr){if(out.length>=n)break;out.push(r);}
+    return out;
+  }
+
+  // ═══ 庫存高模式 (預設, 原邏輯 + 兜底 fallback) ═══
   // 按款分組
   const byKuan={};
   rows.forEach(r=>{
@@ -2276,7 +2291,6 @@ function plnSelectSourceSKUs(config,cells){
   });
   candidates.sort((a,b)=>b.avg-a.avg);
   // 競爭挑選: 整款 fit 整批挑, 不 fit 拆色挑
-  const n=config.nToPick;
   const selected=[];
   const selSet=new Set();
   for(const K of candidates){
@@ -2310,7 +2324,18 @@ function plnSelectSourceSKUs(config,cells){
       if(a._tier1!==b._tier1)return b._tier1-a._tier1;
       return b._total-a._total;
     });
-    others.slice(0,rem2).forEach(r=>selected.push(r));
+    others.slice(0,rem2).forEach(r=>{selected.push(r);selSet.add(r['商品編號']);});
+  }
+  // ★ 兜底 fallback: N 還沒滿 → 把剩餘所有 SKU 按 (_tier1 desc, _total desc) 排序補滿
+  // 這樣使用者填 N=來源總SKU數時, 一定能精確命中
+  const rem3=n-selected.length;
+  if(rem3>0){
+    const remainder=rows.filter(r=>!selSet.has(r['商品編號']));
+    remainder.sort((a,b)=>{
+      if(a._tier1!==b._tier1)return b._tier1-a._tier1;
+      return b._total-a._total;
+    });
+    remainder.slice(0,rem3).forEach(r=>selected.push(r));
   }
   return selected;
 }
@@ -2641,12 +2666,22 @@ function plannerRenderConfigUI(){
       <button onclick="plannerRunAllSteps()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
     </div>
   `;
-  plannerRenderStep(1,aisles,[aisles[0]],aisles.slice(1),260);
+  plannerRenderStep(1,aisles,[aisles[0]],aisles.slice(1),260,'high');
+  // ★ 掛載事件監聽: 任何 checkbox/radio/N 變更 → debounce 後重算所有 step 顯示數字
+  const wrap=document.getElementById('pln-steps-wrap');
+  wrap.addEventListener('change',plannerScheduleRefresh);
+  wrap.addEventListener('input',plannerScheduleRefresh);
+  plannerRefreshStepCounts();
 }
 
-function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN){
+function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSortMode){
+  defaultSortMode=defaultSortMode||'high';
   const wrap=document.getElementById('pln-steps-wrap');
-  const mkCb=(grp,a,checked)=>`<label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;margin-right:8px;cursor:pointer"><input type="checkbox" data-step="${idx}" data-grp="${grp}" value="${a}" ${checked?'checked':''}>${a}</label>`;
+  // ★ 來源 label: 「C02 (SKU: 62)」; 目標 label: 「C06 (空儲位: 121)」; 數字由 plannerRefreshStepCounts 動態填入
+  const mkCb=(grp,a,checked)=>{
+    const inner=grp==='src'?`SKU: <span class="aisle-count" data-step="${idx}" data-grp="src" data-aisle="${a}">-</span>`:`空儲位: <span class="aisle-count" data-step="${idx}" data-grp="dst" data-aisle="${a}">-</span>`;
+    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;margin-right:8px;margin-bottom:2px;cursor:pointer;white-space:nowrap"><input type="checkbox" data-step="${idx}" data-grp="${grp}" value="${a}" ${checked?'checked':''}>${a} <span style="color:var(--text3);font-size:11px">(${inner})</span></label>`;
+  };
   const srcHtml=aisles.map(a=>mkCb('src',a,defaultSrc.includes(a))).join('');
   const dstHtml=aisles.map(a=>mkCb('dst',a,defaultDst.includes(a))).join('');
   const div=document.createElement('div');
@@ -2661,6 +2696,11 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN){
     <div style="display:grid;grid-template-columns:50px 1fr;gap:4px 8px;align-items:center;font-size:12px">
       <span style="color:var(--text2)">來源</span><div>${srcHtml}</div>
       <span style="color:var(--text2)">目標</span><div>${dstHtml}</div>
+      <span style="color:var(--text2)">挑選</span>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''}>庫存高 (預設)</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''}>庫存低 <span style="color:var(--text3);font-size:11px">(未到≤10, 銷售↑)</span></label>
+      </div>
       <span style="color:var(--text2)">N</span>
       <div><input type="number" data-step="${idx}" data-grp="n" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:12px"></div>
     </div>
@@ -2672,7 +2712,8 @@ function plannerAddStep(){
   const aisles=plnGetAislesInReport();
   PLN_STEPS_COUNT++;
   // 預設 source=第一個未被前步驟用過的, 但簡化: 預設全空, 讓使用者勾
-  plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],50);
+  plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],50,'high');
+  plannerScheduleRefresh();
 }
 
 function plannerRemoveStep(idx){
@@ -2691,20 +2732,84 @@ function plannerRemoveStep(idx){
     const removeBtn=d.querySelector('button');
     if(removeBtn)removeBtn.setAttribute('onclick',`plannerRemoveStep(${newIdx})`);
     d.querySelectorAll('[data-step]').forEach(inp=>inp.setAttribute('data-step',String(newIdx)));
+    // ★ 更新 sortMode radio name (避免不同 step 之間互斥錯亂)
+    d.querySelectorAll('input[type="radio"][data-grp="sortMode"]').forEach(r=>r.setAttribute('name',`pln-sort-${newIdx}`));
   });
   PLN_STEPS_COUNT=remaining.length;
+  plannerScheduleRefresh();
 }
 
 function plannerCollectStepConfig(idx){
   const collect=grp=>[...document.querySelectorAll(`#pln-step-${idx} input[data-step="${idx}"][data-grp="${grp}"]:checked`)].map(x=>x.value);
   const nInp=document.querySelector(`#pln-step-${idx} input[data-grp="n"]`);
+  const sortInp=document.querySelector(`#pln-step-${idx} input[data-grp="sortMode"]:checked`);
   return {
     source:collect('src'),
     destination:collect('dst'),
     overflow:plnGetOverflowAisles(),
     nToPick:parseInt(nInp?nInp.value:'0')||0,
+    sortMode:sortInp?sortInp.value:'high',
     aisleGeometry:plnGetAisleGeometry(),
   };
+}
+
+// ═══ 即時計數 (來源 SKU / 目標空格): 含跨 step 模擬 ═══
+let _plnRefreshTimer=null;
+function plannerScheduleRefresh(){
+  if(_plnRefreshTimer)clearTimeout(_plnRefreshTimer);
+  _plnRefreshTimer=setTimeout(()=>{_plnRefreshTimer=null;plannerRefreshStepCounts();},150);
+}
+
+function plannerRefreshStepCounts(){
+  const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
+  if(!stepDivs.length)return;
+  if(!AISLE_REPORT_DATA.length||!Object.keys(STORAGE_MASTER||{}).length)return;
+  const aisles=plnGetAislesInReport();
+  let cells=plnBuildState();  // 初始狀態
+  let simBroken=false;        // 前置 step 模擬失敗 → 後續 step 顯示 ?
+
+  for(let i=0;i<stepDivs.length;i++){
+    const idx=parseInt(stepDivs[i].id.replace('pln-step-',''));
+    const stepEl=stepDivs[i];
+
+    if(simBroken){
+      // 顯示 ? (前置 step 設定不完整或模擬失敗)
+      aisles.forEach(a=>{
+        const s1=stepEl.querySelector(`.aisle-count[data-grp="src"][data-aisle="${a}"]`);
+        const s2=stepEl.querySelector(`.aisle-count[data-grp="dst"][data-aisle="${a}"]`);
+        if(s1)s1.textContent='?';
+        if(s2)s2.textContent='?';
+      });
+      continue;
+    }
+
+    // 計算此 step 進入時的 src SKU 數 / dst 空格數 (dedup by SKU 處理同款跨儲位情形)
+    const srcSet={},emptyCnt={};
+    aisles.forEach(a=>{srcSet[a]=new Set();emptyCnt[a]=0;});
+    Object.values(cells).forEach(cs=>{
+      if(cs.sku){if(srcSet[cs.aisle])srcSet[cs.aisle].add(cs.sku);}
+      else{if(emptyCnt[cs.aisle]!==undefined)emptyCnt[cs.aisle]++;}
+    });
+    aisles.forEach(a=>{
+      const s1=stepEl.querySelector(`.aisle-count[data-grp="src"][data-aisle="${a}"]`);
+      const s2=stepEl.querySelector(`.aisle-count[data-grp="dst"][data-aisle="${a}"]`);
+      if(s1)s1.textContent=String(srcSet[a].size);
+      if(s2)s2.textContent=String(emptyCnt[a]);
+    });
+
+    // 嘗試模擬此 step (給下一個 step 用); 設定不完整則停止後續 step 的數字計算
+    const config=plannerCollectStepConfig(idx);
+    if(!config.source.length||!config.destination.length||config.nToPick<=0){simBroken=true;continue;}
+    try{
+      const selected=plnSelectSourceSKUs(config,cells);
+      if(!selected.length){simBroken=true;continue;}
+      const r=plnRunEngine(config,5,cells,selected);
+      cells=r.finalCells;
+    }catch(e){
+      console.warn('Step',idx,'模擬失敗:',e);
+      simBroken=true;
+    }
+  }
 }
 
 let PLN_LAST_RESULT=null;
@@ -2733,6 +2838,17 @@ function plannerRunAllSteps(){
     const {idx,config}=stepConfigs[i];
     // 預檢 + xxSalesMax 對話 (每 step 獨立)
     const tmpCells=cells?plnCloneCells(cells):plnBuildState();
+    // ★ N 防呆: 檢查來源走道實際可用 SKU 數 (扣掉前面 step 已搬走的)
+    const srcSkuSet=new Set();
+    Object.values(tmpCells).forEach(cs=>{
+      if(cs.sku&&config.source.includes(cs.aisle))srcSkuSet.add(cs.sku);
+    });
+    const srcAvail=srcSkuSet.size;
+    if(config.nToPick>srcAvail){
+      const prefix=(i>0)?'執行完前面 step 後, ':'';
+      alert(`Step ${idx}: ${prefix}來源走道 (${config.source.join('、')}) 只有 ${srcAvail} 個 SKU, 無法挑選 ${config.nToPick} 個.\n\n建議: 降低 N 至 ${srcAvail} 或勾選更多來源走道.`);
+      return;
+    }
     const tmpSelected=plnSelectSourceSKUs(config,cells?cells:null);
     const tmpCap=plnAuditCapacity(tmpCells,config);
     const deficit=tmpSelected.length-tmpCap.total;
