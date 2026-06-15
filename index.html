@@ -233,12 +233,11 @@
   <div class="tab" onclick="switchTab('sales')">每日銷售</div>
   <div class="tab" onclick="switchTab('fw26')">26FW 新品</div>
   <div class="tab" onclick="switchTab('db')">資料庫</div>
-  <div class="tab" onclick="switchTab('xx')">XX零碼區</div>
-  <div class="tab" onclick="switchTab('reloc')">儲位釋放</div>
+  <div class="tab" onclick="switchTab('xx')">XX/儲位釋放</div>
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
   <div class="tab" onclick="switchTab('arrange')">新品儲位安排</div>
   <div class="tab" onclick="switchTab('compare')">銷售比對</div>
-  <div class="tab" onclick="switchTab('planner')">儲位調整建議</div>
+  <div class="tab" onclick="switchTab('planner')">儲位調整</div>
 </div>
 
 <div class="content">
@@ -556,84 +555,83 @@
       </table>
     </div>
   </div>
-</div>
 
-<!-- ═══════════════════════════════════════════════════
-     移倉規劃 TAB — 全新功能
-════════════════════════════════════════════════════ -->
-<div class="tab-panel" id="tab-reloc">
-  <div class="reloc-layout">
+  <!-- ═══ 儲位釋放 區塊 (原獨立 tab, 已合併到此) ═══ -->
+  <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--border)">
+    <div style="font-size:14px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:1px">▼ 儲位釋放</div>
+    <div class="reloc-layout">
 
-    <!-- 左側控制面板 -->
-    <div class="reloc-control-panel">
+      <!-- 左側控制面板 -->
+      <div class="reloc-control-panel">
 
-      <!-- 資料狀態 -->
-      <div class="reloc-section">
-        <div class="reloc-section-title">📊 資料狀態</div>
-        <div class="reloc-section-body">
-          <div class="reloc-stat-row"><span class="reloc-stat-label">EPR 主報表</span><span class="reloc-stat-val" id="reloc-epr-status" style="color:var(--red)">未載入</span></div>
-          <div class="reloc-stat-row"><span class="reloc-stat-label">XX/TX 報表</span><span class="reloc-stat-val" id="reloc-xx-status" style="color:var(--red)">未載入</span></div>
-          <div class="reloc-stat-row"><span class="reloc-stat-label">過季已完售 SKU</span><span class="reloc-stat-val" id="reloc-pull-count">—</span></div>
-          <div class="reloc-stat-row"><span class="reloc-stat-label">當季已完售 SKU</span><span class="reloc-stat-val" id="reloc-pull-cur-count">—</span></div>
-          <div class="reloc-stat-row"><span class="reloc-stat-label">XX/TX 空儲位(≥1.1)</span><span class="reloc-stat-val" id="reloc-avail-slots">—</span></div>
+        <!-- 資料狀態 -->
+        <div class="reloc-section">
+          <div class="reloc-section-title">📊 資料狀態</div>
+          <div class="reloc-section-body">
+            <div class="reloc-stat-row"><span class="reloc-stat-label">EPR 主報表</span><span class="reloc-stat-val" id="reloc-epr-status" style="color:var(--red)">未載入</span></div>
+            <div class="reloc-stat-row"><span class="reloc-stat-label">XX/TX 報表</span><span class="reloc-stat-val" id="reloc-xx-status" style="color:var(--red)">未載入</span></div>
+            <div class="reloc-stat-row"><span class="reloc-stat-label">過季已完售 SKU</span><span class="reloc-stat-val" id="reloc-pull-count">—</span></div>
+            <div class="reloc-stat-row"><span class="reloc-stat-label">當季已完售 SKU</span><span class="reloc-stat-val" id="reloc-pull-cur-count">—</span></div>
+            <div class="reloc-stat-row"><span class="reloc-stat-label">XX/TX 空儲位(≥1.1)</span><span class="reloc-stat-val" id="reloc-avail-slots">—</span></div>
+          </div>
         </div>
+
+        <!-- 釋放儲位設定 -->
+        <div class="reloc-section">
+          <div class="reloc-section-title">⚙️ 釋放儲位設定</div>
+          <div class="reloc-section-body">
+            <div style="font-size:11px;color:var(--text3);margin-bottom:8px">選擇哪些 SKU 要納入釋放儲位：</div>
+            <div class="reloc-mode-row">
+              <label>
+                <input type="checkbox" id="chk-pull" checked onchange="updateRelocStats()">
+                <span>過季已完售</span>
+              </label>
+            </div>
+            <div class="reloc-mode-row">
+              <label>
+                <input type="checkbox" id="chk-pull-cur" onchange="updateRelocStats()">
+                <span>當季已完售(採購可能追加)</span>
+              </label>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:10px;margin-bottom:6px">空儲位閾值（剩餘材積 ≥ 此值優先使用）：</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="number" id="reloc-threshold" value="1.1" step="0.1" min="0" style="width:80px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)">
+              <span style="font-size:11px;color:var(--text2)">m³（預設 1.1，即儲位的50%）</span>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:10px;margin-bottom:6px">分配區域（可多選）：</div>
+            <div class="reloc-mode-row">
+              <label><input type="checkbox" id="chk-zone-xx" checked><span>XX 區（1F）</span></label>
+              <label><input type="checkbox" id="chk-zone-tx" checked><span>TX 區（2F）</span></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- 包材對應規則（可編輯） -->
+        <div class="reloc-section">
+          <div class="reloc-section-title">📦 包材對應規則
+            <button onclick="resetPackagingRules()" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 8px;font-size:10px;cursor:pointer;font-family:var(--font)">重設預設值</button>
+          </div>
+          <div class="reloc-section-body" style="padding:0">
+            <div id="packaging-rules-list" style="max-height:280px;overflow-y:auto"></div>
+            <div style="padding:8px 12px;border-top:1px solid var(--border)">
+              <button onclick="addPackagingRule()" style="width:100%;padding:5px;background:var(--accent-light);border:1px dashed var(--accent);color:var(--accent);border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font)">＋ 新增規則</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 執行按鈕 -->
+        <button class="reloc-run-btn" id="reloc-run-btn" onclick="runRelocPlanning()">🚀 執行儲位釋放</button>
+        <button class="reloc-export-btn" id="reloc-export-btn" onclick="exportRelocPlan()" style="display:none">📥 匯出釋放儲位清單 (Excel)</button>
+        <button class="reloc-export-btn" id="reloc-clear-btn" onclick="clearReleasedSlots()" style="display:none;background:var(--surface);color:var(--red);border-color:var(--red);margin-top:6px">🗑 清除釋放儲位之資訊</button>
       </div>
 
-      <!-- 釋放儲位設定 -->
-      <div class="reloc-section">
-        <div class="reloc-section-title">⚙️ 釋放儲位設定</div>
-        <div class="reloc-section-body">
-          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">選擇哪些 SKU 要納入釋放儲位：</div>
-          <div class="reloc-mode-row">
-            <label>
-              <input type="checkbox" id="chk-pull" checked onchange="updateRelocStats()">
-              <span>過季已完售</span>
-            </label>
-          </div>
-          <div class="reloc-mode-row">
-            <label>
-              <input type="checkbox" id="chk-pull-cur" onchange="updateRelocStats()">
-              <span>當季已完售(採購可能追加)</span>
-            </label>
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:10px;margin-bottom:6px">空儲位閾值（剩餘材積 ≥ 此值優先使用）：</div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <input type="number" id="reloc-threshold" value="1.1" step="0.1" min="0" style="width:80px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)">
-            <span style="font-size:11px;color:var(--text2)">m³（預設 1.1，即儲位的50%）</span>
-          </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:10px;margin-bottom:6px">分配區域（可多選）：</div>
-          <div class="reloc-mode-row">
-            <label><input type="checkbox" id="chk-zone-xx" checked><span>XX 區（1F）</span></label>
-            <label><input type="checkbox" id="chk-zone-tx" checked><span>TX 區（2F）</span></label>
-          </div>
+      <!-- 右側結果區 -->
+      <div class="reloc-result-area" id="reloc-result-area">
+        <div class="no-data-msg">
+          <div style="font-size:32px;margin-bottom:12px">📦</div>
+          <div style="font-weight:700;margin-bottom:6px">儲位釋放尚未執行</div>
+          <div style="font-size:12px">請先上傳 EPR 主報表與 XX/TX 報表，<br>設定參數後點擊「執行儲位釋放」</div>
         </div>
-      </div>
-
-      <!-- 包材對應規則（可編輯） -->
-      <div class="reloc-section">
-        <div class="reloc-section-title">📦 包材對應規則
-          <button onclick="resetPackagingRules()" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 8px;font-size:10px;cursor:pointer;font-family:var(--font)">重設預設值</button>
-        </div>
-        <div class="reloc-section-body" style="padding:0">
-          <div id="packaging-rules-list" style="max-height:280px;overflow-y:auto"></div>
-          <div style="padding:8px 12px;border-top:1px solid var(--border)">
-            <button onclick="addPackagingRule()" style="width:100%;padding:5px;background:var(--accent-light);border:1px dashed var(--accent);color:var(--accent);border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font)">＋ 新增規則</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 執行按鈕 -->
-      <button class="reloc-run-btn" id="reloc-run-btn" onclick="runRelocPlanning()">🚀 執行儲位釋放</button>
-      <button class="reloc-export-btn" id="reloc-export-btn" onclick="exportRelocPlan()" style="display:none">📥 匯出釋放儲位清單 (Excel)</button>
-      <button class="reloc-export-btn" id="reloc-clear-btn" onclick="clearReleasedSlots()" style="display:none;background:var(--surface);color:var(--red);border-color:var(--red);margin-top:6px">🗑 清除釋放儲位之資訊</button>
-    </div>
-
-    <!-- 右側結果區 -->
-    <div class="reloc-result-area" id="reloc-result-area">
-      <div class="no-data-msg">
-        <div style="font-size:32px;margin-bottom:12px">📦</div>
-        <div style="font-weight:700;margin-bottom:6px">儲位釋放尚未執行</div>
-        <div style="font-size:12px">請先上傳 EPR 主報表與 XX/TX 報表，<br>設定參數後點擊「執行儲位釋放」</div>
       </div>
     </div>
   </div>
@@ -838,7 +836,7 @@ function getXXStatus(r) {
 // TAB SWITCHING
 // ============================================================
 function switchTab(name){
-  const tabs=['sku','sales','fw26','db','xx','reloc','slotdata','arrange','compare','planner'];
+  const tabs=['sku','sales','fw26','db','xx','slotdata','arrange','compare','planner'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
@@ -851,12 +849,14 @@ function switchTab(name){
     if(name==='sales'){renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();}
     if(name==='fw26'){renderFW26Stats();renderFW26CatTable();renderFW26Table();}
     if(name==='db')renderDBTable();
-    if(name==='reloc')updateRelocStats();
     DIRTY[name]=false;
   }
-  if(name==='xx'&&XX_DB.length>0&&DIRTY.xx)renderXXTables();
+  // ★ XX/儲位釋放 合併 tab: 進入時兩部分都刷新
+  if(name==='xx'){
+    if(XX_DB.length>0&&DIRTY.xx)renderXXTables();
+    updateRelocStats();
+  }
   if(!DB.length&&name==='sku')renderSKUTables();
-  if(name==='reloc')updateRelocStats();
 }
 
 // ============================================================
@@ -3118,20 +3118,60 @@ function plannerExportResult(){
   applyStyleFull(ws2,{headerRows:[0]});
   XLSX.utils.book_append_sheet(wb,ws2,'待移');
 
-  // ─── Sheet 3+: 各走道剩餘庫存 (原報表扣掉挑選清單) ───
-  const pickedSet=new Set((r.selected||[]).map(s=>String(s['商品編號']||'')));
+  // ─── Sheet 3+: 各走道最終狀態 (套用所有 step 的 moves 後) ───
+  // 演算法:
+  //   1. 從 AISLE_REPORT_DATA 建初始 SKU→儲位 對應 + 完整 row data
+  //   2. 依序套用 r.moves 更新 SKU 當前儲位 (跨 step 已 merged)
+  //   3. 重新按 (當前儲位的走道) 分組 → 寫入 sheet, 儲位顯示「新位置」
+  //   4. 若某走道最終 SKU 數=0 (例 step1 全搬光且無後續 step 移入), sheet 名 = `{aisle}_空走道`, 內容空白
+  //   5. 移到 XX/TX (overflow) 的 SKU 不在 aislesInReport 內 → 不會出現在任何走道 sheet
   const aislesInReport=(typeof plnGetAislesInReport==='function')?plnGetAislesInReport():[];
   const priorityCols=['商品編號','商品名稱','顏色','尺寸','儲位'];
   const widthMap={'商品編號':13.3,'商品名稱':30,'顏色':8,'尺寸':6,'儲位':12.5,
     '未到量':8,'未抓貨':8,'保留數量':9,'銷售庫存':9,'架上數量':9,'倉庫庫存':9,
     '商品款號':10,'季別':8,'品牌':8,'類別':10};
+
+  // Step A: 從原報表建 sku → row data 對應 (含原儲位)
+  const skuRowMap={};
+  (AISLE_REPORT_DATA||[]).forEach(row=>{
+    const sku=String(row['商品編號']||'');
+    if(!sku)return;
+    // shallow copy 避免動到原資料
+    skuRowMap[sku]={...row};
+  });
+
+  // Step B: 套用所有 moves (含 phase=XX_OVERFLOW / INTERNAL_DISPLACEMENT / SOURCE_TO_DEST), 更新儲位
+  // 注意: 同 SKU 在多 step 中只會被搬一次 (進入挑選清單後就離開來源), 故安全
+  (r.moves||[]).forEach(mv=>{
+    if(!mv.sku||!mv.dst)return;
+    if(skuRowMap[mv.sku]){
+      skuRowMap[mv.sku]['儲位']=mv.dst;
+    }
+  });
+
+  // Step C: 按當前儲位的走道分組
+  const aisleSkus={};
+  aislesInReport.forEach(a=>{aisleSkus[a]=[];});
+  Object.values(skuRowMap).forEach(row=>{
+    const cell=String(row['儲位']||'');
+    const aisle=cell.substring(0,3);
+    if(aisleSkus[aisle]!==undefined){
+      aisleSkus[aisle].push(row);
+    }
+  });
+
+  // Step D: 為每個走道建 sheet
   aislesInReport.forEach(aisle=>{
-    const prefix=aisle+'-';
-    const rows=(AISLE_REPORT_DATA||[]).filter(row=>{
-      const cell=String(row['儲位']||'');
-      return cell.startsWith(prefix)&&!pickedSet.has(String(row['商品編號']||''));
-    });
-    if(!rows.length)return;
+    const rows=aisleSkus[aisle];
+    if(!rows||rows.length===0){
+      // ★ 空走道: 命名 `{aisle}_空走道`, 內容空白
+      const ws=XLSX.utils.aoa_to_sheet([['']]);
+      ws['!cols']=[{wch:14}];
+      XLSX.utils.book_append_sheet(wb,ws,`${aisle}_空走道`);
+      return;
+    }
+    // 排序: 依當前儲位升冪 (方便操作員按位置查找)
+    rows.sort((a,b)=>String(a['儲位']||'').localeCompare(String(b['儲位']||'')));
     // 欄位順序: priority 優先, 其餘按原順序
     const keysRemaining=new Set();
     const allKeysInOrder=[];
