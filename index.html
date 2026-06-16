@@ -2637,6 +2637,129 @@ function plnCloneCells(src){
   return out;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ★ 內部整理引擎 (同走道分散空格 → 連續 N 個空格)
+// ═══════════════════════════════════════════════════════════════════
+// 演算法:
+//   1. 來源走道 = 目的走道 = 單一走道 (UI 保證, 引擎再次驗證)
+//   2. 對該走道的所有 col, 從每個 col 的 layer=1 嘗試當起點, 往後找 N 個「存在的」cell
+//      → 計算其中現有 SKU 的數量 = 該起點所需移動次數
+//   3. 取最少移動次數的起點; 同分時取 col 最小 (走道頭優先)
+//   4. 目標範圍內的現存 SKU 全部撤離 → 放到走道內目標範圍「以外」的空格
+//      (空格依 col, layer 升冪填滿, 不刻意最佳化走路距離; 用戶只要求最少移動次數)
+//   5. 不做 XX/TX overflow, 不做款色分組, 直接逐筆 move
+function plnRunInternalEngine(config,initialCells){
+  const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
+  const moves=[];
+  const failed=[];
+  
+  // 驗證: 來源/目的應同一走道
+  if(!config.source.length||config.source.length!==1||config.destination.length!==1||config.source[0]!==config.destination[0]){
+    return {selected:[],capacity:{total:0,byAisle:{},byLayout:{}},deficit:0,moves:[],failed:[],
+      config,xxSalesMax:0,finalCells:cells,
+      _internalError:'內部整理模式: 需要剛好一個走道, 且來源=目的'};
+  }
+  const aisle=config.source[0];
+  const N=config.nToPick;
+  if(N<=0){
+    return {selected:[],capacity:{total:0,byAisle:{[aisle]:0},byLayout:{}},deficit:0,moves:[],failed:[],
+      config,xxSalesMax:0,finalCells:cells,
+      _internalError:'內部整理模式: 連續空格數需 > 0'};
+  }
+  
+  // 蒐集走道內所有 cell, 並建立 col→layer→cell 索引
+  const aisleCells=Object.values(cells).filter(c=>c.aisle===aisle);
+  if(!aisleCells.length){
+    return {selected:[],capacity:{total:0,byAisle:{[aisle]:0},byLayout:{}},deficit:0,moves:[],failed:[],
+      config,xxSalesMax:0,finalCells:cells,
+      _internalError:`走道 ${aisle} 沒有任何儲位`};
+  }
+  const colSet=new Set(aisleCells.map(c=>c.col));
+  const sortedCols=[...colSet].sort((a,b)=>a-b);
+  const cellByPos={};
+  aisleCells.forEach(c=>{
+    if(!cellByPos[c.col])cellByPos[c.col]={};
+    cellByPos[c.col][c.layer]=c;
+  });
+  
+  // 從起點 col 開始, 取連續 N 個「實際存在」的 cell (每 col 由 layer 1→4 掃, 然後跳下個 col)
+  function getRangeFrom(startCol,n){
+    const range=[];
+    for(const col of sortedCols){
+      if(col<startCol)continue;
+      for(let layer=1;layer<=4&&range.length<n;layer++){
+        if(cellByPos[col]&&cellByPos[col][layer])range.push(cellByPos[col][layer]);
+      }
+      if(range.length>=n)break;
+    }
+    return range.length===n?range:null;
+  }
+  
+  // 嘗試每個可能的起點 col (起點必為 layer 1, 由 sortedCols 保證)
+  let bestStartCol=-1, bestCost=Infinity, bestRange=null;
+  for(const startCol of sortedCols){
+    const r=getRangeFrom(startCol,N);
+    if(!r)continue;
+    // cost = 範圍內有 SKU 的 cell 數 = 需移動次數
+    // (locked cell 不可動, 視為「不可用範圍」直接跳過此 startCol)
+    const lockedInRange=r.some(c=>c.locked);
+    if(lockedInRange)continue;
+    const cost=r.filter(c=>c.sku).length;
+    if(cost<bestCost){
+      bestCost=cost;
+      bestStartCol=startCol;
+      bestRange=r;
+    }
+  }
+  
+  if(!bestRange){
+    return {selected:[],capacity:{total:0,byAisle:{[aisle]:0},byLayout:{}},deficit:N,moves:[],failed:[],
+      config,xxSalesMax:0,finalCells:cells,
+      _internalError:`走道 ${aisle} 沒有 ${N} 個連續可用儲位 (可能 locked 或實際 cell 不足)`};
+  }
+  
+  // 目標範圍內現存 SKU = 需移出
+  const displacees=bestRange.filter(c=>c.sku);
+  
+  // 撤離終點 = 走道內目標範圍以外的空格 (非 locked)
+  const targetCellSet=new Set(bestRange.map(c=>c.cell));
+  const refuges=aisleCells.filter(c=>!c.sku&&!c.locked&&!targetCellSet.has(c.cell));
+  refuges.sort((a,b)=>a.col-b.col||a.layer-b.layer);
+  
+  if(displacees.length>refuges.length){
+    return {selected:[],capacity:{total:refuges.length,byAisle:{[aisle]:refuges.length},byLayout:{}},
+      deficit:displacees.length-refuges.length,moves:[],failed:[],
+      config,xxSalesMax:0,finalCells:cells,
+      _internalError:`走道 ${aisle} 內可用空格 (${refuges.length}) 不足以容納目標範圍內 ${displacees.length} 個需移出 SKU`};
+  }
+  
+  // 執行 moves
+  const selected=[];
+  displacees.forEach((srcCell,i)=>{
+    const dstCell=refuges[i];
+    const sku=srcCell.sku, info=srcCell.info;
+    moves.push({phase:'INTERNAL_CONSOLIDATION',sku,src:srcCell.cell,dst:dstCell.cell,
+      dstLayout:dstCell.layout||''});
+    selected.push(Object.assign({},info||{},{'商品編號':sku,'儲位':srcCell.cell}));
+    // 更新狀態
+    srcCell.sku=null; srcCell.info=null;
+    dstCell.sku=sku; dstCell.info=info; dstCell.locked=true;
+  });
+  
+  return {
+    selected,
+    capacity:{total:refuges.length,byAisle:{[aisle]:refuges.length},byLayout:{}},
+    deficit:0,
+    moves,
+    failed,
+    config,
+    xxSalesMax:0,
+    finalCells:cells,
+    _internalStartCol:bestStartCol,
+    _internalTargetRange:bestRange.map(c=>c.cell)
+  };
+}
+
 // ═══ UI: 多步驟 (pipeline) ═══
 // PLN_STEPS: 預設 1 個 step, 使用者可加減
 let PLN_STEPS_COUNT=1;
@@ -2673,6 +2796,7 @@ function plannerRenderConfigUI(){
   plannerRenderStep(1,aisles,[],[],'','high');
   // ★ 掛載事件監聽: 任何 checkbox/radio/N 變更 → debounce 後重算所有 step 顯示數字
   const wrap=document.getElementById('pln-steps-wrap');
+  wrap.addEventListener('change',plannerHandleInternalBind);  // 內部整理: src/dst 互鎖 + 單選
   wrap.addEventListener('change',plannerScheduleRefresh);
   wrap.addEventListener('input',plannerScheduleRefresh);
   plannerRefreshStepCounts();
@@ -2704,6 +2828,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''}>高庫存</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''}>低庫存</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="internal" ${defaultSortMode==='internal'?'checked':''}>內部整理</label>
       </div>
       <span style="color:var(--text2)">SKU數</span>
       <div><input type="number" data-step="${idx}" data-grp="n" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px"></div>
@@ -2764,6 +2889,47 @@ function plannerScheduleRefresh(){
   _plnRefreshTimer=setTimeout(()=>{_plnRefreshTimer=null;plannerRefreshStepCounts();},150);
 }
 
+// ═══ 內部整理: src/dst 互鎖 + 單選 ═══
+// 任意 step 切到 internal 時, src 與 dst 視為同一個走道; 點 src 同步 dst, 點 dst 同步 src, 其餘自動取消勾選.
+// 切回 high/low 時不做事 (使用者手動調整 src/dst).
+function plannerHandleInternalBind(e){
+  const t=e.target;
+  if(!t||!t.dataset||!t.dataset.step)return;
+  const idx=t.dataset.step;
+  const stepEl=document.getElementById(`pln-step-${idx}`);
+  if(!stepEl)return;
+  const sortInp=stepEl.querySelector('input[data-grp="sortMode"]:checked');
+  const mode=sortInp?sortInp.value:'high';
+  
+  // 切到 internal: 同步 src=dst (若 src 已勾 → 帶到 dst; 否則 dst 已勾 → 帶到 src; 都未勾就維持空)
+  if(t.dataset.grp==='sortMode' && mode==='internal'){
+    const srcChecked=[...stepEl.querySelectorAll('input[data-grp="src"]:checked')].map(c=>c.value);
+    const dstChecked=[...stepEl.querySelectorAll('input[data-grp="dst"]:checked')].map(c=>c.value);
+    const target=srcChecked[0]||dstChecked[0]||null;
+    // 全部取消
+    stepEl.querySelectorAll('input[data-grp="src"],input[data-grp="dst"]').forEach(c=>{c.checked=false;});
+    // 同步勾選 target (若有)
+    if(target){
+      stepEl.querySelectorAll(`input[data-grp="src"][value="${target}"],input[data-grp="dst"][value="${target}"]`).forEach(c=>{c.checked=true;});
+    }
+    return;
+  }
+  // 切離 internal: 不動 src/dst
+  if(t.dataset.grp==='sortMode')return;
+  
+  // src 或 dst 變動時, 若當前 mode 是 internal → 強制單選 + 互鎖
+  if(mode==='internal'&&(t.dataset.grp==='src'||t.dataset.grp==='dst')){
+    if(!t.checked){
+      // 取消勾選 → 兩邊都取消
+      stepEl.querySelectorAll(`input[data-grp="src"][value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=false;});
+      return;
+    }
+    // 勾選 → 取消其他所有, 兩邊都勾這一個
+    stepEl.querySelectorAll('input[data-grp="src"],input[data-grp="dst"]').forEach(c=>{c.checked=false;});
+    stepEl.querySelectorAll(`input[data-grp="src"][value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=true;});
+  }
+}
+
 function plannerRefreshStepCounts(){
   const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
   if(!stepDivs.length)return;
@@ -2803,6 +2969,16 @@ function plannerRefreshStepCounts(){
 
     // 嘗試模擬此 step (給下一個 step 用); 設定不完整則停止後續 step 的數字計算
     const config=plannerCollectStepConfig(idx);
+    if(config.sortMode==='internal'){
+      // 內部整理: 需要單一同走道 + N>0
+      if(config.source.length!==1||config.destination.length!==1||config.source[0]!==config.destination[0]||!config.nToPick){simBroken=true;continue;}
+      try{
+        const r=plnRunInternalEngine(config,cells);
+        if(r._internalError){simBroken=true;continue;}
+        cells=r.finalCells;
+      }catch(e){console.warn('Step',idx,'內部整理模擬失敗:',e);simBroken=true;}
+      continue;
+    }
     if(!config.source.length||!config.destination.length||config.nToPick<=0){simBroken=true;continue;}
     try{
       const selected=plnSelectSourceSKUs(config,cells);
@@ -2828,8 +3004,17 @@ function plannerRunAllSteps(){
   });
   // 驗證每 step
   for(const s of stepConfigs){
-    if(!s.config.source.length){alert(`Step ${s.idx}: 請選擇至少一個來源走道`);return;}
-    if(!s.config.destination.length){alert(`Step ${s.idx}: 請選擇至少一個目的走道`);return;}
+    if(s.config.sortMode==='internal'){
+      if(s.config.source.length!==1||s.config.destination.length!==1||s.config.source[0]!==s.config.destination[0]){
+        alert(`Step ${s.idx}: 內部整理模式需要剛好勾選同一個走道 (來源=目的)`);return;
+      }
+      if(!s.config.nToPick||s.config.nToPick<=0){
+        alert(`Step ${s.idx}: 內部整理模式請輸入要產生的「連續空格數」`);return;
+      }
+    } else {
+      if(!s.config.source.length){alert(`Step ${s.idx}: 請選擇至少一個來源走道`);return;}
+      if(!s.config.destination.length){alert(`Step ${s.idx}: 請選擇至少一個目的走道`);return;}
+    }
   }
   
   // 依序執行: 每 step 用上一 step 結束的 cells 作為起點
@@ -2840,6 +3025,27 @@ function plannerRunAllSteps(){
   
   for(let i=0;i<stepConfigs.length;i++){
     const {idx,config}=stepConfigs[i];
+    
+    // ════ 內部整理 分支 (跳過 srcAvail/XX overflow 預檢, 直接呼叫 plnRunInternalEngine) ════
+    if(config.sortMode==='internal'){
+      const r=plnRunInternalEngine(config,cells);
+      r.stepIdx=idx;
+      if(r._internalError){alert(`Step ${idx}: ${r._internalError}`);return;}
+      allResults.push(r);
+      mergedMoves.push(...r.moves);
+      mergedSelected.push(...r.selected);
+      cells=r.finalCells;
+      const statusEl=document.getElementById(`pln-step-${idx}-status`);
+      if(statusEl){
+        const aisle=config.source[0];
+        const startCol=r._internalStartCol;
+        statusEl.textContent=`✓ 內部整理 ${aisle} | 起點 col ${String(startCol).padStart(3,'0')}-1 | 移動 ${r.moves.length} 次 (產生連續 ${config.nToPick} 空格)`;
+        statusEl.style.color='var(--accent)';
+      }
+      continue;
+    }
+    
+    // ════ 高/低庫存 分支 (原邏輯) ════
     // 預檢 + xxSalesMax 對話 (每 step 獨立)
     const tmpCells=cells?plnCloneCells(cells):plnBuildState();
     // ★ N 防呆: 檢查來源走道實際可用 SKU 數 (扣掉前面 step 已搬走的)
@@ -2939,7 +3145,7 @@ function plannerRenderResult(r){
   rc.className='card';
   const byPhase={};
   r.moves.forEach(m=>{byPhase[m.phase]=(byPhase[m.phase]||0)+1;});
-  const xxN=byPhase.XX_OVERFLOW||0,intN=byPhase.INTERNAL_DISPLACEMENT||0,mainN=byPhase.SOURCE_TO_DEST||0;
+  const xxN=byPhase.XX_OVERFLOW||0,intN=byPhase.INTERNAL_DISPLACEMENT||0,mainN=byPhase.SOURCE_TO_DEST||0,icN=byPhase.INTERNAL_CONSOLIDATION||0;
   // 健康檢查: 同 SKU 是否重複出現
   const skuCount={};
   r.moves.forEach(m=>{skuCount[m.sku]=(skuCount[m.sku]||0)+1;});
@@ -2951,11 +3157,12 @@ function plannerRenderResult(r){
   rc.innerHTML=`
     <div class="card-title"><span class="dot"></span>執行結果</div>
     <div style="padding:8px 0">
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11px;margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;font-size:11px;margin-bottom:8px">
         <div style="padding:6px 10px;background:rgba(192,57,43,0.08);border-radius:4px"><div style="color:var(--text2)">挑選 SKU</div><div style="font-size:18px;font-weight:700">${r.selected.length}</div></div>
         <div style="padding:6px 10px;background:rgba(41,128,185,0.10);border-radius:4px"><div style="color:var(--text2)">XX 溢位</div><div style="font-size:18px;font-weight:700;color:#2980b9">${xxN}</div></div>
-        <div style="padding:6px 10px;background:rgba(212,160,23,0.10);border-radius:4px"><div style="color:var(--text2)">內部整理</div><div style="font-size:18px;font-weight:700;color:#d4a017">${intN}</div></div>
+        <div style="padding:6px 10px;background:rgba(212,160,23,0.10);border-radius:4px"><div style="color:var(--text2)">置換</div><div style="font-size:18px;font-weight:700;color:#d4a017">${intN}</div></div>
         <div style="padding:6px 10px;background:rgba(192,57,43,0.08);border-radius:4px"><div style="color:var(--text2)">主要移動</div><div style="font-size:18px;font-weight:700">${mainN}</div></div>
+        <div style="padding:6px 10px;background:rgba(120,76,150,0.10);border-radius:4px"><div style="color:var(--text2)">內部整理</div><div style="font-size:18px;font-weight:700;color:#784c96">${icN}</div></div>
       </div>
       <div style="font-size:11px;color:var(--text2);margin-bottom:6px">總移動 = <strong>${r.moves.length}</strong> 筆｜目標空格 ${r.capacity.total}｜${r.deficit>0?`缺口 ${r.deficit} ${xxNote}`:'容量充足'}</div>
       ${dupHtml}
@@ -2979,93 +3186,127 @@ function plannerExportResult(){
   });
 
   // === Sheet 2: 待移 ===
-  // ★ 新排序規則:
-  //   1. phase 順序: XX_OVERFLOW → INTERNAL_DISPLACEMENT → SOURCE_TO_DEST
-  //   2. 各 phase 內按 (src 走道, dst 走道, src col, src layer) 排序
-  //   3. 每換一個 (src 走道, dst 走道) 對 → 空一行
-  //   4. phase 切換 → 空兩行 (不插 inline header, 由每欄頂的 forced header 處理)
-  //   5. 動態 numCols = ceil(linearRows / 50), cap 4
-  //   6. 每欄頂強制顯示「商品編號 NEW 擺法 儲位」標頭 (含 col 2+)
+  // ★ 走道分組 bin-packing 排版 (取代舊版線性切欄):
+  //   1. 按 src 走道分組, 組內按 (src col, src layer) 升冪
+  //   2. 每 block 上限 58 列 (1 標題 + 57 資料), 每頁 2 block 並排 (= 114 資料列)
+  //   3. 走道 ≤57 列 → 1 block; 走道 >57 → 拆 chunk, 接續同頁第二區塊 (跨頁占連續頁)
+  //   4. 多 chunk 走道末頁奇數 → 留空槽給單 chunk 走道填
+  //   5. 剩餘單 chunk 走道用 FFD (largest+smallest pairing) 平衡每頁列數
+  //   6. 頁內 block 依走道字母左→右; 整體頁面依首 chunk 走道字母序
+  // 框線規則 (符合 待移.xlsx 模板): 標題=灰底+粗體+全框; 商品編號/儲位 cell=全框; NEW/擺法 cell=無框
   
   const aisleOf=cell=>String(cell||'').substring(0,3);
   const colOf=cell=>{const m=String(cell||'').match(/-(\d+)-/);return m?parseInt(m[1]):0;};
   const layerOf=cell=>{const m=String(cell||'').match(/-(\d+)$/);return m?parseInt(m[1]):0;};
-  const phaseOrder=['XX_OVERFLOW','INTERNAL_DISPLACEMENT','SOURCE_TO_DEST'];
   
-  // ── Step 1: 建線性序列 (純資料 + 空白行; 不放 inline header) ──
-  // linearRows: 每筆 = {sku, dst, layout, src} | {blank:true}
-  const linearRows=[];
-  let firstPhase=true;
-  phaseOrder.forEach(ph=>{
-    const sub=r.moves.filter(m=>m.phase===ph);
-    if(!sub.length)return;
-    if(!firstPhase){
-      // phase 切換: 空兩行作分隔 (內部 → 主要 之間, 給操作員視覺斷點)
-      linearRows.push({blank:true});
-      linearRows.push({blank:true});
-    }
-    firstPhase=false;
-    // 排序: src 走道 ASC → dst 走道 ASC → src col ASC → src layer ASC
-    // (★ 圖 3 A09→A09 區順序 026-1, 026-4, 050-1, 050-2, 050-3, 062-1, 062-2 即按 src 升冪)
-    sub.sort((a,b)=>{
-      const sa=aisleOf(a.src),sb=aisleOf(b.src);
-      if(sa!==sb)return sa<sb?-1:1;
-      const da=aisleOf(a.dst),db=aisleOf(b.dst);
-      if(da!==db)return da<db?-1:1;
-      const sca=colOf(a.src),scb=colOf(b.src);
-      if(sca!==scb)return sca-scb;
-      const sla=layerOf(a.src),slb=layerOf(b.src);
-      if(sla!==slb)return sla-slb;
-      return (a.dst||'').localeCompare(b.dst||'');
-    });
-    // 插入分隔空行 (每換一個 (src走道, dst走道) 對)
-    let prevKey=null;
-    sub.forEach(m=>{
-      const key=aisleOf(m.src)+'|'+aisleOf(m.dst);
-      if(prevKey!==null && key!==prevKey){linearRows.push({blank:true});}
-      linearRows.push({sku:m.sku,dst:m.dst,layout:m.dstLayout||'',src:m.src||''});
-      prevKey=key;
-    });
+  // ── Step 1: 按 src 走道分組 + 組內排序 ──
+  const tyByAisle={};
+  (r.moves||[]).forEach(m=>{
+    const a=aisleOf(m.src);
+    if(!a)return;
+    if(!tyByAisle[a])tyByAisle[a]=[];
+    tyByAisle[a].push(m);
+  });
+  Object.values(tyByAisle).forEach(arr=>{
+    arr.sort((a,b)=>colOf(a.src)-colOf(b.src)||layerOf(a.src)-layerOf(b.src));
   });
   
-  // ── Step 2: 動態決定 numCols (每 col ~50 行) ──
-  const totalLines=linearRows.length;
-  let numCols=Math.max(1,Math.ceil(totalLines/50));
-  if(numCols>4)numCols=4;  // cap 4 col
-  const rowsPerCol=Math.ceil(totalLines/numCols);
-  
-  // ── Step 3: 切分 + 每欄 strip leading/trailing blanks + 強制 header at top ──
-  const cols=[];
-  for(let g=0;g<numCols;g++){
-    const slice=linearRows.slice(g*rowsPerCol,(g+1)*rowsPerCol);
-    while(slice.length && slice[0].blank)slice.shift();           // 開頭空白丟掉
-    while(slice.length && slice[slice.length-1].blank)slice.pop(); // 結尾空白丟掉
-    slice.unshift({header:true});                                  // 每欄頂強制 header
-    cols.push(slice);
-  }
-  // 補齊長度
-  const maxLen=Math.max(...cols.map(c=>c.length),1);
-  cols.forEach(c=>{while(c.length<maxLen)c.push({blank:true});});
-  
-  // ── Step 4: 組 aoa2 (4 col 並排, 每 col 4 欄位 + 1 分隔空欄) ──
-  const aoa2=[];
-  for(let i=0;i<maxLen;i++){
-    const row=[];
-    for(let g=0;g<numCols;g++){
-      const item=cols[g][i];
-      if(item.header){
-        row.push('商品編號','NEW','擺法','儲位');
-      } else if(item.blank){
-        row.push('','','','');
-      } else {
-        row.push(item.sku,item.dst,item.layout,item.src);
-      }
-      if(g<numCols-1)row.push('');
+  // ── Step 2: 切 chunks (每 chunk ≤57 moves) + 分多/單 ──
+  const TY_BLOCK_DATA=57;
+  const tyMultiPages=[];
+  const tyOpenSlots=[];
+  const tySingleChunks=[];
+  Object.keys(tyByAisle).sort().forEach(a=>{
+    const mvs=tyByAisle[a];
+    const cs=[];
+    for(let i=0;i<mvs.length;i+=TY_BLOCK_DATA){
+      cs.push({aisle:a, moves:mvs.slice(i,i+TY_BLOCK_DATA)});
     }
+    if(cs.length>=2){
+      // 多 chunk: 2 chunk 1 頁, 末頁奇數則留空槽
+      for(let i=0;i<cs.length;i+=2){
+        if(i+1<cs.length){
+          tyMultiPages.push([cs[i],cs[i+1]]);
+        } else {
+          const p=[cs[i]];
+          tyMultiPages.push(p);
+          tyOpenSlots.push(p);
+        }
+      }
+    } else if(cs.length===1){
+      tySingleChunks.push(cs[0]);
+    }
+  });
+  
+  // ── Step 3: 單 chunk DESC 排序, 填多 chunk 走道末頁空槽 ──
+  tySingleChunks.sort((a,b)=>b.moves.length-a.moves.length);
+  let tySi=0;
+  while(tySi<tySingleChunks.length && tyOpenSlots.length>0){
+    tyOpenSlots.shift().push(tySingleChunks[tySi++]);
+  }
+  
+  // ── Step 4: 剩餘單 chunk 用 largest+smallest pairing ──
+  const tySingles=tySingleChunks.slice(tySi);
+  const tyPairedPages=[];
+  let tyL=0,tyR=tySingles.length-1;
+  while(tyL<=tyR){
+    if(tyL===tyR){
+      tyPairedPages.push([tySingles[tyL]]);tyL++;
+    } else {
+      tyPairedPages.push([tySingles[tyL],tySingles[tyR]]);tyL++;tyR--;
+    }
+  }
+  
+  // ── Step 5: 合併頁面, 每頁內依走道字母排序; 整體頁面依首 chunk 走道字母序 ──
+  const tyPages=[...tyMultiPages,...tyPairedPages];
+  tyPages.forEach(p=>{
+    if(p.length===2 && p[0].aisle>p[1].aisle){[p[0],p[1]]=[p[1],p[0]];}
+  });
+  tyPages.sort((a,b)=>a[0].aisle.localeCompare(b[0].aisle));
+  
+  // ── Step 6: 渲染 aoa2 (每頁 9 col + 頁間 sep) ──
+  // 頁結構: [塊1×4col, intra-sep×1, 塊2×4col] + inter-sep (除末頁)
+  // 總列數 = max(chunk.moves.length + 1 for header) 跨所有 chunks
+  const tyMaxRows = tyPages.length ? Math.max(...tyPages.flatMap(p=>p.map(c=>c.moves.length+1))) : 1;
+  const aoa2=[];
+  for(let rIdx=0; rIdx<tyMaxRows; rIdx++){
+    const row=[];
+    tyPages.forEach((page,pi)=>{
+      // Block 1
+      const c1=page[0];
+      if(rIdx===0){
+        row.push('商品編號','NEW','擺法','儲位');
+      } else if(rIdx-1<c1.moves.length){
+        const m=c1.moves[rIdx-1];
+        row.push(m.sku||'', m.dst||'', m.dstLayout||'', m.src||'');
+      } else {
+        row.push('','','','');
+      }
+      // Intra-page sep
+      row.push('');
+      // Block 2 (可能不存在)
+      if(page.length>=2){
+        const c2=page[1];
+        if(rIdx===0){
+          row.push('商品編號','NEW','擺法','儲位');
+        } else if(rIdx-1<c2.moves.length){
+          const m=c2.moves[rIdx-1];
+          row.push(m.sku||'', m.dst||'', m.dstLayout||'', m.src||'');
+        } else {
+          row.push('','','','');
+        }
+      } else {
+        row.push('','','','');
+      }
+      // Inter-page sep (除末頁)
+      if(pi<tyPages.length-1) row.push('');
+    });
     aoa2.push(row);
   }
+  // 空結果保底 (沒有任何 move 時)
+  if(!aoa2.length) aoa2.push(['商品編號','NEW','擺法','儲位']);
   
-  // ═══════ 樣式工具: 全部置中; headerRows 加 bold + 灰底 + 下框 ═══════
+  // ═══════ 樣式工具 1: 挑選清單/各走道 sheet (全 cell 置中; header 加灰底+粗體+下框) ═══════
   function applyStyleFull(ws,opts){
     if(!ws['!ref'])return;
     const range=XLSX.utils.decode_range(ws['!ref']);
@@ -3088,6 +3329,51 @@ function plannerExportResult(){
       }
     }
   }
+  
+  // ═══════ 樣式工具 2: 待移 sheet (商品編號/儲位 全框, NEW/擺法 無框, 標題全框灰底) ═══════
+  function styleTaiYiSheet(ws){
+    if(!ws['!ref'])return;
+    const range=XLSX.utils.decode_range(ws['!ref']);
+    const fullBorder={
+      top:{style:'thin',color:{rgb:'FF000000'}},
+      bottom:{style:'thin',color:{rgb:'FF000000'}},
+      left:{style:'thin',color:{rgb:'FF000000'}},
+      right:{style:'thin',color:{rgb:'FF000000'}}
+    };
+    for(let R=range.s.r;R<=range.e.r;R++){
+      for(let C=range.s.c;C<=range.e.c;C++){
+        // 每頁 10 cols: 0-3=block1(商品/NEW/擺法/儲位) 4=intra-sep 5-8=block2 9=inter-sep
+        const inPageCol=C%10;
+        let colType='sep';
+        if(inPageCol===0||inPageCol===5) colType='product';   // 商品編號
+        else if(inPageCol===1||inPageCol===6) colType='new';    // NEW
+        else if(inPageCol===2||inPageCol===7) colType='layout'; // 擺法
+        else if(inPageCol===3||inPageCol===8) colType='loc';    // 儲位
+        if(colType==='sep') continue;
+        
+        const ref=XLSX.utils.encode_cell({r:R,c:C});
+        if(!ws[ref])ws[ref]={t:'s',v:''};
+        const v=ws[ref].v;
+        const hasValue=v!==''&&v!=null;
+        const isHeader=(R===0)&&hasValue;
+        
+        const style={
+          alignment:{horizontal:'center',vertical:'center'},
+          font:isHeader?{name:'Microsoft JhengHei',sz:11,bold:true}:{name:'Microsoft JhengHei',sz:11}
+        };
+        if(isHeader){
+          style.fill={patternType:'solid',fgColor:{rgb:'FFEAEAEA'}};
+          style.border=fullBorder;
+        } else if(hasValue){
+          // 資料 cell: 商品編號/儲位 加全框, NEW/擺法 不加框
+          if(colType==='product'||colType==='loc'){
+            style.border=fullBorder;
+          }
+        }
+        ws[ref].s=style;
+      }
+    }
+  }
 
   // ═══════ 檔名: 來源_目的; 多走道同區→prefix; 多區→排序連接 prefixes; 多 step→括號連接 ═══════
   function buildAisleLabel(aisles){
@@ -3099,7 +3385,15 @@ function plannerExportResult(){
   function buildFilename(){
     const steps=r.stepResults||[];
     if(!steps.length)return '待移.xlsx';
-    const labels=steps.map(s=>`${buildAisleLabel(s.config.source)}_${buildAisleLabel(s.config.destination)}`);
+    const labels=steps.map(s=>{
+      const src=buildAisleLabel(s.config.source);
+      const dst=buildAisleLabel(s.config.destination);
+      // 內部整理: src=dst 同走道 → "走道_內部" 取代 "A09_A09"
+      if(s.config.sortMode==='internal' && src===dst){
+        return `${src}_內部`;
+      }
+      return `${src}_${dst}`;
+    });
     return labels.length===1?`${labels[0]}.xlsx`:`${labels.map(l=>`(${l})`).join('_')}.xlsx`;
   }
 
@@ -3111,15 +3405,24 @@ function plannerExportResult(){
   applyStyleFull(ws1,{headerRows:[0]});
   XLSX.utils.book_append_sheet(wb,ws1,'挑選清單');
 
-  // ─── Sheet 2: 待移 (★ 新欄寬: 13.3 / 12.3 / 5.6 / 12.5) ───
+  // ─── Sheet 2: 待移 (★ 走道分組 bin-packing + 待移.xlsx 模板框線) ───
   const ws2=XLSX.utils.aoa_to_sheet(aoa2);
+  // 欄寬: 每頁 [block1×4 + intra-sep + block2×4] + inter-sep (除末頁)
   const cw=[];
-  for(let g=0;g<numCols;g++){
+  if(tyPages.length){
+    tyPages.forEach((page,pi)=>{
+      cw.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}); // block 1
+      cw.push({wch:3});                                     // intra-page sep (窄)
+      cw.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}); // block 2
+      if(pi<tyPages.length-1) cw.push({wch:6});             // inter-page sep (寬, 視覺斷頁)
+    });
+  } else {
     cw.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});
-    if(g<numCols-1)cw.push({wch:2});
   }
   ws2['!cols']=cw;
-  applyStyleFull(ws2,{headerRows:[0]});
+  styleTaiYiSheet(ws2);
+  // A4 列印邊距 (與 待移.xlsx 模板一致, 邊距=0)
+  ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
   XLSX.utils.book_append_sheet(wb,ws2,'待移');
 
   // ─── Sheet 3+: 各走道最終狀態 (套用所有 step 的 moves 後) ───
@@ -3192,45 +3495,25 @@ function plannerExportResult(){
     const ws=XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols']=finalCols.map(k=>({wch:widthMap[k]||10}));
     applyStyleFull(ws,{headerRows:[0]});
+    // ★ autoFilter: Excel 排序時自動辨識首列為標題, 避免標題被排到資料底部
+    if(ws['!ref']){
+      const r=XLSX.utils.decode_range(ws['!ref']);
+      ws['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:r.e.r,c:r.e.c}})};
+    }
     XLSX.utils.book_append_sheet(wb,ws,aisle);
   });
 
-  // ═══════ 凍結標頭列 ═══════
-  // xlsx-js-style@1.2.0 writer 不支援 ws['!views'] 寫出凍結窗格 (輸出 XML 永遠是空 <sheetView/>),
-  // 解法: 先 write 成 xlsx (其本質是 CFB zip), 用 X.CFB 讀回, 改 sheet*.xml 注入 <pane.../>, 再重新打包
-  // 兩階段流程: 先收集所有要改的 sheet (因為 cfb_add 會 reorder FullPaths/FileIndex), 再統一 add
+  // ═══════ 凍結窗格 ═══════
+  // 註: xlsx-js-style@1.2.0 writer 不原生輸出 <pane> (寫出來只剩空 sheetView).
+  //   先前用 XLSX.CFB 後處理硬注 XML 會破壞 ZIP 結構, Excel 開啟彈出修復對話框.
+  //   改用 ws['!autofilter']: Excel 排序時會自動辨識首列為標題, 避免標題被排到底.
+  //   套用範圍: 挑選清單 + 各走道 sheet (待移 sheet 含多 block 不適合 autoFilter).
   const filename=buildFilename();
-  try{
-    const buf=XLSX.write(wb,{type:'array',bookType:'xlsx'});
-    const u8=new Uint8Array(buf);
-    const cfb=XLSX.CFB.read(u8,{type:'array'});
-    const pending=[];
-    cfb.FullPaths.forEach((fp,i)=>{
-      if(!/xl\/worksheets\/sheet\d+\.xml$/.test(fp))return;
-      const file=cfb.FileIndex[i];
-      if(!file||!file.content)return;
-      const xml=typeof file.content==='string'?file.content:new TextDecoder().decode(file.content);
-      const newXml=xml.replace(
-        /<sheetView([^/]*)\/>/,
-        '<sheetView$1><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView>'
-      );
-      if(newXml!==xml){
-        pending.push({relPath:fp.replace(/^Root Entry\//,''),newXml});
-      }
-    });
-    pending.forEach(p=>XLSX.CFB.utils.cfb_add(cfb,p.relPath,new TextEncoder().encode(p.newXml)));
-    const finalBuf=XLSX.CFB.write(cfb,{fileType:'zip',type:'array'});
-    const blob=new Blob([finalBuf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(blob);
-    a.download=filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},100);
-  }catch(e){
-    console.warn('凍結窗格 post-process 失敗, fallback 直接寫檔:',e);
-    XLSX.writeFile(wb,filename);
+  if(ws1['!ref']){
+    const r1=XLSX.utils.decode_range(ws1['!ref']);
+    ws1['!autofilter']={ref:XLSX.utils.encode_range({s:{r:0,c:0},e:{r:r1.e.r,c:r1.e.c}})};
   }
+  XLSX.writeFile(wb,filename);
 }
 
 function renderArrangeCompare(){
