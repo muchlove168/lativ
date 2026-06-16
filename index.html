@@ -233,7 +233,7 @@
   <div class="tab" onclick="switchTab('sales')">每日銷售</div>
   <div class="tab" onclick="switchTab('fw26')">26FW 新品</div>
   <div class="tab" onclick="switchTab('db')">資料庫</div>
-  <div class="tab" onclick="switchTab('xx')">XX/儲位釋放</div>
+  <div class="tab" onclick="switchTab('xx')">儲位釋放</div>
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
   <div class="tab" onclick="switchTab('arrange')">新品儲位安排</div>
   <div class="tab" onclick="switchTab('compare')">銷售比對</div>
@@ -511,54 +511,9 @@
     <input type="file" id="zz-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleZZUpload(event)">
     <span id="xx-upload-status" style="margin-left:auto;align-self:center;font-size:12px;color:var(--text3)"></span>
   </div>
-  <div class="card" style="margin-bottom:16px">
-    <div class="card-title">
-      <span class="dot"></span>XX區統計（1F零碼區）
-      <button onclick="showXXZoneConfig('XX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
-    </div>
-    <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
-      <table id="tbl-xx">
-        <thead style="position:sticky;top:0"><tr>
-          <th onclick="sortXXTable('XX','loc')">儲位</th><th onclick="sortXXTable('XX','ungrab')">未抓貨</th>
-          <th onclick="sortXXTable('XX','stock')">銷售庫存</th><th onclick="sortXXTable('XX','shelf')">架上數量</th>
-          <th onclick="sortXXTable('XX','vol')">商品材積</th><th onclick="sortXXTable('XX','remain')">剩餘材積</th>
-          <th onclick="sortXXTable('XX','usage')">使用率</th><th onclick="sortXXTable('XX','sku')">SKU數</th><th>狀態</th>
-        </tr></thead>
-        <tbody></tbody>
-        <tfoot><tr class="total-row">
-          <td style="text-align:left!important">合計</td>
-          <td id="xx-total-ungrab">—</td><td id="xx-total-stock">—</td><td id="xx-total-shelf">—</td>
-          <td id="xx-total-vol">—</td><td>—</td><td>—</td><td id="xx-total-sku">—</td><td>—</td>
-        </tr></tfoot>
-      </table>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-title">
-      <span class="dot"></span>TX區統計（2F零碼區）
-      <button onclick="showXXZoneConfig('TX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
-    </div>
-    <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
-      <table id="tbl-tx">
-        <thead style="position:sticky;top:0"><tr>
-          <th onclick="sortXXTable('TX','loc')">儲位</th><th onclick="sortXXTable('TX','ungrab')">未抓貨</th>
-          <th onclick="sortXXTable('TX','stock')">銷售庫存</th><th onclick="sortXXTable('TX','shelf')">架上數量</th>
-          <th onclick="sortXXTable('TX','vol')">商品材積</th><th onclick="sortXXTable('TX','remain')">剩餘材積</th>
-          <th onclick="sortXXTable('TX','usage')">使用率</th><th onclick="sortXXTable('TX','sku')">SKU數</th><th>狀態</th>
-        </tr></thead>
-        <tbody></tbody>
-        <tfoot><tr class="total-row">
-          <td style="text-align:left!important">合計</td>
-          <td id="tx-total-ungrab">—</td><td id="tx-total-stock">—</td><td id="tx-total-shelf">—</td>
-          <td id="tx-total-vol">—</td><td>—</td><td>—</td><td id="tx-total-sku">—</td><td>—</td>
-        </tr></tfoot>
-      </table>
-    </div>
-  </div>
 
-  <!-- ═══ 儲位釋放 區塊 (原獨立 tab, 已合併到此) ═══ -->
-  <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--border)">
-    <div style="font-size:14px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:1px">▼ 儲位釋放</div>
+  <!-- ═══ 儲位釋放 區塊 ═══ -->
+  <div>
     <div class="reloc-layout">
 
       <!-- 左側控制面板 -->
@@ -632,6 +587,55 @@
           <div style="font-weight:700;margin-bottom:6px">儲位釋放尚未執行</div>
           <div style="font-size:12px">請先上傳 EPR 主報表與 XX/TX 報表，<br>設定參數後點擊「執行儲位釋放」</div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ XX/TX 區統計（移至最下方） ═══ -->
+  <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--border)">
+    <div style="font-size:14px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:1px">▼ XX/TX 區統計</div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-title">
+        <span class="dot"></span>XX區統計（1F零碼區）
+        <button onclick="showXXZoneConfig('XX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+      </div>
+      <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
+        <table id="tbl-xx">
+          <thead style="position:sticky;top:0"><tr>
+            <th onclick="sortXXTable('XX','loc')">儲位</th><th onclick="sortXXTable('XX','ungrab')">未抓貨</th>
+            <th onclick="sortXXTable('XX','stock')">銷售庫存</th><th onclick="sortXXTable('XX','shelf')">架上數量</th>
+            <th onclick="sortXXTable('XX','vol')">商品材積</th><th onclick="sortXXTable('XX','remain')">剩餘材積</th>
+            <th onclick="sortXXTable('XX','usage')">使用率</th><th onclick="sortXXTable('XX','sku')">SKU數</th><th>狀態</th>
+          </tr></thead>
+          <tbody></tbody>
+          <tfoot><tr class="total-row">
+            <td style="text-align:left!important">合計</td>
+            <td id="xx-total-ungrab">—</td><td id="xx-total-stock">—</td><td id="xx-total-shelf">—</td>
+            <td id="xx-total-vol">—</td><td>—</td><td>—</td><td id="xx-total-sku">—</td><td>—</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">
+        <span class="dot"></span>TX區統計（2F零碼區）
+        <button onclick="showXXZoneConfig('TX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+      </div>
+      <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
+        <table id="tbl-tx">
+          <thead style="position:sticky;top:0"><tr>
+            <th onclick="sortXXTable('TX','loc')">儲位</th><th onclick="sortXXTable('TX','ungrab')">未抓貨</th>
+            <th onclick="sortXXTable('TX','stock')">銷售庫存</th><th onclick="sortXXTable('TX','shelf')">架上數量</th>
+            <th onclick="sortXXTable('TX','vol')">商品材積</th><th onclick="sortXXTable('TX','remain')">剩餘材積</th>
+            <th onclick="sortXXTable('TX','usage')">使用率</th><th onclick="sortXXTable('TX','sku')">SKU數</th><th>狀態</th>
+          </tr></thead>
+          <tbody></tbody>
+          <tfoot><tr class="total-row">
+            <td style="text-align:left!important">合計</td>
+            <td id="tx-total-ungrab">—</td><td id="tx-total-stock">—</td><td id="tx-total-shelf">—</td>
+            <td id="tx-total-vol">—</td><td>—</td><td>—</td><td id="tx-total-sku">—</td><td>—</td>
+          </tr></tfoot>
+        </table>
       </div>
     </div>
   </div>
