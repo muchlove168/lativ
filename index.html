@@ -2653,7 +2653,7 @@ function plannerRenderConfigUI(){
   
   if(aisles.length<2){
     body.innerHTML=`<div style="padding:24px;text-align:center;color:var(--text3)">
-      走道報表只偵測到 ${aisles.length} 個走道 (${aisles.join(', ')||'無'})，至少需要 2 個 (來源 + 目標)
+      走道報表只偵測到 ${aisles.length} 個走道 (${aisles.join(', ')||'無'})，至少需要 2 個 (來源 + 目的)
     </div>`;
     document.getElementById('planner-result-card').style.display='none';
     return;
@@ -2670,7 +2670,7 @@ function plannerRenderConfigUI(){
       <button onclick="plannerRunAllSteps()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
     </div>
   `;
-  plannerRenderStep(1,aisles,[aisles[0]],aisles.slice(1),260,'high');
+  plannerRenderStep(1,aisles,[],[],'','high');
   // ★ 掛載事件監聽: 任何 checkbox/radio/N 變更 → debounce 後重算所有 step 顯示數字
   const wrap=document.getElementById('pln-steps-wrap');
   wrap.addEventListener('change',plannerScheduleRefresh);
@@ -2684,7 +2684,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
   // ★ 來源 label: 「C02 (SKU: 62)」; 目標 label: 「C06 (空儲位: 121)」; 數字由 plannerRefreshStepCounts 動態填入
   const mkCb=(grp,a,checked)=>{
     const inner=grp==='src'?`SKU: <span class="aisle-count" data-step="${idx}" data-grp="src" data-aisle="${a}">-</span>`:`空儲位: <span class="aisle-count" data-step="${idx}" data-grp="dst" data-aisle="${a}">-</span>`;
-    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;margin-right:8px;margin-bottom:2px;cursor:pointer;white-space:nowrap"><input type="checkbox" data-step="${idx}" data-grp="${grp}" value="${a}" ${checked?'checked':''}>${a} <span style="color:var(--text3);font-size:11px">(${inner})</span></label>`;
+    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px;margin-bottom:2px;cursor:pointer;white-space:nowrap"><input type="checkbox" data-step="${idx}" data-grp="${grp}" value="${a}" ${checked?'checked':''}>${a} <span style="color:var(--text3);font-size:12px">(${inner})</span></label>`;
   };
   const srcHtml=aisles.map(a=>mkCb('src',a,defaultSrc.includes(a))).join('');
   const dstHtml=aisles.map(a=>mkCb('dst',a,defaultDst.includes(a))).join('');
@@ -2697,16 +2697,16 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
       <span id="pln-step-${idx}-status" style="font-size:11px;color:var(--text3)"></span>
       <button onclick="plannerRemoveStep(${idx})" style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:3px;font-size:11px;padding:2px 8px;cursor:pointer" title="移除此步驟">×</button>
     </div>
-    <div style="display:grid;grid-template-columns:50px 1fr;gap:4px 8px;align-items:center;font-size:12px">
-      <span style="color:var(--text2)">來源</span><div>${srcHtml}</div>
-      <span style="color:var(--text2)">目標</span><div>${dstHtml}</div>
+    <div style="display:grid;grid-template-columns:70px 1fr;gap:4px 8px;align-items:center;font-size:13px">
+      <span style="color:var(--text2)">來源走道</span><div>${srcHtml}</div>
+      <span style="color:var(--text2)">目的走道</span><div>${dstHtml}</div>
       <span style="color:var(--text2)">挑選</span>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''}>庫存高 (預設)</label>
-        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''}>庫存低 <span style="color:var(--text3);font-size:11px">(未到≤10, 銷售↑)</span></label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''}>高庫存</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''}>低庫存</label>
       </div>
-      <span style="color:var(--text2)">N</span>
-      <div><input type="number" data-step="${idx}" data-grp="n" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:12px"></div>
+      <span style="color:var(--text2)">SKU數</span>
+      <div><input type="number" data-step="${idx}" data-grp="n" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px"></div>
     </div>
   `;
   wrap.appendChild(div);
@@ -2716,7 +2716,7 @@ function plannerAddStep(){
   const aisles=plnGetAislesInReport();
   PLN_STEPS_COUNT++;
   // 預設 source=第一個未被前步驟用過的, 但簡化: 預設全空, 讓使用者勾
-  plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],50,'high');
+  plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],'','high');
   plannerScheduleRefresh();
 }
 
@@ -2829,7 +2829,7 @@ function plannerRunAllSteps(){
   // 驗證每 step
   for(const s of stepConfigs){
     if(!s.config.source.length){alert(`Step ${s.idx}: 請選擇至少一個來源走道`);return;}
-    if(!s.config.destination.length){alert(`Step ${s.idx}: 請選擇至少一個目標走道`);return;}
+    if(!s.config.destination.length){alert(`Step ${s.idx}: 請選擇至少一個目的走道`);return;}
   }
   
   // 依序執行: 每 step 用上一 step 結束的 cells 作為起點
@@ -2875,9 +2875,9 @@ function plannerRunAllSteps(){
       });
       const unchecked=Object.entries(allAislesWithSpace).filter(([a,n])=>n>0).sort((a,b)=>b[1]-a[1]);
       const uncheckedTxt=unchecked.length?`\n\n💡 未勾選但有空格的走道 (空格數降冪):\n${unchecked.map(([a,n])=>`  • ${a}: ${n} 個`).join('\n')}`:'';
-      // ★ 若有 0 空格目標走道 + 未勾選有充足空格走道, 強烈提示
+      // ★ 若有 0 空格目的走道 + 未勾選有充足空格走道, 強烈提示
       const zeroWarn=(zeroAisles.length && unchecked.length)?
-        `\n\n🚨 警告: 目標走道 ${zeroAisles.join('、')} 沒有任何空格 (可能已被前面 step 填滿).\n   檢查是否該改勾「${unchecked[0][0]}」(有 ${unchecked[0][1]} 個空格)?`:'';
+        `\n\n🚨 警告: 目的走道 ${zeroAisles.join('、')} 沒有任何空格 (可能已被前面 step 填滿).\n   檢查是否該改勾「${unchecked[0][0]}」(有 ${unchecked[0][1]} 個空格)?`:'';
       
       if(strict.length<deficit){
         const allEligible=[];
@@ -2890,11 +2890,11 @@ function plannerRunAllSteps(){
         });
         allEligible.sort((a,b)=>a.sales-b.sales);
         if(allEligible.length<deficit){
-          alert(`Step ${idx}: 即使忽略銷售門檻, 符合「無未到+保留=0」的 SKU 也只有 ${allEligible.length} 個, 不足缺口 ${deficit}.\n\n目標走道空格:\n${dstDetail}${zeroWarn}${uncheckedTxt}\n\n建議減少挑選數量到 ${tmpSelected.length-deficit+allEligible.length}.`);
+          alert(`Step ${idx}: 即使忽略銷售門檻, 符合「無未到+保留=0」的 SKU 也只有 ${allEligible.length} 個, 不足缺口 ${deficit}.\n\n目的走道空格:\n${dstDetail}${zeroWarn}${uncheckedTxt}\n\n建議減少挑選數量到 ${tmpSelected.length-deficit+allEligible.length}.`);
           return;
         }
         const need=allEligible[deficit-1].sales;
-        const ok=confirm(`【Step ${idx} 容量不足】\n\n挑選: ${tmpSelected.length} 個　目標空格: ${tmpCap.total} 個　缺口: ${deficit} 個\n\n目標走道空格:\n${dstDetail}${zeroWarn}${uncheckedTxt}\n\n──────────────\n嚴格 (銷售≤5) 只有 ${strict.length} 個 XX 候選\n放寬到「銷售≤${need}」才能補足缺口\n\n確定 → 套用「銷售≤${need}」繼續\n取消 → 回去檢查走道勾選`);
+        const ok=confirm(`【Step ${idx} 容量不足】\n\n挑選: ${tmpSelected.length} 個　目標空格: ${tmpCap.total} 個　缺口: ${deficit} 個\n\n目的走道空格:\n${dstDetail}${zeroWarn}${uncheckedTxt}\n\n──────────────\n嚴格 (銷售≤5) 只有 ${strict.length} 個 XX 候選\n放寬到「銷售≤${need}」才能補足缺口\n\n確定 → 套用「銷售≤${need}」繼續\n取消 → 回去檢查走道勾選`);
         if(!ok)return;
         xxSalesMax=need;
       }
