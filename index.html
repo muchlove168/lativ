@@ -2612,6 +2612,211 @@ function plnPlaceGroup(cells,skusLayers,config,moves,opts){
   return res;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ★ 連續排入 (按款 5 碼分組, 大目的走道整批塞入連續空格)
+// ═══════════════════════════════════════════════════════════════════
+// 目的: 避免目的走道已經有足夠連續空格時, 仍對既有 SKU 做不必要 displacement
+// 演算法 (依 Gordon 底層邏輯):
+//   1. 按款 5 碼分組 → 大款先 (n DESC, vol DESC)
+//   2. 找各目的走道最長「連續可用」段, 取夠裝 N 個 SKU 的最短段 (waste 最少)
+//      連續性定義: 同走道內 col 遞增, 每 col 由 layer 1 起的連續未鎖空格
+//   3. PASS 1: 每款依色排序 (7 碼 asc) 排 main bin
+//      - 每色 1 bin (4 cell), sizes 依 plnGetTargetLayer 配 layer
+//      - 配不到 layer (層循環衝突 e.g. XL→L1 但 L1 被 XS 佔) → 進 spillover queue
+//      - 該款 max layer < 4 時, 未使用層留作「free 槽」供 spillover 補
+//   4. PASS 2: spillover 依產生順序 (款→色→碼) 填入:
+//      - 優先填 free 槽 (索引最小者先, 通常落在後續款的 layer 4)
+//      - 不夠時往 run 尾巴續排
+//   5. 任一步無法配 → 回傳 null, 由 plnRunEngine 退回原 7 碼 + plnPlaceGroup 流程
+function plnPackByFamily(cells,selected,config){
+  if(!selected||!selected.length)return null;
+  if(!config.destination||!config.destination.length)return null;
+  
+  // ── Step 1: 按款 5 碼分組 + 款內按色 7 碼分組 ──
+  const familyMap={};
+  selected.forEach(r=>{
+    const sku=String(r['商品編號']||'');
+    if(sku.length<7)return;
+    const k=plnSkuKuan(sku);
+    if(!familyMap[k])familyMap[k]={skus:[]};
+    familyMap[k].skus.push(r);
+  });
+  
+  const families=Object.entries(familyMap).map(([k,f])=>{
+    f.skus.sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號'])));
+    const colorMap={};
+    f.skus.forEach(s=>{
+      const c=plnSkuKuanSe(s['商品編號']);
+      if(!colorMap[c])colorMap[c]=[];
+      colorMap[c].push(s);
+    });
+    const colors=Object.keys(colorMap).sort();
+    
+    // 每色: 算 main (sizes→layer 1-4, 不衝突) 與 spill (層循環)
+    const colorPlans=colors.map(c=>{
+      const skus=colorMap[c];
+      const main=[]; const spill=[];
+      const layersUsed=new Set();
+      skus.forEach(s=>{
+        const L=plnGetTargetLayer(s['商品編號'],s['尺寸']);
+        if(L>=1&&L<=4&&!layersUsed.has(L)){
+          main.push({sku:s['商品編號'],layer:L,info:s});
+          layersUsed.add(L);
+        } else {
+          spill.push({sku:s['商品編號'],info:s});
+        }
+      });
+      const maxLayer=main.reduce((m,x)=>Math.max(m,x.layer),0);
+      return {color:c,main,spill,maxLayer};
+    });
+    
+    const familyMaxLayer=colorPlans.reduce((m,cp)=>Math.max(m,cp.maxLayer),0);
+    const vol=f.skus.reduce((s,r)=>s+Number(r['銷售庫存']||0)+Number(r['架上數量']||0),0);
+    return {kc:k,n:f.skus.length,vol,colorPlans,familyMaxLayer};
+  });
+  
+  // ── Step 2: 排款序 (n DESC, vol DESC) ──
+  families.sort((a,b)=>(b.n-a.n)||(b.vol-a.vol)||(a.kc<b.kc?-1:1));
+  
+  // ── Step 3: 找目的走道最長連續可用段 ──
+  // 連續性: 同走道內依 col asc, 每 col 內 layer asc 走訪 cell;
+  //         遇到 sku/locked/cell-missing 就切斷 run, 之後接續成新 run
+  // 可用 = master 有此 cell + sku 為 null + 非 locked
+  function getRunsForAisle(aisle){
+    const cols=plnValidCols(cells,aisle);
+    const runs=[];
+    let cur=[];
+    let lastCol=null,lastLayer=null;
+    cols.forEach(col=>{
+      for(let L=1;L<=4;L++){
+        const cid=plnCellId(aisle,col,L);
+        const cs=cells[cid];
+        if(!cs||cs.sku||cs.locked){
+          if(cur.length){runs.push(cur);cur=[];}
+          lastCol=null;lastLayer=null;
+          continue;
+        }
+        // 連續性: 與前一 cell 必須 (a) 同 col 且 layer 緊鄰 +1, 或 (b) col+1 且前 layer=4 此 layer=1
+        if(cur.length){
+          const okSameCol=(lastCol===col && lastLayer===L-1);
+          const okNextCol=(lastCol===col-1 && lastLayer===4 && L===1);
+          if(!okSameCol && !okNextCol){
+            runs.push(cur);
+            cur=[];
+          }
+        }
+        cur.push(cs);
+        lastCol=col;lastLayer=L;
+      }
+    });
+    if(cur.length)runs.push(cur);
+    return runs;
+  }
+  
+  // 收集所有目的走道的 runs
+  const allRuns=[];
+  config.destination.forEach(a=>{
+    getRunsForAisle(a).forEach(r=>allRuns.push(r));
+  });
+  
+  const totalSkus=selected.length;
+  // 篩選: 夠長 + 起點必為 layer 1 (bin 邊界對齊)
+  const fitRuns=allRuns.filter(r=>r.length>=totalSkus&&r[0].layer===1);
+  if(!fitRuns.length)return null;
+  // 取「最短但 >= totalSkus」(剩餘浪費最小, 也偏向使用走道靠頭那段)
+  fitRuns.sort((a,b)=>(a.length-b.length)||(a[0].col-b[0].col));
+  const bestRun=fitRuns[0];
+  
+  // ── Step 4: PASS 1: 排每款每色 main bin ──
+  // 預先計算總 bin 需求: 確保不會超出 run
+  const totalMainBins=families.reduce((s,f)=>s+f.colorPlans.length,0);
+  const totalSpills=families.reduce((s,f)=>s+f.colorPlans.reduce((q,cp)=>q+cp.spill.length,0),0);
+  // run 內可用 free 槽 = sum(每色 main bin 內未用層數)
+  const totalFreeInMains=families.reduce((s,f)=>
+    s+f.colorPlans.reduce((q,cp)=>q+(4-cp.main.length),0),0);
+  // 額外需要 spillover bin 的 SKU 數
+  const extraSpills=Math.max(0,totalSpills-totalFreeInMains);
+  const extraBins=Math.ceil(extraSpills/4);
+  // 預估占用 cell = main bins * 4 + extraSpills (補在 run 尾巴, 不需另起 bin 邊界對齊)
+  // 但實作上 free 槽落在 main bins 內, 不會額外占 cell
+  // 所以實際 cell = totalMainBins*4 - totalFreeInMains + totalSpills
+  //              = totalMainBins*4 - (totalFreeInMains - totalSpills, 若 > 0) + extraSpills (若 < 0)
+  // 簡化: 實際 cell = totalMainBins*4 + extraSpills (因為 free 槽完全被吃掉的情況才需要 extra)
+  const estimatedCells=totalMainBins*4+extraSpills;
+  if(estimatedCells>bestRun.length)return null;
+  
+  // ── 開始放置 ──
+  const assignments={};      // sku → cell
+  const usedSlotIdx=new Set(); // index in bestRun
+  const freeSlots=[];        // 索引 list, main bin 內未使用層 (供 spillover 用)
+  const spillQueue=[];       // {sku, info} 按產生順序
+  
+  let cursor=0;
+  
+  for(const f of families){
+    for(const cp of f.colorPlans){
+      // main bin 起點 = cursor (應對齊 layer 1, 因 bestRun 由 layer 1 起每 4 cell 為一 bin)
+      // bestRun 是由 getRunsForAisle 一次塞 4 cell 一 col, 必對齊
+      const binStart=cursor;
+      if(binStart+4>bestRun.length)return null;
+      
+      // 配 main SKUs 到對應 layer
+      const usedLayers=new Set();
+      cp.main.forEach(m=>{
+        const slotIdx=binStart+(m.layer-1);
+        if(slotIdx<bestRun.length && bestRun[slotIdx].layer===m.layer){
+          assignments[m.sku]=bestRun[slotIdx].cell;
+          usedSlotIdx.add(slotIdx);
+          usedLayers.add(m.layer);
+        }
+      });
+      // 未使用層加進 freeSlots
+      for(let L=1;L<=4;L++){
+        if(!usedLayers.has(L)){
+          const slotIdx=binStart+(L-1);
+          if(slotIdx<bestRun.length && bestRun[slotIdx].layer===L){
+            freeSlots.push(slotIdx);
+          }
+        }
+      }
+      cursor=binStart+4;
+      
+      // 該色 spillover 進 queue
+      cp.spill.forEach(s=>spillQueue.push(s));
+    }
+  }
+  
+  // ── Step 5: PASS 2: 排 spillover ──
+  // 優先填 freeSlots (索引小者優先), 不夠時往 cursor 後續排
+  freeSlots.sort((a,b)=>a-b);
+  for(const sp of spillQueue){
+    let placed=false;
+    if(freeSlots.length){
+      const idx=freeSlots.shift();
+      if(!usedSlotIdx.has(idx)){
+        assignments[sp.sku]=bestRun[idx].cell;
+        usedSlotIdx.add(idx);
+        placed=true;
+      }
+    }
+    if(!placed){
+      // 從 cursor 起找下一個未用 slot
+      while(cursor<bestRun.length && usedSlotIdx.has(cursor))cursor++;
+      if(cursor>=bestRun.length)return null;
+      assignments[sp.sku]=bestRun[cursor].cell;
+      usedSlotIdx.add(cursor);
+      cursor++;
+    }
+  }
+  
+  // 驗證: 全部 selected 必須都被 assign
+  for(const r of selected){
+    if(!assignments[r['商品編號']])return null;
+  }
+  
+  return assignments;
+}
+
 // 引擎主執行 (★ 支援 initialCells: 多步驟串接時, 第 2+ step 從上一步結束狀態起算)
 function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
   // 多步驟: 若 initialCells 提供, 用 deep clone 作為起點; 否則從 STORAGE_MASTER 重建
@@ -2640,6 +2845,35 @@ function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
     });
   }
   
+  // ★ 先嘗試「連續排入」: 大目的走道有足夠連續空格時, 整批塞入不做 displacement
+  // 撇除 XX overflow 後仍要排的 SKUs
+  const selectedAfterXX=selected.filter(r=>{
+    const sku=String(r['商品編號']||'');
+    return !moves.some(m=>m.phase==='XX_OVERFLOW'&&m.sku===sku);
+  });
+  const consec=plnPackByFamily(cells,selectedAfterXX,config);
+  if(consec){
+    // 直接套用 assignments → SOURCE_TO_DEST moves
+    // 依 cell 排序確保輸出穩定 (待移 sheet 中按 dst 走道 col layer 排列)
+    const entries=Object.entries(consec);
+    entries.sort((a,b)=>(a[1]<b[1]?-1:a[1]>b[1]?1:0));
+    entries.forEach(([sku,dstCell])=>{
+      const srcCell=plnFindSkuCell(cells,sku,config.source);
+      let srcInfo=null;
+      if(srcCell){
+        srcInfo=cells[srcCell].info;
+        cells[srcCell].sku=null;
+        cells[srcCell].info=null;
+      }
+      cells[dstCell].sku=sku;
+      cells[dstCell].info=srcInfo;
+      cells[dstCell].locked=true;
+      moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
+    });
+    return {selected,capacity,deficit,moves,failed:[],config,xxSalesMax,finalCells:cells};
+  }
+  
+  // ── Fallback: 連續空格不足, 用原 7 碼 grouping + plnPlaceGroup (可能含 displacement) ──
   const groupMap={};
   selected.forEach(r=>{
     const kc=String(r['商品編號']||'').substring(0,7);
