@@ -2152,6 +2152,56 @@ function plnGetTargetLayer(sku,sizeName){
   return null;
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// ★★★ 預設底層排入邏輯 (DEFAULT BASE SLOT-ASSIGNMENT LOGIC) ★★★
+// 後續所有「排入儲位」相關功能務必預設沿用以下優先序，除非另外指定：
+//   1. layerMatch  — S/M/L/XL 對應第 1/2/3/4 層 (plnGetTargetLayer)
+//   2. adjConflict — 避免同款同色不同碼排在相鄰且同層 (款色 = SKU 前 7 碼)
+//   3. dist        — 移動距離最短 (plnAisleDistance, U-shape 走道)
+//   4. sameLayout  — 同擺法優先
+//   5. col         — 欄號小者優先 (穩定 tie-break)
+// ════════════════════════════════════════════════════════════════════════
+function plnSkuKuanSe(sku){return String(sku||'').substring(0,7);}
+function plnSkuKuan(sku){return String(sku||'').substring(0,5);}
+
+// 查相鄰同層儲位是否有同款色 SKU (cells 為實際 state 陣列)
+// ignoreCell 用於排除「正在被移走」的來源 cell，避免自我衝突
+function plnAdjConflictCount(cells,sku,cellId,ignoreCell){
+  const p=plnParseCell(cellId);if(!p)return 0;
+  const ks=plnSkuKuanSe(sku);if(!ks)return 0;
+  let cnt=0;
+  for(const dc of [-1,1]){
+    const nb=plnCellId(p.aisle,p.col+dc,p.layer);
+    if(ignoreCell && nb===ignoreCell)continue;
+    const nc=cells.find(c=>c.cell===nb);
+    if(nc && nc.sku && plnSkuKuanSe(nc.sku)===ks)cnt++;
+  }
+  return cnt;
+}
+
+// 同上但使用 Map<cellId, sku> (用於 greedy 過程中暫存的 state)
+function plnAdjConflictByMap(skuMap,sku,cellId){
+  const p=plnParseCell(cellId);if(!p)return 0;
+  const ks=plnSkuKuanSe(sku);if(!ks)return 0;
+  let cnt=0;
+  for(const dc of [-1,1]){
+    const nb=plnCellId(p.aisle,p.col+dc,p.layer);
+    const ns=skuMap.get(nb);
+    if(ns && plnSkuKuanSe(ns)===ks)cnt++;
+  }
+  return cnt;
+}
+
+// 字典序比較 score 陣列 (小者優先)
+function plnCmpScoreArr(a,b){
+  for(let i=0;i<Math.max(a.length,b.length);i++){
+    const x=a[i]||0,y=b[i]||0;
+    if(x!==y)return x-y;
+  }
+  return 0;
+}
+// ════════════════════════════════════════════════════════════════════════
+
 // 從走道報表自動偵測有出現的走道
 function plnGetAislesInReport(){
   const aisles=new Set();
@@ -2646,7 +2696,13 @@ function plnCloneCells(src){
 //      → 計算其中現有 SKU 的數量 = 該起點所需移動次數
 //   3. 取最少移動次數的起點; 同分時取 col 最小 (走道頭優先)
 //   4. 目標範圍內的現存 SKU 全部撤離 → 放到走道內目標範圍「以外」的空格
-//      (空格依 col, layer 升冪填滿, 不刻意最佳化走路距離; 用戶只要求最少移動次數)
+//      ★ v2: 套用「預設底層排入邏輯」分配 refuge:
+//        優先序 = [layerMatch, adjConflict, dist, sameLayout, col]
+//        - layerMatch: S/M/L/XL → 第 1/2/3/4 層
+//        - adjConflict: 避免相鄰同層出現同款色 (前 7 碼相同)
+//        - dist: srcCell ↔ dstCell 走道內 col 差最小
+//        - sameLayout: 同擺法優先
+//        Greedy 順序: 先處理「目標層 refuge 數最少」的 displacee, 避免搶位
 //   5. 不做 XX/TX overflow, 不做款色分組, 直接逐筆 move
 function plnRunInternalEngine(config,initialCells){
   const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
@@ -2724,7 +2780,6 @@ function plnRunInternalEngine(config,initialCells){
   // 撤離終點 = 走道內目標範圍以外的空格 (非 locked)
   const targetCellSet=new Set(bestRange.map(c=>c.cell));
   const refuges=aisleCells.filter(c=>!c.sku&&!c.locked&&!targetCellSet.has(c.cell));
-  refuges.sort((a,b)=>a.col-b.col||a.layer-b.layer);
   
   if(displacees.length>refuges.length){
     return {selected:[],capacity:{total:refuges.length,byAisle:{[aisle]:refuges.length},byLayout:{}},
@@ -2733,17 +2788,61 @@ function plnRunInternalEngine(config,initialCells){
       _internalError:`走道 ${aisle} 內可用空格 (${refuges.length}) 不足以容納目標範圍內 ${displacees.length} 個需移出 SKU`};
   }
   
-  // 執行 moves
+  // ════ 套用「預設底層排入邏輯」配對 displacee → refuge ════
+  // 1. 建立 skuMap (cellId → sku), 同時將所有 displacee 來源 cell 視為「即將清空」
+  const skuMap=new Map();
+  Object.values(cells).forEach(c=>{if(c.sku)skuMap.set(c.cell,c.sku);});
+  const displaceeSrcSet=new Set(displacees.map(d=>d.cell));
+  displaceeSrcSet.forEach(cid=>skuMap.delete(cid));
+  
+  // 2. 為每個 displacee 預先算 target layer + 該層在 refuges 中的數量
+  const refugesRemaining=refuges.slice();
+  const dispInfo=displacees.map(d=>{
+    const sizeName=d.info&&(d.info['尺寸']||d.info['Size']||'');
+    const targetL=plnGetTargetLayer(d.sku,sizeName);
+    return {srcCell:d,sku:d.sku,info:d.info,targetL,sizeName};
+  });
+  
+  // 3. Greedy: 先處理「目標層 refuge 數最少」的 displacee, 避免搶位
+  const assigned=[];   // {srcCell, dstCell, sku, info}
+  while(dispInfo.length){
+    // 重新計算每個剩餘 displacee 的「目標層可用 refuge 數」
+    dispInfo.forEach(di=>{
+      di.availInTargetL=(di.targetL==null)?refugesRemaining.length
+        :refugesRemaining.filter(r=>r.layer===di.targetL).length;
+    });
+    // 缺乏 target layer 選項者優先處理 (asc); 同分按原順序 (穩定)
+    dispInfo.sort((a,b)=>a.availInTargetL-b.availInTargetL);
+    const di=dispInfo.shift();
+    
+    // 4. 為 di 評分所有剩餘 refuge: [layerMatch, adjConflict, dist, sameLayout, col]
+    let bestRef=null, bestScore=null;
+    for(const r of refugesRemaining){
+      const layerMatch=(di.targetL!=null && r.layer===di.targetL)?0:1;
+      const adjConflict=plnAdjConflictByMap(skuMap,di.sku,r.cell);
+      const dist=Math.abs(r.col-di.srcCell.col);
+      const srcLay=di.srcCell.layout||'';
+      const sameLayout=(srcLay && r.layout===srcLay)?0:1;
+      const score=[layerMatch,adjConflict,dist,sameLayout,r.col];
+      if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){
+        bestScore=score;bestRef=r;
+      }
+    }
+    assigned.push({srcCell:di.srcCell,dstCell:bestRef,sku:di.sku,info:di.info});
+    // 從 pool 移除已用 refuge, 並即時更新 skuMap (讓後續 displacee 看到新狀態)
+    const idx=refugesRemaining.indexOf(bestRef);
+    if(idx>=0)refugesRemaining.splice(idx,1);
+    skuMap.set(bestRef.cell,di.sku);
+  }
+  
+  // 5. 執行 moves
   const selected=[];
-  displacees.forEach((srcCell,i)=>{
-    const dstCell=refuges[i];
-    const sku=srcCell.sku, info=srcCell.info;
-    moves.push({phase:'INTERNAL_CONSOLIDATION',sku,src:srcCell.cell,dst:dstCell.cell,
-      dstLayout:dstCell.layout||''});
-    selected.push(Object.assign({},info||{},{'商品編號':sku,'儲位':srcCell.cell}));
-    // 更新狀態
-    srcCell.sku=null; srcCell.info=null;
-    dstCell.sku=sku; dstCell.info=info; dstCell.locked=true;
+  assigned.forEach(a=>{
+    moves.push({phase:'INTERNAL_CONSOLIDATION',sku:a.sku,src:a.srcCell.cell,dst:a.dstCell.cell,
+      dstLayout:a.dstCell.layout||''});
+    selected.push(Object.assign({},a.info||{},{'商品編號':a.sku,'儲位':a.srcCell.cell}));
+    a.srcCell.sku=null; a.srcCell.info=null;
+    a.dstCell.sku=a.sku; a.dstCell.info=a.info; a.dstCell.locked=true;
   });
   
   return {
