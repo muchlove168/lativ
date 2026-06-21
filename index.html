@@ -2152,10 +2152,17 @@ async function exportArrangeNewReport(){
   ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:14},{wch:10}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'待安排新品');
-  // 檔名: 含日期 + 櫃號/類別摘要
-  const containers=[...new Set(selection.map(s=>s.containerType))].slice(0,3).join('_');
-  const dateStr=new Date().toISOString().slice(0,10).replace(/-/g,'');
-  const fname=`待安排新品_${containers||'多櫃'}_${dateStr}.xlsx`;
+  // ★ 檔名格式: 進口編號_櫃號/櫃型 (去掉櫃號後面的 (箱數) 標註); 多櫃情況附加「_等N櫃」
+  // 例: 申洲26-016_SNBU8314481/40HQ
+  const stripBoxCount=s=>String(s||'').replace(/\s*\([^)]*\)\s*$/,'').trim();
+  let fname;
+  if(selection.length===1){
+    const s=selection[0];
+    fname=`${s.importNo||'未知'}_${stripBoxCount(s.containerType)||'未知'}.xlsx`;
+  }else{
+    const s=selection[0];
+    fname=`${s.importNo||'未知'}_${stripBoxCount(s.containerType)||'未知'}_等${selection.length}櫃.xlsx`;
+  }
   XLSX.writeFile(wb,fname);
 }
 
@@ -3462,11 +3469,19 @@ function plnRunNewEngine(config,initialCells){
   for(const ku of kuans){
     const n=ku.n;
     const dstList=config.destination||[];
+    // ★ FIX (F01 空格不足 bug): 實際需要的「連續儲位數」並非 SKU 數 n,
+    //   而是 4 × 色數. 因為 placeKuanInRun 每色配一 4-cell bin (cursor=binStart+4),
+    //   即使某色只有 1 個 SKU 也會佔用整個 bin. 5 個 SKU 分 5 色 ⇒ 需要 20 cells.
+    //   原本傳 n 進 findBestRun / 內部整理 nToPick, 導致即使 F01 有 351 個空格,
+    //   切碎後找不到「>= 5 cells 且首格 layer=1 且不含 locked」的連續段就誤判失敗.
+    const colorSet=new Set();
+    ku.skus.forEach(s=>colorSet.add(String(s.code||'').substring(0,7)));
+    const needCells=4*colorSet.size;
     
-    // (a) 先找有連續段 ≥ n 的走道, 取最短的
+    // (a) 先找有連續段 ≥ needCells 的走道, 取最短的
     let bestAisle=null, bestRun=null;
     for(const a of dstList){
-      const run=findBestRun(a,n);
+      const run=findBestRun(a,needCells);
       if(run && (!bestRun || run.length<bestRun.length)){
         bestAisle=a; bestRun=run;
       }
@@ -3481,16 +3496,16 @@ function plnRunNewEngine(config,initialCells){
     let consolAisle=null, consolEmpty=0;
     for(const a of dstList){
       const en=countEmptyInAisle(a);
-      if(en>=n && en>consolEmpty){consolAisle=a; consolEmpty=en;}
+      if(en>=needCells && en>consolEmpty){consolAisle=a; consolEmpty=en;}
     }
     
     if(consolAisle){
-      // 呼叫 plnRunInternalEngine 產生連續 n 空格
+      // 呼叫 plnRunInternalEngine 產生連續 needCells 空格
       const intCfg={
         source:[consolAisle],
         destination:[consolAisle],
         overflow:[],
-        nToPick:n,
+        nToPick:needCells,
         sortMode:'internal',
         aisleGeometry:config.aisleGeometry||plnGetAisleGeometry(),
       };
@@ -3501,7 +3516,7 @@ function plnRunNewEngine(config,initialCells){
         // 套用 intR.finalCells 到當前 cells
         Object.keys(intR.finalCells).forEach(k=>{cells[k]=intR.finalCells[k];});
         // 再找一次 best run
-        const run2=findBestRun(consolAisle,n);
+        const run2=findBestRun(consolAisle,needCells);
         if(run2){
           placeKuanInRun(ku,run2);
           continue;
@@ -3715,6 +3730,14 @@ function plannerHandleInternalBind(e){
   // mode === 'new' 時, 真實走道 src 不應被勾, 若使用者誤勾則強制取消
   if(mode==='new' && t.dataset.grp==='src' && !t.dataset.virtual){
     t.checked=false;
+  }
+  
+  // ★ 勾選新品虛擬 src → 自動切到 '新品' 挑選 mode + 取消真實走道 src
+  //   (規格: 來源走道勾選任一新品類別時, 下方挑選自動鎖定為「新品」)
+  if(t.dataset.grp==='src' && t.dataset.virtual==='new' && t.checked && mode!=='new'){
+    stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').forEach(c=>{c.checked=false;});
+    const newRadio=stepEl.querySelector('input[data-grp="sortMode"][value="new"]');
+    if(newRadio){newRadio.checked=true;}
   }
 }
 
@@ -3971,19 +3994,18 @@ function plannerRenderResult(r){
   const newSkipHtml=skippedNew.length?`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.6">📦 新品空格不足 (款保留未排): ${skippedNew.length} 款｜共 ${skippedNew.reduce((s,f)=>s+f.n,0)} 個 SKU<br>${skippedNew.slice(0,8).map(f=>`<span style="font-family:monospace">${f.kc}</span>(${f.n})`).join('、')}${skippedNew.length>8?` …+${skippedNew.length-8}`:''}</div>`:'';
   const failedHtml=otherFailed.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 未放置: ${otherFailed.length} 群組 (${otherFailed.slice(0,3).map(f=>f.kc).join(', ')}${otherFailed.length>3?'...':''})</div>`:'';
   const xxNote=r.xxSalesMax!==5?`<span style="color:#d4a017;font-weight:600">（已放寬為 銷售≤${r.xxSalesMax}）</span>`:'';
-  // 顯示新品列僅在有 newN > 0 時
-  const newCard=newN>0?`<div style="padding:6px 10px;background:rgba(120,76,150,0.16);border-radius:4px"><div style="color:var(--text2)">新品安排</div><div style="font-size:18px;font-weight:700;color:#784c96">${newN}</div></div>`:'';
-  const cols=newN>0?6:5;
+  // 顯示新品列僅在有 newN > 0 時 (★ 統一咖啡色, 取消個別色相)
+  const newCard=newN>0?`<div style="padding:6px 10px;background:var(--accent-light);border-radius:4px"><div style="color:var(--text2)">新品安排</div><div style="font-size:18px;font-weight:700;color:var(--accent)">${newN}</div></div>`:'';
   
   rc.innerHTML=`
     <div class="card-title"><span class="dot"></span>執行結果</div>
     <div style="padding:8px 0">
-      <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;font-size:11px;margin-bottom:8px">
-        <div style="padding:6px 10px;background:rgba(192,57,43,0.08);border-radius:4px"><div style="color:var(--text2)">挑選 SKU</div><div style="font-size:18px;font-weight:700">${r.selected.length}</div></div>
-        <div style="padding:6px 10px;background:rgba(41,128,185,0.10);border-radius:4px"><div style="color:var(--text2)">XX 溢位</div><div style="font-size:18px;font-weight:700;color:#2980b9">${xxN}</div></div>
-        <div style="padding:6px 10px;background:rgba(212,160,23,0.10);border-radius:4px"><div style="color:var(--text2)">置換</div><div style="font-size:18px;font-weight:700;color:#d4a017">${intN}</div></div>
-        <div style="padding:6px 10px;background:rgba(192,57,43,0.08);border-radius:4px"><div style="color:var(--text2)">主要移動</div><div style="font-size:18px;font-weight:700">${mainN}</div></div>
-        <div style="padding:6px 10px;background:rgba(120,76,150,0.10);border-radius:4px"><div style="color:var(--text2)">內部整理</div><div style="font-size:18px;font-weight:700;color:#784c96">${icN}</div></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:11px;margin-bottom:8px">
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:4px"><div style="color:var(--text2)">挑選 SKU</div><div style="font-size:18px;font-weight:700;color:var(--accent)">${r.selected.length}</div></div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:4px"><div style="color:var(--text2)">XX 溢位</div><div style="font-size:18px;font-weight:700;color:var(--accent)">${xxN}</div></div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:4px"><div style="color:var(--text2)">置換</div><div style="font-size:18px;font-weight:700;color:var(--accent)">${intN}</div></div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:4px"><div style="color:var(--text2)">主要移動</div><div style="font-size:18px;font-weight:700;color:var(--accent)">${mainN}</div></div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:4px"><div style="color:var(--text2)">內部整理</div><div style="font-size:18px;font-weight:700;color:var(--accent)">${icN}</div></div>
         ${newCard}
       </div>
       <div style="font-size:11px;color:var(--text2);margin-bottom:6px">總移動 = <strong>${r.moves.length}</strong> 筆｜目標空格 ${r.capacity.total}｜${r.deficit>0?`缺口 ${r.deficit} ${xxNote}`:'容量充足'}</div>
@@ -7073,11 +7095,11 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   <div style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
     <button class="upload-btn" onclick="document.getElementById('arrange-file-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳「匯出儲位安排」報表</button>
     <input type="file" id="arrange-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleArrangeUpload(event)">
-    <span id="arrange-status" style="font-size:12px;color:var(--text3)"></span>
+    <span id="arrange-status" style="font-size:11px;color:var(--text3)"></span>
 
     <button class="upload-btn" onclick="document.getElementById('forecast-file-input').click()" style="background:var(--accent);color:#fff;margin-left:8px">⬆ 上傳「匯出預告進貨表」報表</button>
     <input type="file" id="forecast-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleForecastUpload(event)">
-    <span id="forecast-status" style="font-size:12px;color:var(--text3)"></span>
+    <span id="forecast-status" style="font-size:11px;color:var(--text3)"></span>
 
     <button class="upload-btn" onclick="clearArrangeData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto;display:none" id="arrange-clear-btn">✖ 清除資料</button>
   </div>
@@ -7124,8 +7146,8 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <div class="card">
       <div class="card-title" style="gap:6px;flex-wrap:wrap"><span class="dot"></span>預告進貨明細
         <span style="flex:1"></span>
-        <button id="forecast-export-btn" onclick="exportArrangeNewReport()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">📥 匯出待安排新品儲位報表</button>
-        <button id="forecast-send-planner-btn" onclick="sendToPlannerFromForecast()" style="background:#784c96;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">→ 傳送至儲位調整</button>
+        <button id="forecast-export-btn" onclick="exportArrangeNewReport()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">匯出待排新品</button>
+        <button id="forecast-send-planner-btn" onclick="sendToPlannerFromForecast()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">傳送至儲位調整</button>
       </div>
       <div style="max-height:560px;overflow:auto">
         <table style="width:100%;border-collapse:collapse;font-size:11px">
@@ -7212,17 +7234,20 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 <!-- ═══ 儲位調整建議 TAB ═══ -->
 <div class="tab-panel" id="tab-planner">
   <div style="padding:14px 18px;display:flex;flex-direction:column;gap:10px">
-    <!-- 上傳列 -->
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding-bottom:8px;border-bottom:1px solid var(--border)">
-      <button class="upload-btn" onclick="document.getElementById('planner-aisle-input').click()" style="background:var(--accent);color:#fff">⬆ 走道報表</button>
-      <input type="file" id="planner-aisle-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerAisleUpload(event)">
-      <span id="planner-aisle-status" style="font-size:12px;color:var(--text3)">未上傳</span>
-      <button class="upload-btn" id="planner-aisle-clear-btn" onclick="clearPlannerAisle()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
-
-      <button class="upload-btn" onclick="document.getElementById('planner-master-input').click()" style="background:var(--accent);color:#fff;margin-left:14px">⬆ 儲位總表</button>
-      <input type="file" id="planner-master-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerMasterUpload(event)">
-      <span id="planner-master-status" style="font-size:12px;color:var(--text3)">未上傳</span>
-      <button class="upload-btn" id="planner-master-clear-btn" onclick="clearPlannerMaster()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
+    <!-- 上傳列 (走道報表 / 儲位總表 各自獨立一列, 兩個按鈕左側對齊) -->
+    <div style="display:flex;flex-direction:column;gap:6px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <button class="upload-btn" onclick="document.getElementById('planner-aisle-input').click()" style="background:var(--accent);color:#fff">⬆ 走道報表</button>
+        <input type="file" id="planner-aisle-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerAisleUpload(event)">
+        <span id="planner-aisle-status" style="font-size:11px;color:var(--text3)">未上傳</span>
+        <button class="upload-btn" id="planner-aisle-clear-btn" onclick="clearPlannerAisle()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <button class="upload-btn" onclick="document.getElementById('planner-master-input').click()" style="background:var(--accent);color:#fff">⬆ 儲位總表</button>
+        <input type="file" id="planner-master-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerMasterUpload(event)">
+        <span id="planner-master-status" style="font-size:11px;color:var(--text3)">未上傳</span>
+        <button class="upload-btn" id="planner-master-clear-btn" onclick="clearPlannerMaster()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
+      </div>
     </div>
 
     <!-- 情境配置 -->
