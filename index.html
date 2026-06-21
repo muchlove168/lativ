@@ -34,6 +34,17 @@
   .content { padding: 16px 20px; }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
+  /* ★ 儲位調整/新品安排 合併版面: 左窄(planner) 右寬(arrange) */
+  #plnarr-wrap { display:flex; flex-direction:row; align-items:flex-start; gap:14px; padding:0; }
+  #plnarr-left { flex: 0 0 380px; min-width:0; }
+  #plnarr-right { flex: 1 1 auto; min-width:0; }
+  /* 兩個內嵌 panel 在 plnarr 啟用時強制顯示, 並去掉重複的外層 padding (移交給 wrap 控制) */
+  #tab-plnarr.active #tab-arrange,
+  #tab-plnarr.active #tab-planner { display: block; }
+  #tab-plnarr.active #tab-arrange > *,
+  #tab-plnarr.active #tab-planner > * { padding-left:0!important; padding-right:0!important; }
+  #tab-plnarr.active #tab-arrange .stats-bar,
+  #tab-plnarr.active #tab-planner .stats-bar { padding-left:0!important; padding-right:0!important; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
   .card-title { padding: 9px 14px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 12px; color: var(--text2); letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; background: var(--surface2); flex-wrap: wrap; }
   .card-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
@@ -235,9 +246,8 @@
   <div class="tab" onclick="switchTab('db')">資料庫</div>
   <div class="tab" onclick="switchTab('xx')">儲位釋放</div>
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
-  <div class="tab" onclick="switchTab('arrange')">新品儲位安排</div>
   <div class="tab" onclick="switchTab('compare')">銷售比對</div>
-  <div class="tab" onclick="switchTab('planner')">儲位調整</div>
+  <div class="tab" onclick="switchTab('plnarr')">儲位調整/新品安排</div>
 </div>
 
 <div class="content">
@@ -840,14 +850,28 @@ function getXXStatus(r) {
 // TAB SWITCHING
 // ============================================================
 function switchTab(name){
-  const tabs=['sku','sales','fw26','db','xx','slotdata','arrange','compare','planner'];
+  const tabs=['sku','sales','fw26','db','xx','slotdata','compare','plnarr'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  // ★ plnarr (合併版面): 把 tab-planner 移到 plnarr-left, tab-arrange 移到 plnarr-right
+  //    並讓兩個內層 panel 也加 .active 以顯示
+  if(name==='plnarr'){
+    const wrapL=document.getElementById('plnarr-left');
+    const wrapR=document.getElementById('plnarr-right');
+    const aPan=document.getElementById('tab-arrange');
+    const pPan=document.getElementById('tab-planner');
+    if(wrapL&&pPan&&pPan.parentNode!==wrapL)wrapL.appendChild(pPan);
+    if(wrapR&&aPan&&aPan.parentNode!==wrapR)wrapR.appendChild(aPan);
+    if(aPan)aPan.classList.add('active');
+    if(pPan)pPan.classList.add('active');
+    document.getElementById('tab-plnarr').classList.add('active');
+    renderArrangeCompare();
+    renderPlanner();
+    return;
+  }
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='slotdata'){renderSlotData();return;}
-  if(name==='arrange'){renderArrangeCompare();return;}
   if(name==='compare'){renderSalesCompare();return;}
-  if(name==='planner'){renderPlanner();return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
     if(name==='sales'){renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();}
@@ -2008,6 +2032,181 @@ async function clearArrangeData(){
 }
 
 // ═══════════════════════════════════════════════════════
+// ★ 預告進貨明細 — checkbox 連動 + 匯出 + 傳送至儲位調整
+// ═══════════════════════════════════════════════════════
+// 勾櫃號 → 連動全勾類別 (整櫃選取)
+// 取消某類別 → 自動取消同 key 的櫃號 checkbox (因為已非整櫃)
+// 全部類別勾齊 → 自動勾起櫃號 checkbox
+function forecastCbToggle(el){
+  const key=el.dataset.key;
+  if(!key)return;
+  const keySel=(typeof CSS!=='undefined'&&CSS.escape)?CSS.escape(key):key.replace(/(["\\])/g,'\\$1');
+  if(el.classList.contains('forecast-cb-container')){
+    // container 變動 → 同 key 全部 category 同步
+    document.querySelectorAll(`.forecast-cb-category[data-key="${keySel}"]`).forEach(c=>{c.checked=el.checked;});
+  }else if(el.classList.contains('forecast-cb-category')){
+    const cont=document.querySelector(`.forecast-cb-container[data-key="${keySel}"]`);
+    if(!cont)return;
+    if(!el.checked){
+      // 取消某 category → 取消 container (不再代表整櫃)
+      cont.checked=false;
+    }else{
+      // 全部 category 都勾了 → container 自動勾
+      const allCats=document.querySelectorAll(`.forecast-cb-category[data-key="${keySel}"]`);
+      const allChecked=[...allCats].every(c=>c.checked);
+      if(allChecked)cont.checked=true;
+    }
+  }
+}
+
+// 收集目前勾選的 (key, category) 對 — 回傳 array of {grpKey, cats:Set, containerType, importNo, arrivalDate}
+// 規則:
+//   勾櫃號 (container) → 該櫃所有類別 (因連動會把 category 也勾起)
+//   勾單獨類別 → 那一筆
+//   實作上只看 category checkbox: 它已包含 container 連動的結果
+function forecastCollectSelection(){
+  const cats=document.querySelectorAll('.forecast-cb-category:checked');
+  const byKey={};
+  cats.forEach(c=>{
+    const key=c.dataset.key||'';
+    const cat=c.dataset.cat||'';
+    if(!byKey[key])byKey[key]={grpKey:key, cats:new Set()};
+    byKey[key].cats.add(cat);
+  });
+  // 解析 key 取得櫃號顯示資訊
+  Object.values(byKey).forEach(b=>{
+    const parts=String(b.grpKey).split('||');
+    b.arrivalDate=parts[0]||'';
+    b.importNo=parts[1]||'';
+    b.containerType=parts[2]||'';
+  });
+  return Object.values(byKey);
+}
+
+// 依勾選結果, 從 FORECAST_DATA 找出對應的 款號(5碼)集合, 然後與 ARRANGE_DATA 比對
+// 回傳 {rows: ARRANGE_DATA rows, styles: Set, catLookup: {code: 類別}}
+function forecastBuildSelectedSkus(selection){
+  // 為了每一個選到的 (grpKey, cat) 找出該櫃下的 款號 → 過濾 ARRANGE_DATA
+  const fw26Lookup=window.EMBEDDED_FW26_LOOKUP||{};
+  if(FW26_FILTER_DATA&&FW26_FILTER_DATA.length){
+    FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])fw26Lookup[r[0]]=r[3];});
+  }
+  // 款號 (前5碼) → 類別
+  const styleToCat={};
+  Object.entries(fw26Lookup).forEach(([code,cat])=>{
+    const style=String(code).substring(0,5);
+    if(!styleToCat[style])styleToCat[style]=cat;
+  });
+  // 重建 (grpKey → 款號 list) 對應, 跟 renderArrangeCompare 用同邏輯
+  const groupToStyles={};
+  FORECAST_DATA.forEach(r=>{
+    const _ci=resolveContainerInfo(r);
+    const _ct=_ci.containerType, _in=_ci.importNo;
+    const key=`${r.arrivalDate||'—'}||${_in}||${_ct}`;
+    if(!groupToStyles[key])groupToStyles[key]=new Set();
+    const _s5=String(r.style||'').substring(0,5);
+    if(_s5)groupToStyles[key].add(_s5);
+  });
+  // 收集所有要納入的 款號 (前5碼) → 類別
+  const includeStyleCat={};  // style → cat
+  selection.forEach(sel=>{
+    const styles=groupToStyles[sel.grpKey]||new Set();
+    styles.forEach(st=>{
+      const cat=styleToCat[st]||'未匹配';
+      if(sel.cats.has(cat))includeStyleCat[st]=cat;
+    });
+  });
+  // 過濾 ARRANGE_DATA
+  const rows=(ARRANGE_DATA||[]).filter(r=>{
+    const st=String(r.code||'').substring(0,5);
+    return st in includeStyleCat;
+  });
+  const catLookup={};
+  rows.forEach(r=>{
+    const st=String(r.code||'').substring(0,5);
+    catLookup[r.code]=includeStyleCat[st]||'';
+  });
+  return {rows, includeStyleCat, catLookup};
+}
+
+// 匯出待安排新品儲位報表 — 欄位: 商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 商品包材, 類別
+async function exportArrangeNewReport(){
+  const selection=forecastCollectSelection();
+  if(!selection.length){alert('請先勾選要匯出的櫃號或類別 (預告進貨明細左側 checkbox)');return;}
+  if(!ARRANGE_DATA||!ARRANGE_DATA.length){alert('儲位安排報表尚未上傳, 無法匯出');return;}
+  const {rows, catLookup}=forecastBuildSelectedSkus(selection);
+  if(!rows.length){alert('勾選範圍內沒有可匯出的 SKU\n(可能該櫃內的款號未在儲位安排報表中)');return;}
+  // 按 (類別, 商品編號) 排序
+  rows.sort((a,b)=>{
+    const ca=catLookup[a.code]||'';
+    const cb=catLookup[b.code]||'';
+    if(ca!==cb)return ca<cb?-1:1;
+    return String(a.code).localeCompare(String(b.code));
+  });
+  const cols=['商品編號','商品名稱','尺寸','儲位','材積','未到量','預計倉位','商品包材','類別'];
+  const aoa=[cols];
+  rows.forEach(r=>{
+    aoa.push([r.code,r.name,r.size,r.slot,r.volume||0,r.pending||0,r.plannedSlot||'',r.packaging||'',catLookup[r.code]||'']);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:14},{wch:10}];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'待安排新品');
+  // 檔名: 含日期 + 櫃號/類別摘要
+  const containers=[...new Set(selection.map(s=>s.containerType))].slice(0,3).join('_');
+  const dateStr=new Date().toISOString().slice(0,10).replace(/-/g,'');
+  const fname=`待安排新品_${containers||'多櫃'}_${dateStr}.xlsx`;
+  XLSX.writeFile(wb,fname);
+}
+
+// 傳送至儲位調整 — 把勾選的 (櫃, 類別) 組合成虛擬「新品-類別」走道, 注入 NEW_PRODUCT_QUEUE
+// 然後切到 plnarr tab + 重新渲染情境配置, 自動選 src + sortMode='new'
+async function sendToPlannerFromForecast(){
+  const selection=forecastCollectSelection();
+  if(!selection.length){alert('請先勾選要傳送的櫃號或類別');return;}
+  if(!ARRANGE_DATA||!ARRANGE_DATA.length){alert('儲位安排報表尚未上傳, 無法取得 SKU 詳細資訊');return;}
+  if(!AISLE_REPORT_DATA||!AISLE_REPORT_DATA.length||!Object.keys(STORAGE_MASTER||{}).length){
+    alert('請先在儲位調整區上傳「走道報表」與「儲位總表」');
+    return;
+  }
+  const {rows, catLookup}=forecastBuildSelectedSkus(selection);
+  if(!rows.length){alert('勾選範圍內沒有可傳送的 SKU');return;}
+  // 按類別分群, 建立 NEW_PRODUCT_QUEUE
+  const byCat={};
+  rows.forEach(r=>{
+    const cat=catLookup[r.code]||'未匹配';
+    if(!byCat[cat])byCat[cat]=[];
+    byCat[cat].push({code:r.code,name:r.name,size:r.size,packaging:r.packaging,plannedSlot:r.plannedSlot,pending:r.pending,volume:r.volume,slot:r.slot});
+  });
+  window.NEW_PRODUCT_QUEUE=Object.entries(byCat).map(([cat,skus])=>({
+    label:`新品-${cat}`,
+    category:cat,
+    skus,
+  }));
+  // 重新渲染 planner 情境配置 (會將虛擬走道顯示為 src 選項)
+  plannerRenderConfigUI();
+  // 自動勾起所有「新品-*」src + 切到 sortMode='new'
+  setTimeout(()=>{
+    const step1=document.getElementById('pln-step-1');
+    if(step1){
+      step1.querySelectorAll('input[data-grp="src"]').forEach(cb=>{
+        if(String(cb.value).startsWith('新品-')){cb.checked=true;}
+      });
+      const newRadio=step1.querySelector('input[data-grp="sortMode"][value="new"]');
+      if(newRadio){newRadio.checked=true;newRadio.dispatchEvent(new Event('change',{bubbles:true}));}
+      // 設定 N = 全部 SKU 數
+      const totalSku=window.NEW_PRODUCT_QUEUE.reduce((s,e)=>s+e.skus.length,0);
+      const nInp=step1.querySelector('input[data-grp="n"]');
+      if(nInp){nInp.value=totalSku;}
+      plannerRefreshStepCounts();
+    }
+  },50);
+  // 提示
+  const summary=window.NEW_PRODUCT_QUEUE.map(e=>`${e.label} (SKU:${e.skus.length})`).join('、');
+  alert(`✓ 已傳送至儲位調整\n${summary}\n\n請於左側情境配置確認目的走道與設定後執行`);
+}
+
+// ═══════════════════════════════════════════════════════
 // ★ 儲位調整建議 TAB
 // ═══════════════════════════════════════════════════════
 // sheet 名稱正規化：全形→半形 + trim
@@ -3093,6 +3292,242 @@ function plnRunInternalEngine(config,initialCells){
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ★ 新品安置引擎 plnRunNewEngine
+// ═══════════════════════════════════════════════════════════════════
+// 演算法 (依 Gordon 規格):
+//   1. 來源 = 從 NEW_PRODUCT_QUEUE 取所有 step.source 中 label='新品-*' 對應的 SKU 清單
+//   2. 按款 (5碼) 分組, 大款優先 (n DESC, 同 n 則 5 碼 ASC)
+//   3. 每款依序安置 — 同款必須同走道:
+//      a. 走過所有 destination 走道, 計算 (連續空格段最大長度, 總空格數)
+//      b. 若有走道存在連續段 ≥ n → 直接放在「最短但 ≥ n」連續段中 (使用 plnPackByFamily 風格)
+//      c. 否則若有走道總空格 ≥ n → 對該走道做內部整理 (plnRunInternalEngine) 創造連續段 → 再放
+//      d. 否則該款保留, 跳過 (failed.push({kc, n, reason:'NEW_NO_FIT'}))
+//   4. 排入時依照底層邏輯:
+//      - 同款依色 (7碼) 排序, 每色一 bin (4 cell), sizes → plnGetTargetLayer 配層
+//      - 配不到層 → spillover, 優先填同款內未用層 (free 槽), 否則往後續排
+//   5. 移動 phase: 'NEW_PRODUCT' (純新品排入), 'NEW_PRODUCT_CONSOLIDATION' (走道內現有 SKU 因內部整理而被搬)
+function plnRunNewEngine(config,initialCells){
+  const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
+  const moves=[];
+  const failed=[];
+  const placed=[];
+  
+  // Step 1: 從 config.source (虛擬「新品-*」label) 取 SKU 清單
+  const queue=window.NEW_PRODUCT_QUEUE||[];
+  const wanted=new Set((config.source||[]).filter(v=>String(v).startsWith('新品-')));
+  const skus=[];
+  queue.forEach(e=>{if(wanted.has(e.label))skus.push(...e.skus.map(s=>({...s,_cat:e.category})));});
+  if(!skus.length){
+    return {selected:[],capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells};
+  }
+  
+  // Step 2: 按款 (5碼) 分組
+  const kuanMap={};
+  skus.forEach(s=>{
+    const k=String(s.code||'').substring(0,5);
+    if(!k)return;
+    if(!kuanMap[k])kuanMap[k]={skus:[],cat:s._cat||''};
+    kuanMap[k].skus.push(s);
+  });
+  const kuans=Object.entries(kuanMap).map(([k,v])=>({kc:k,n:v.skus.length,cat:v.cat,skus:v.skus}))
+    .sort((a,b)=>(b.n-a.n)||(a.kc<b.kc?-1:1));
+  
+  // ── helper: 找走道內連續可用段 (排除 sku/locked, 起點需 layer=1) ──
+  function getRunsForAisle(a){
+    const cols=plnValidCols(cells,a);
+    const runs=[];
+    let cur=[],lastCol=null,lastLayer=null;
+    cols.forEach(col=>{
+      for(let L=1;L<=4;L++){
+        const cid=plnCellId(a,col,L);
+        const cs=cells[cid];
+        if(!cs||cs.sku||cs.locked){
+          if(cur.length){runs.push(cur);cur=[];}
+          lastCol=null;lastLayer=null;
+          continue;
+        }
+        if(cur.length){
+          const okSameCol=(lastCol===col&&lastLayer===L-1);
+          const okNextCol=(lastCol===col-1&&lastLayer===4&&L===1);
+          if(!okSameCol&&!okNextCol){runs.push(cur);cur=[];}
+        }
+        cur.push(cs);
+        lastCol=col;lastLayer=L;
+      }
+    });
+    if(cur.length)runs.push(cur);
+    return runs;
+  }
+  function findBestRun(a,needN){
+    const runs=getRunsForAisle(a);
+    const fit=runs.filter(r=>r.length>=needN&&r[0].layer===1);
+    if(!fit.length)return null;
+    fit.sort((x,y)=>(x.length-y.length)||(x[0].col-y[0].col));
+    return fit[0];
+  }
+  function countEmptyInAisle(a){
+    let n=0;
+    Object.values(cells).forEach(cs=>{if(cs.aisle===a&&!cs.sku&&!cs.locked)n++;});
+    return n;
+  }
+  
+  // ── helper: 將一款的 SKU 排入指定 run (bin-packing 風格) ──
+  // 回傳 placed 數; 同款依色 (7碼) 排序, 每色一 bin (4 cell), sizes→plnGetTargetLayer 配層
+  function placeKuanInRun(ku,run){
+    // 按色 (7碼) 分組
+    const colorMap={};
+    ku.skus.forEach(s=>{
+      const c=String(s.code||'').substring(0,7);
+      if(!colorMap[c])colorMap[c]=[];
+      colorMap[c].push(s);
+    });
+    const colors=Object.keys(colorMap).sort();
+    // 每色一 bin (4 cell); 若 run 不足容納所有 bin, 進入 spill
+    const usedIdx=new Set();
+    const freeSlots=[];
+    const spillQueue=[];
+    let cursor=0;
+    for(const c of colors){
+      const skusInColor=colorMap[c];
+      const binStart=cursor;
+      if(binStart+4>run.length){
+        // 不夠開新 bin, 整色全部進 spill
+        skusInColor.forEach(s=>spillQueue.push(s));
+        continue;
+      }
+      const usedLayers=new Set();
+      skusInColor.forEach(s=>{
+        const L=plnGetTargetLayer(s.code,s.size);
+        if(L>=1&&L<=4&&!usedLayers.has(L)){
+          const slotIdx=binStart+(L-1);
+          if(slotIdx<run.length&&run[slotIdx].layer===L){
+            const cell=run[slotIdx].cell;
+            const info={'商品編號':s.code,'商品名稱':s.name||'','尺寸':s.size||'','顏色':'','銷售庫存':0,'架上數量':0,'未到量':s.pending||0,'未抓貨':0,'保留數量':0,'商品包材':s.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
+            cells[cell].sku=s.code;
+            cells[cell].info=info;
+            cells[cell].locked=true;
+            moves.push({phase:'NEW_PRODUCT',sku:s.code,src:'',dst:cell,dstLayout:run[slotIdx].layout||''});
+            placed.push(info);
+            usedIdx.add(slotIdx);
+            usedLayers.add(L);
+            return;
+          }
+        }
+        spillQueue.push(s);
+      });
+      // 該色未用的 layer 加入 free 槽
+      for(let L=1;L<=4;L++){
+        if(!usedLayers.has(L)){
+          const slotIdx=binStart+(L-1);
+          if(slotIdx<run.length&&run[slotIdx].layer===L&&!usedIdx.has(slotIdx)){
+            freeSlots.push(slotIdx);
+          }
+        }
+      }
+      cursor=binStart+4;
+    }
+    // 安置 spill: 優先 freeSlots → 否則 cursor 後續
+    freeSlots.sort((a,b)=>a-b);
+    for(const sp of spillQueue){
+      let done=false;
+      while(freeSlots.length){
+        const idx=freeSlots.shift();
+        if(usedIdx.has(idx))continue;
+        const cell=run[idx].cell;
+        if(!cells[cell].sku){
+          const info={'商品編號':sp.code,'商品名稱':sp.name||'','尺寸':sp.size||'','顏色':'','銷售庫存':0,'架上數量':0,'未到量':sp.pending||0,'未抓貨':0,'保留數量':0,'商品包材':sp.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
+          cells[cell].sku=sp.code;cells[cell].info=info;cells[cell].locked=true;
+          moves.push({phase:'NEW_PRODUCT',sku:sp.code,src:'',dst:cell,dstLayout:run[idx].layout||''});
+          placed.push(info);
+          usedIdx.add(idx);
+          done=true;
+          break;
+        }
+      }
+      if(done)continue;
+      while(cursor<run.length&&(usedIdx.has(cursor)||cells[run[cursor].cell].sku))cursor++;
+      if(cursor>=run.length)break;  // run 用盡 (理論上不會發生因事先檢查)
+      const cell=run[cursor].cell;
+      const info={'商品編號':sp.code,'商品名稱':sp.name||'','尺寸':sp.size||'','顏色':'','銷售庫存':0,'架上數量':0,'未到量':sp.pending||0,'未抓貨':0,'保留數量':0,'商品包材':sp.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
+      cells[cell].sku=sp.code;cells[cell].info=info;cells[cell].locked=true;
+      moves.push({phase:'NEW_PRODUCT',sku:sp.code,src:'',dst:cell,dstLayout:run[cursor].layout||''});
+      placed.push(info);
+      usedIdx.add(cursor);
+      cursor++;
+    }
+  }
+  
+  // Step 3: 逐款安置
+  for(const ku of kuans){
+    const n=ku.n;
+    const dstList=config.destination||[];
+    
+    // (a) 先找有連續段 ≥ n 的走道, 取最短的
+    let bestAisle=null, bestRun=null;
+    for(const a of dstList){
+      const run=findBestRun(a,n);
+      if(run && (!bestRun || run.length<bestRun.length)){
+        bestAisle=a; bestRun=run;
+      }
+    }
+    
+    if(bestRun){
+      placeKuanInRun(ku,bestRun);
+      continue;
+    }
+    
+    // (b) 沒連續段但總空格夠 → 找空格最多的走道做內部整理
+    let consolAisle=null, consolEmpty=0;
+    for(const a of dstList){
+      const en=countEmptyInAisle(a);
+      if(en>=n && en>consolEmpty){consolAisle=a; consolEmpty=en;}
+    }
+    
+    if(consolAisle){
+      // 呼叫 plnRunInternalEngine 產生連續 n 空格
+      const intCfg={
+        source:[consolAisle],
+        destination:[consolAisle],
+        overflow:[],
+        nToPick:n,
+        sortMode:'internal',
+        aisleGeometry:config.aisleGeometry||plnGetAisleGeometry(),
+      };
+      const intR=plnRunInternalEngine(intCfg,cells);
+      if(intR && !intR._internalError){
+        // 把 internal moves 加入結果 (改 phase 為 NEW_PRODUCT_CONSOLIDATION 以區分)
+        intR.moves.forEach(m=>moves.push({...m,phase:'NEW_PRODUCT_CONSOLIDATION'}));
+        // 套用 intR.finalCells 到當前 cells
+        Object.keys(intR.finalCells).forEach(k=>{cells[k]=intR.finalCells[k];});
+        // 再找一次 best run
+        const run2=findBestRun(consolAisle,n);
+        if(run2){
+          placeKuanInRun(ku,run2);
+          continue;
+        }
+      }
+      // 內部整理失敗或仍找不到連續段
+      failed.push({kc:ku.kc,n,reason:'NEW_NO_FIT',cat:ku.cat});
+      continue;
+    }
+    
+    // (c) 所有 dst 都不夠 → 保留, 跳過
+    failed.push({kc:ku.kc,n,reason:'NEW_NO_FIT',cat:ku.cat});
+  }
+  
+  return {
+    selected:placed,
+    capacity:plnAuditCapacity(cells,config),
+    deficit:0,
+    moves,
+    failed,
+    config,
+    xxSalesMax:0,
+    finalCells:cells,
+  };
+}
+
 // ═══ UI: 多步驟 (pipeline) ═══
 // PLN_STEPS: 預設 1 個 step, 使用者可加減
 let PLN_STEPS_COUNT=1;
@@ -3143,7 +3578,14 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
     const inner=grp==='src'?`SKU: <span class="aisle-count" data-step="${idx}" data-grp="src" data-aisle="${a}">-</span>`:`空儲位: <span class="aisle-count" data-step="${idx}" data-grp="dst" data-aisle="${a}">-</span>`;
     return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px;margin-bottom:2px;cursor:pointer;white-space:nowrap"><input type="checkbox" data-step="${idx}" data-grp="${grp}" value="${a}" ${checked?'checked':''}>${a} <span style="color:var(--text3);font-size:12px">(${inner})</span></label>`;
   };
-  const srcHtml=aisles.map(a=>mkCb('src',a,defaultSrc.includes(a))).join('');
+  // ★ 虛擬新品 src 來源 (僅 src 區出現) - 從 window.NEW_PRODUCT_QUEUE 取
+  const mkNewCb=(entry,checked)=>{
+    const lbl=entry.label, n=entry.skus.length;
+    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px;margin-bottom:2px;cursor:pointer;white-space:nowrap;color:#784c96"><input type="checkbox" data-step="${idx}" data-grp="src" data-virtual="new" value="${lbl}" ${checked?'checked':''}>${lbl} <span style="color:var(--text3);font-size:12px">(SKU: ${n})</span></label>`;
+  };
+  const newQueue=window.NEW_PRODUCT_QUEUE||[];
+  const newSrcHtml=newQueue.map(e=>mkNewCb(e,defaultSrc.includes(e.label))).join('');
+  const srcHtml=aisles.map(a=>mkCb('src',a,defaultSrc.includes(a))).join('') + newSrcHtml;
   const dstHtml=aisles.map(a=>mkCb('dst',a,defaultDst.includes(a))).join('');
   const div=document.createElement('div');
   div.id=`pln-step-${idx}`;
@@ -3162,6 +3604,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''}>高庫存</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''}>低庫存</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="internal" ${defaultSortMode==='internal'?'checked':''}>內部整理</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;color:#784c96"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="new" ${defaultSortMode==='new'?'checked':''}>新品</label>
       </div>
       <span style="color:var(--text2)">SKU數</span>
       <div><input type="number" data-step="${idx}" data-grp="n" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px"></div>
@@ -3222,9 +3665,10 @@ function plannerScheduleRefresh(){
   _plnRefreshTimer=setTimeout(()=>{_plnRefreshTimer=null;plannerRefreshStepCounts();},150);
 }
 
-// ═══ 內部整理: src/dst 互鎖 + 單選 ═══
+// ═══ 內部整理 / 新品: src/dst 互鎖 + 單選 ═══
 // 任意 step 切到 internal 時, src 與 dst 視為同一個走道; 點 src 同步 dst, 點 dst 同步 src, 其餘自動取消勾選.
-// 切回 high/low 時不做事 (使用者手動調整 src/dst).
+// 切到 new 時, 取消所有「真實走道」src, 只允許虛擬新品 src; dst 維持真實走道.
+// 切離 new/internal 時, 取消所有虛擬新品 src (避免污染 high/low/internal mode).
 function plannerHandleInternalBind(e){
   const t=e.target;
   if(!t||!t.dataset||!t.dataset.step)return;
@@ -3236,30 +3680,41 @@ function plannerHandleInternalBind(e){
   
   // 切到 internal: 同步 src=dst (若 src 已勾 → 帶到 dst; 否則 dst 已勾 → 帶到 src; 都未勾就維持空)
   if(t.dataset.grp==='sortMode' && mode==='internal'){
-    const srcChecked=[...stepEl.querySelectorAll('input[data-grp="src"]:checked')].map(c=>c.value);
+    const srcChecked=[...stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual]):checked')].map(c=>c.value);
     const dstChecked=[...stepEl.querySelectorAll('input[data-grp="dst"]:checked')].map(c=>c.value);
     const target=srcChecked[0]||dstChecked[0]||null;
-    // 全部取消
+    // 全部取消 (含虛擬新品 src)
     stepEl.querySelectorAll('input[data-grp="src"],input[data-grp="dst"]').forEach(c=>{c.checked=false;});
     // 同步勾選 target (若有)
     if(target){
-      stepEl.querySelectorAll(`input[data-grp="src"][value="${target}"],input[data-grp="dst"][value="${target}"]`).forEach(c=>{c.checked=true;});
+      stepEl.querySelectorAll(`input[data-grp="src"]:not([data-virtual])[value="${target}"],input[data-grp="dst"][value="${target}"]`).forEach(c=>{c.checked=true;});
     }
     return;
   }
-  // 切離 internal: 不動 src/dst
-  if(t.dataset.grp==='sortMode')return;
+  // 切到 new: 取消所有真實走道 src, 保留虛擬新品 src
+  if(t.dataset.grp==='sortMode' && mode==='new'){
+    stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').forEach(c=>{c.checked=false;});
+    return;
+  }
+  // 切到 high/low: 取消所有虛擬新品 src + 取消任何因 internal 同步而被勾的 dst (使用者再手動調整)
+  if(t.dataset.grp==='sortMode' && (mode==='high'||mode==='low')){
+    stepEl.querySelectorAll('input[data-grp="src"][data-virtual]').forEach(c=>{c.checked=false;});
+    return;
+  }
   
   // src 或 dst 變動時, 若當前 mode 是 internal → 強制單選 + 互鎖
   if(mode==='internal'&&(t.dataset.grp==='src'||t.dataset.grp==='dst')){
+    if(t.dataset.virtual==='new')return;  // 虛擬新品 src 不參與 internal 互鎖
     if(!t.checked){
-      // 取消勾選 → 兩邊都取消
-      stepEl.querySelectorAll(`input[data-grp="src"][value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=false;});
+      stepEl.querySelectorAll(`input[data-grp="src"]:not([data-virtual])[value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=false;});
       return;
     }
-    // 勾選 → 取消其他所有, 兩邊都勾這一個
     stepEl.querySelectorAll('input[data-grp="src"],input[data-grp="dst"]').forEach(c=>{c.checked=false;});
-    stepEl.querySelectorAll(`input[data-grp="src"][value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=true;});
+    stepEl.querySelectorAll(`input[data-grp="src"]:not([data-virtual])[value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=true;});
+  }
+  // mode === 'new' 時, 真實走道 src 不應被勾, 若使用者誤勾則強制取消
+  if(mode==='new' && t.dataset.grp==='src' && !t.dataset.virtual){
+    t.checked=false;
   }
 }
 
@@ -3344,6 +3799,12 @@ function plannerRunAllSteps(){
       if(!s.config.nToPick||s.config.nToPick<=0){
         alert(`Step ${s.idx}: 內部整理模式請輸入要產生的「連續空格數」`);return;
       }
+    } else if(s.config.sortMode==='new'){
+      // 新品模式: 來源必須全部是「新品-*」虛擬走道; 目的需至少一個真實走道
+      const virtSrc=s.config.source.filter(v=>String(v).startsWith('新品-'));
+      if(!virtSrc.length){alert(`Step ${s.idx}: 新品模式請勾選「新品-XXX」虛擬來源 (從預告進貨明細傳送)`);return;}
+      if(virtSrc.length!==s.config.source.length){alert(`Step ${s.idx}: 新品模式不可同時勾選真實走道, 請僅勾選「新品-XXX」`);return;}
+      if(!s.config.destination.length){alert(`Step ${s.idx}: 新品模式請選擇至少一個目的走道`);return;}
     } else {
       if(!s.config.source.length){alert(`Step ${s.idx}: 請選擇至少一個來源走道`);return;}
       if(!s.config.destination.length){alert(`Step ${s.idx}: 請選擇至少一個目的走道`);return;}
@@ -3374,6 +3835,25 @@ function plannerRunAllSteps(){
         const startCol=r._internalStartCol;
         statusEl.textContent=`✓ 內部整理 ${aisle} | 起點 col ${String(startCol).padStart(3,'0')}-1 | 移動 ${r.moves.length} 次 (產生連續 ${config.nToPick} 空格)`;
         statusEl.style.color='var(--accent)';
+      }
+      continue;
+    }
+    
+    // ════ 新品 分支 ════
+    if(config.sortMode==='new'){
+      const r=plnRunNewEngine(config,cells);
+      r.stepIdx=idx;
+      allResults.push(r);
+      mergedMoves.push(...r.moves);
+      mergedSelected.push(...r.selected);
+      cells=r.finalCells;
+      const statusEl=document.getElementById(`pln-step-${idx}-status`);
+      if(statusEl){
+        const placedN=r.selected.length;
+        const skipped=(r.failed||[]).length;
+        const skipMsg=skipped?` | 跳過 ${skipped} 款 (空格不足)`:'';
+        statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} 個 SKU${skipMsg}`;
+        statusEl.style.color=skipped?'#d4a017':'var(--accent)';
       }
       continue;
     }
@@ -3479,26 +3959,36 @@ function plannerRenderResult(r){
   const byPhase={};
   r.moves.forEach(m=>{byPhase[m.phase]=(byPhase[m.phase]||0)+1;});
   const xxN=byPhase.XX_OVERFLOW||0,intN=byPhase.INTERNAL_DISPLACEMENT||0,mainN=byPhase.SOURCE_TO_DEST||0,icN=byPhase.INTERNAL_CONSOLIDATION||0;
+  const newN=(byPhase.NEW_PRODUCT||0)+(byPhase.NEW_PRODUCT_CONSOLIDATION||0);
   // 健康檢查: 同 SKU 是否重複出現
   const skuCount={};
   r.moves.forEach(m=>{skuCount[m.sku]=(skuCount[m.sku]||0)+1;});
   const dups=Object.entries(skuCount).filter(([s,c])=>c>1);
   const dupHtml=dups.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 重複 SKU 警告: ${dups.length} 個 (異常，請聯絡開發)</div>`:'';
-  const failedHtml=r.failed&&r.failed.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 未放置: ${r.failed.length} 群組 (${r.failed.slice(0,3).map(f=>f.kc).join(', ')}${r.failed.length>3?'...':''})</div>`:'';
+  // ★ 跳過款明細 (新品模式因空格不足而保留)
+  const skippedNew=(r.failed||[]).filter(f=>f.reason==='NEW_NO_FIT');
+  const otherFailed=(r.failed||[]).filter(f=>f.reason!=='NEW_NO_FIT');
+  const newSkipHtml=skippedNew.length?`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.6">📦 新品空格不足 (款保留未排): ${skippedNew.length} 款｜共 ${skippedNew.reduce((s,f)=>s+f.n,0)} 個 SKU<br>${skippedNew.slice(0,8).map(f=>`<span style="font-family:monospace">${f.kc}</span>(${f.n})`).join('、')}${skippedNew.length>8?` …+${skippedNew.length-8}`:''}</div>`:'';
+  const failedHtml=otherFailed.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 未放置: ${otherFailed.length} 群組 (${otherFailed.slice(0,3).map(f=>f.kc).join(', ')}${otherFailed.length>3?'...':''})</div>`:'';
   const xxNote=r.xxSalesMax!==5?`<span style="color:#d4a017;font-weight:600">（已放寬為 銷售≤${r.xxSalesMax}）</span>`:'';
+  // 顯示新品列僅在有 newN > 0 時
+  const newCard=newN>0?`<div style="padding:6px 10px;background:rgba(120,76,150,0.16);border-radius:4px"><div style="color:var(--text2)">新品安排</div><div style="font-size:18px;font-weight:700;color:#784c96">${newN}</div></div>`:'';
+  const cols=newN>0?6:5;
   
   rc.innerHTML=`
     <div class="card-title"><span class="dot"></span>執行結果</div>
     <div style="padding:8px 0">
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;font-size:11px;margin-bottom:8px">
+      <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;font-size:11px;margin-bottom:8px">
         <div style="padding:6px 10px;background:rgba(192,57,43,0.08);border-radius:4px"><div style="color:var(--text2)">挑選 SKU</div><div style="font-size:18px;font-weight:700">${r.selected.length}</div></div>
         <div style="padding:6px 10px;background:rgba(41,128,185,0.10);border-radius:4px"><div style="color:var(--text2)">XX 溢位</div><div style="font-size:18px;font-weight:700;color:#2980b9">${xxN}</div></div>
         <div style="padding:6px 10px;background:rgba(212,160,23,0.10);border-radius:4px"><div style="color:var(--text2)">置換</div><div style="font-size:18px;font-weight:700;color:#d4a017">${intN}</div></div>
         <div style="padding:6px 10px;background:rgba(192,57,43,0.08);border-radius:4px"><div style="color:var(--text2)">主要移動</div><div style="font-size:18px;font-weight:700">${mainN}</div></div>
         <div style="padding:6px 10px;background:rgba(120,76,150,0.10);border-radius:4px"><div style="color:var(--text2)">內部整理</div><div style="font-size:18px;font-weight:700;color:#784c96">${icN}</div></div>
+        ${newCard}
       </div>
       <div style="font-size:11px;color:var(--text2);margin-bottom:6px">總移動 = <strong>${r.moves.length}</strong> 筆｜目標空格 ${r.capacity.total}｜${r.deficit>0?`缺口 ${r.deficit} ${xxNote}`:'容量充足'}</div>
       ${dupHtml}
+      ${newSkipHtml}
       ${failedHtml}
       <div style="display:flex;justify-content:center;gap:8px;margin-top:8px">
         <button onclick="plannerExportResult()" class="upload-btn" style="background:var(--accent);color:#fff;font-size:12px;padding:5px 14px">📥 匯出 Excel</button>
@@ -3999,7 +4489,7 @@ function renderArrangeCompare(){
       };
       const _s5=String(r.style||'').substring(0,5);
       groups[key].styles.push(_s5);
-      groups[key].rowBoxList.push({style:_s5, boxCount:Number(r.boxCount)||0, slot:String(r.slot||''), plannedSlot:String(r.plannedSlot||'')});
+      groups[key].rowBoxList.push({style:_s5, boxCount:Number(r.boxCount)||0, slot:String(r.slot||''), plannedSlot:String(r.plannedSlot||''), reminder:String(r.arrivalReminder||'')});
       const pri=Number(r.priority);if(!isNaN(pri))groups[key].priorityTotal+=pri;
       const _av=Number(r.arrival);
       if(r.arrival!==''&&!isNaN(_av))groups[key].arrivalNotifyTotal+=_av;
@@ -4020,13 +4510,14 @@ function renderArrangeCompare(){
     });
 
     // 第二步：每個進倉單內，按類別統計
-    Object.values(groups).forEach(grp=>{
+    Object.entries(groups).forEach(([grpKey,grp])=>{
       const catStats={};  // {類別: {skuCount, plannedSlots:Set, styles:Set (用於提示), unmatchedStyles:Set}}
       const catBoxes={};  // {類別: 箱數加總}
       const catSlotZones={};       // {類別: Set of 儲區首字（如 'C', 'D'）} — 來自預告進貨表 slot
       const catFcPlannedSlots={};  // {類別: Set of 倉位（如 '1F','2F'）} — 來自預告進貨表 plannedSlot
-      // ★ 先按 rowBoxList 累計箱數 + 儲區/倉位 到類別
-      grp.rowBoxList.forEach(({style,boxCount,slot,plannedSlot})=>{
+      const catReminders={};       // {類別: Set of 進倉提醒（去重）}
+      // ★ 先按 rowBoxList 累計箱數 + 儲區/倉位 + 進倉提醒 到類別
+      grp.rowBoxList.forEach(({style,boxCount,slot,plannedSlot,reminder})=>{
         if(!style)return;
         const cat=styleToCat[style]||'未匹配';
         catBoxes[cat]=(catBoxes[cat]||0)+boxCount;
@@ -4045,6 +4536,12 @@ function renderArrangeCompare(){
             if(!catFcPlannedSlots[cat])catFcPlannedSlots[cat]=new Set();
             catFcPlannedSlots[cat].add(_p);
           }
+        }
+        // 進倉提醒：per 款號去重後集合（顯示時 join）
+        const _rm=String(reminder||'').trim();
+        if(_rm){
+          if(!catReminders[cat])catReminders[cat]=new Set();
+          catReminders[cat].add(_rm);
         }
       });
       grp.styles.forEach(style=>{
@@ -4104,13 +4601,19 @@ function renderArrangeCompare(){
         if(idx===0){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.arrivalDate}</td>`;
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;font-family:monospace;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.importNo}</td>`;
-          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.containerType}</td>`;
+          // ★ 櫃號/櫃型 cell: 加入 container checkbox (整櫃選取)
+          const _gkEsc=String(grpKey).replace(/"/g,'&quot;');
+          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle"><label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;justify-content:center"><input type="checkbox" class="forecast-cb-container" data-key="${_gkEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer">${grp.containerType}</label></td>`;
         }
         // ★ 未匹配 + skuCount=0（不在儲位安排報表內）→ 顯示為「無待安排儲位」
         const displayCat=isNoArrange?'無待安排儲位':cat;
         const catColor=isNoArrange?'color:var(--text3)':(cat==='未匹配'?'color:var(--red)':'');
         const catTitle=cat==='未匹配'&&s.unmatchedStyles?(isNoArrange?'此貨櫃內款號未被列入儲位安排，可能為既有商品續進，沿用原儲位':'未匹配款號: '+Array.from(s.unmatchedStyles).join(', ')):'';
-        html+=`<td style="padding:4px 8px;text-align:center;${catColor}" title="${catTitle}">${displayCat}</td>`;
+        // ★ 類別 cell: 加入 category checkbox (個別類別選取)
+        const _gkEsc=String(grpKey).replace(/"/g,'&quot;');
+        const _catEsc=String(cat).replace(/"/g,'&quot;');
+        const cbHtml=isNoArrange?'':`<input type="checkbox" class="forecast-cb-category" data-key="${_gkEsc}" data-cat="${_catEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer;margin-right:4px">`;
+        html+=`<td style="padding:4px 8px;text-align:center;${catColor}" title="${catTitle}">${cbHtml}<span style="cursor:default">${displayCat}</span></td>`;
         // SKU 數欄位：含跨櫃重複提醒
         const skuCell=dupAlert
           ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${s.skuCount||'—'}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
@@ -4125,6 +4628,9 @@ function renderArrangeCompare(){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:right;border-left:1px solid var(--border);vertical-align:middle">${grp.priorityTotal||'—'}</td>`;
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;vertical-align:middle">${arrivalNotify}</td>`;
         }
+        // ★ 進倉提醒欄 (per-category): 直接從預告進貨表 per款號 值順序呈現（去重、保留出現順序）
+        const reminderTxt=catReminders[cat]?Array.from(catReminders[cat]).join('、'):'—';
+        html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2)">${reminderTxt}</td>`;
         tr.innerHTML=html;
         forecastBody.appendChild(tr);
       });
@@ -6616,13 +7122,17 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   <!-- 預告進貨表 -->
   <div id="forecast-section" style="padding:0 18px 14px;display:none">
     <div class="card">
-      <div class="card-title"><span class="dot"></span>預告進貨明細（按進倉單分組，類別統計）</div>
+      <div class="card-title" style="gap:6px;flex-wrap:wrap"><span class="dot"></span>預告進貨明細
+        <span style="flex:1"></span>
+        <button id="forecast-export-btn" onclick="exportArrangeNewReport()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">📥 匯出待安排新品儲位報表</button>
+        <button id="forecast-send-planner-btn" onclick="sendToPlannerFromForecast()" style="background:#784c96;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">→ 傳送至儲位調整</button>
+      </div>
       <div style="max-height:560px;overflow:auto">
         <table style="width:100%;border-collapse:collapse;font-size:11px">
           <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">進倉日期</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">進口編號</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">櫃號櫃型</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">櫃號/櫃型</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">類別</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">SKU 數</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">儲區</th>
@@ -6630,6 +7140,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">箱數</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">優先箱數</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">貨到通知</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">進倉提醒</th>
           </tr></thead>
           <tbody id="forecast-body"></tbody>
         </table>
@@ -6724,6 +7235,16 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 
     <!-- 結果區 -->
     <div id="planner-result-card" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ═══ 儲位調整/新品安排 合併版面 (執行期由 switchTab 將 tab-planner / tab-arrange 移入下方插槽) ═══ -->
+<div class="tab-panel" id="tab-plnarr">
+  <div style="padding:14px 18px">
+    <div id="plnarr-wrap">
+      <div id="plnarr-left"></div>
+      <div id="plnarr-right"></div>
+    </div>
   </div>
 </div>
 
