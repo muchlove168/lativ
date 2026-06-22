@@ -3616,48 +3616,43 @@ function plnRunNewEngine(config,initialCells){
       }
 
       // ── Phase 3: 剩餘 A 空層 → 給未到量最低款色的主碼 ──
-      // 目標: 找 !placed && !partialPlaced 的 entry, 按 totalPending ASC
-      // ★ 一次只取一個 entry; 若主碼全放入 → placed=true; 若部分放入 → partialPlaced=true (不再選)
+      // ★ 嚴格規則:
+      //   (a) 只選「所有主碼的 plnGetTargetLayer 都在 avail 內」的款色
+      //   (b) 若款色有 ≥4 個主碼 (S/M/L/XL 完整4碼) → 不進 A col, 留給 G col
+      //   (c) 若找不到適合的款色 → continue 嘗試下一個 A col (不強迫排入)
       for(const rackACol of rack.aCols){
         let avail=aColAvail[rackACol]||[];
         if(!avail.length)continue;
+        const availSet=new Set(avail);
 
-        // 找未到量最低且完全未排的 entry
-        const candidate=colorEntries
-          .filter(e=>!e.placed&&!e.partialPlaced&&e.mainSkus.length>0)
-          .sort((a,b)=>a.totalPending-b.totalPending)[0];
-        if(!candidate)break;
+        // 候選: 未排、有主碼、主碼數<4、所有主碼 layer 都在 avail 中且不重複
+        const candidate=colorEntries.filter(e=>{
+          if(e.placed||e.partialPlaced||!e.mainSkus.length)return false;
+          if(e.mainSkus.length>=4)return false; // 4碼完整款留給 G col
+          const layers=e.mainSkus.map(s=>plnGetTargetLayer(s.code,s.size));
+          if(layers.some(l=>l===null))return false;
+          if(new Set(layers).size!==layers.length)return false; // layer 衝突
+          return layers.every(l=>availSet.has(l));
+        }).sort((a,b)=>a.totalPending-b.totalPending)[0];
+        if(!candidate)continue; // 此 A col 找不到合適款色 → 嘗試下一個
 
-        const mainSkus=candidate.mainSkus;
-        const placedLayers=[]; // 實際排入的 layers
-        for(const s of mainSkus){
-          const prefL=plnGetTargetLayer(s.code,s.size);
-          const L=(avail.includes(prefL)?prefL:avail[0])??null;
-          if(L===null)break; // 此 A col 已滿
+        // 嚴格按 plnGetTargetLayer 排入 (已確認 layer 可用)
+        for(const s of candidate.mainSkus){
+          const L=plnGetTargetLayer(s.code,s.size);
           if(placeOneSku(s,aisle,rackACol,L,candidate.ku.cat)){
             avail=avail.filter(x=>x!==L);
             aColAvail[rackACol]=avail;
-            placedLayers.push(L);
           }
         }
+        candidate.placed=true;
 
-        if(placedLayers.length===0)continue; // 完全放不下, 跳過
-
-        if(placedLayers.length>=mainSkus.length){
-          // 主碼全放入
-          candidate.placed=true;
-          // 5 碼另找 A col
-          for(const s5 of candidate.size5Skus){
-            const ac5=findNearestACol(rackACol,1,freeA);
-            if(ac5!==null)placeSize5InACol(s5,ac5,candidate.ku.cat);
-            else failed.push({kc:candidate.kc,n:candidate.ku.n,reason:'NO_A_SLOT',cat:candidate.ku.cat});
-          }
-          candidate.size5Placed=true;
-        }else{
-          // 部分放入 → 標記 partialPlaced, 後續迴圈不再選此 entry
-          // 也不讓它進 fallback G col (已有部分 SKU 在 cells 但 placed=false)
-          candidate.partialPlaced=true;
+        // 5 碼另找 A col
+        for(const s5 of candidate.size5Skus){
+          const ac5=findNearestACol(rackACol,1,freeA);
+          if(ac5!==null)placeSize5InACol(s5,ac5,candidate.ku.cat);
+          else failed.push({kc:candidate.kc,n:candidate.ku.n,reason:'NO_A_SLOT',cat:candidate.ku.cat});
         }
+        candidate.size5Placed=true;
       }
     } // end rack loop
 
@@ -3741,7 +3736,7 @@ function plnRunNewEngine(config,initialCells){
     failed.push({kc:ku.kc,n:ku.n,reason:'NEW_NO_FIT',cat:ku.cat});
   }
 
-  return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells};
+  return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:skus.length};
 }
 
 
@@ -4104,10 +4099,10 @@ function plannerRunAllSteps(){
       const statusEl=document.getElementById(`pln-step-${idx}-status`);
       if(statusEl){
         const placedN=r.selected.length;
-        const skipped=(r.failed||[]).length;
-        const skipMsg=skipped?` | 跳過 ${skipped} 款 (空格不足)`:'';
-        statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} 個 SKU${skipMsg}`;
-        statusEl.style.color=skipped?'#d4a017':'var(--accent)';
+        const failedSkuN=(r.failed||[]).reduce((s,f)=>s+f.n,0);
+        const qTotal=r.queueTotal||placedN;
+        const skipMsg=failedSkuN?` | 跳過 ${failedSkuN} 個 SKU (空格不足)`:'';\n        statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} / 佇列 ${qTotal} 個 SKU${skipMsg}`;
+        statusEl.style.color=failedSkuN?'#d4a017':'var(--accent)';
       }
       continue;
     }
@@ -4220,9 +4215,13 @@ function plannerRenderResult(r){
   const dups=Object.entries(skuCount).filter(([s,c])=>c>1);
   const dupHtml=dups.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 重複 SKU 警告: ${dups.length} 個 (異常，請聯絡開發)</div>`:'';
   // ★ 跳過款明細 (新品模式因空格不足而保留)
-  const skippedNew=(r.failed||[]).filter(f=>f.reason==='NEW_NO_FIT');
-  const otherFailed=(r.failed||[]).filter(f=>f.reason!=='NEW_NO_FIT');
-  const newSkipHtml=skippedNew.length?`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.6">📦 新品空格不足 (款保留未排): ${skippedNew.length} 款｜共 ${skippedNew.reduce((s,f)=>s+f.n,0)} 個 SKU<br>${skippedNew.slice(0,8).map(f=>`<span style="font-family:monospace">${f.kc}</span>(${f.n})`).join('、')}${skippedNew.length>8?` …+${skippedNew.length-8}`:''}</div>`:'';
+  const skippedNew=(r.failed||[]).filter(f=>f.reason==='NEW_NO_FIT'||f.reason==='NO_A_SLOT');
+  const otherFailed=(r.failed||[]).filter(f=>f.reason!=='NEW_NO_FIT'&&f.reason!=='NO_A_SLOT');
+  const skippedSkuTotal=skippedNew.reduce((s,f)=>s+f.n,0);
+  const newSkipHtml=skippedNew.length?`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.6">
+    ⚠ 重要 SKU 警告: ${skippedNew.length} 款（真實 ${skippedSkuTotal} 個 SKU）排入失敗（空格不足）<br>
+    <span style="color:var(--text3)">新品佇列共 ${(r.queueTotal||r.selected.length+skippedSkuTotal)} 個 SKU，實際安排 ${r.selected.length} 個，未排入 ${skippedSkuTotal} 個</span><br>
+    ${skippedNew.slice(0,8).map(f=>`<span style="font-family:monospace">${f.kc}</span>(${f.n})`).join('、')}${skippedNew.length>8?` …+${skippedNew.length-8}`:''}</div>`:'';
   const failedHtml=otherFailed.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 未放置: ${otherFailed.length} 群組 (${otherFailed.slice(0,3).map(f=>f.kc).join(', ')}${otherFailed.length>3?'...':''})</div>`:'';
   const xxNote=r.xxSalesMax!==5?`<span style="color:#d4a017;font-weight:600">（已放寬為 銷售≤${r.xxSalesMax}）</span>`:'';
   // 顯示新品列僅在有 newN > 0 時 (★ 統一咖啡色, 取消個別色相)
