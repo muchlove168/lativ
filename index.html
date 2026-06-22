@@ -3668,42 +3668,45 @@ function plnRunNewEngine(config,initialCells){
 
   let remainKuans=[...kuans];
 
-  // AG 走道
+  // AG 走道: 讓所有款式都嘗試 AG 引擎 (多輪直到無進展)
   if(agAisles.length>0){
     const agSorted=[...agAisles].sort((a,b)=>countEmptyInAisle(b)-countEmptyInAisle(a));
-    for(const agAisle of agSorted){
-      if(!remainKuans.length)break;
-      const prevPlacedKcs=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
-      const stillFailed=runAgEngine(agAisle,remainKuans);
-      const failedKcSet=new Set(stillFailed.map(k=>k.kc));
-      // 只保留: AG 前就沒排 且 仍失敗 的款
-      remainKuans=remainKuans.filter(ku=>!prevPlacedKcs.has(ku.kc)&&failedKcSet.has(ku.kc));
-      const seen=new Set();
-      remainKuans=remainKuans.filter(ku=>{if(seen.has(ku.kc))return false;seen.add(ku.kc);return true;});
+    // 最多 3 輪, 每輪把仍失敗的款再跑一次 (利用上輪排完後釋放的空間)
+    for(let round=0;round<3&&remainKuans.length>0;round++){
+      const beforeCount=remainKuans.length;
+      for(const agAisle of agSorted){
+        if(!remainKuans.length)break;
+        const prevPlacedKcs=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
+        const stillFailed=runAgEngine(agAisle,remainKuans);
+        const failedKcSet=new Set(stillFailed.map(k=>k.kc));
+        remainKuans=remainKuans.filter(ku=>!prevPlacedKcs.has(ku.kc)&&failedKcSet.has(ku.kc));
+        const seen=new Set();
+        remainKuans=remainKuans.filter(ku=>{if(seen.has(ku.kc))return false;seen.add(ku.kc);return true;});
+      }
+      // 若本輪沒有任何進展 → 停止避免無限迴圈
+      if(remainKuans.length>=beforeCount)break;
     }
   }
 
-  // Fallback: 非AG走道 + 剩餘款 (連續段)
+  // Fallback: 非AG走道才用 findBestRun (AG走道空格碎片化, 連續段找不到)
   const placedKcsFinal=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
-  const fallbackDst=[...nonAgAisles,...agAisles];
   for(const ku of remainKuans){
-    if(placedKcsFinal.has(ku.kc))continue; // ★ 防重複
+    if(placedKcsFinal.has(ku.kc))continue;
     const colorCount={};
     ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);colorCount[c]=(colorCount[c]||0)+1;});
     const needCells=Object.values(colorCount).reduce((a,b)=>a+Math.max(4,b),0);
     let bestAisle=null,bestRun=null;
-    for(const a of fallbackDst){
+    for(const a of nonAgAisles){
       const run=findBestRun(a,needCells);
       if(run&&(!bestRun||run.length<bestRun.length)){bestAisle=a;bestRun=run;}
     }
     if(bestRun){placeKuanInRun(ku,bestRun);continue;}
-    // 內部整理 (最少移動)
     let consolAisle=null,consolCost=Infinity,consolEmpty=0;
-    for(const a of fallbackDst){
+    for(const a of nonAgAisles){
       const en=countEmptyInAisle(a);if(en<needCells)continue;
       const cellByPos={};
-      Object.values(cells).filter(c=>c.aisle===a).forEach(c=>{
-        if(!cellByPos[c.col])cellByPos[c.col]={};cellByPos[c.col][c.layer]=c;
+      Object.values(cells).filter(cs=>cs.aisle===a).forEach(cs=>{
+        if(!cellByPos[cs.col])cellByPos[cs.col]={};cellByPos[cs.col][cs.layer]=cs;
       });
       const cols=plnValidCols(cells,a);
       let minCost=Infinity;
@@ -3716,8 +3719,8 @@ function plnRunNewEngine(config,initialCells){
           }
           if(range.length>=needCells)break;
         }
-        if(range.length<needCells||range.some(c=>c.locked))continue;
-        const cost=range.filter(c=>c.sku).length;
+        if(range.length<needCells||range.some(cs=>cs.locked))continue;
+        const cost=range.filter(cs=>cs.sku).length;
         if(cost<minCost)minCost=cost;
       }
       if(minCost<consolCost||(minCost===consolCost&&en>consolEmpty)){consolAisle=a;consolCost=minCost;consolEmpty=en;}
@@ -3735,7 +3738,6 @@ function plnRunNewEngine(config,initialCells){
     }
     failed.push({kc:ku.kc,n:ku.n,reason:'NEW_NO_FIT',cat:ku.cat});
   }
-
   return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:skus.length};
 }
 
