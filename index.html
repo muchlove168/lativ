@@ -3506,7 +3506,10 @@ function plnRunNewEngine(config,initialCells){
     });
 
     // 建 colorEntries: 以 color7 (7碼前綴) 為單位
-    // placed: 主碼已安置  size5Placed: 5碼已安置  partialPlaced: 部分主碼已排 (此輪不再選)
+    // ★ 5碼以上款式的溢出邏輯:
+    //   - 先按 plnGetTargetLayer 分配 G col 的 1-4 層
+    //   - 若某 SKU 的 layer 已被前面 SKU 佔用 (衝突) → 歸入 size5Skus (溢出)
+    //   - size5Skus 排入 A col 時保持「層次相連」原則
     const colorEntries=[];
     kuansToPlace.forEach(ku=>{
       const cm={};
@@ -3517,8 +3520,27 @@ function plnRunNewEngine(config,initialCells){
         else cm[c7].main.push(s);
       });
       Object.entries(cm).forEach(([c7,{main,size5}])=>{
-        const tp=[...main,...size5].reduce((s,sk)=>s+(sk.pending||0),0);
-        colorEntries.push({kc:ku.kc,color7:c7,mainSkus:main,size5Skus:size5,
+        // ★ 動態偵測 layer 衝突: 若 mainSkus 中有兩個 SKU 要用同一 layer → 後者溢出
+        const assignedLayers=new Set();
+        const fittingMain=[];
+        const overflow=[];
+        // 按 plnGetTargetLayer 分配, layer 有空才進 fittingMain
+        for(const s of main){
+          const L=plnGetTargetLayer(s.code,s.size);
+          if(L!==null&&!assignedLayers.has(L)&&L>=1&&L<=4){
+            fittingMain.push(s);
+            assignedLayers.add(L);
+          } else {
+            overflow.push(s); // layer 衝突或無法對應 → 溢出
+          }
+        }
+        // 溢出碼合併進 size5Skus, size5Skus 本身的 isSize5 碼也在其中
+        // 排序: size5Skus 依 code 排序 (code2=50,60,70... 保持碼號順序), 確保層次相連
+        const allOverflow=[...size5,...overflow].sort((a,b)=>
+          String(a.code||'').localeCompare(String(b.code||''))
+        );
+        const tp=[...fittingMain,...allOverflow].reduce((s,sk)=>s+(sk.pending||0),0);
+        colorEntries.push({kc:ku.kc,color7:c7,mainSkus:fittingMain,size5Skus:allOverflow,
           totalPending:tp,ku,placed:false,size5Placed:false,partialPlaced:false});
       });
     });
@@ -3599,18 +3621,38 @@ function plnRunNewEngine(config,initialCells){
         entry.placed=true;
       }
 
-      // ── Phase 2: 5 碼 → 放到最近 A col ──
+      // ── Phase 2: 溢出碼 (5碼+以上) → 放到最近 A col, 層次相連 ──
+      // ★ 同一款色的所有溢出碼優先塞入同一個 A col 的連續層
+      //   若一個 A col 放不下全部 → 溢出到下一個相鄰 A col 繼續填
       for(const {gc,entry} of gAssign){
         if(!entry.size5Skus.length)continue;
-        for(const s5 of entry.size5Skus){
-          // 找最近有空層的 A col (同架優先)
-          const ac=findNearestACol(gc,1,freeA);
+        const overflowSkus=entry.size5Skus; // 已按 code 排序 (code2=50,60,70... 保持順序)
+        let oIdx=0;
+        while(oIdx<overflowSkus.length){
+          // 找一個有足夠空層的 A col (優先同架, 再全走道, 按距離排序)
+          const needed=overflowSkus.length-oIdx;
+          const allAvailACols=Object.keys(aColAvail)
+            .map(Number)
+            .filter(ac=>(aColAvail[ac]||[]).length>0)
+            .sort((a,b)=>Math.abs(a-gc)-Math.abs(b-gc));
+          const ac=allAvailACols[0]??null;
           if(ac===null){
-            // 完全找不到 A col → failed
-            failed.push({kc:entry.kc,n:entry.ku.n,reason:'NO_A_SLOT',cat:entry.ku.cat});
-            continue;
+            // 完全找不到 A col → 剩餘溢出碼失敗
+            for(let i=oIdx;i<overflowSkus.length;i++){
+              failed.push({kc:entry.kc,n:entry.ku.n,reason:'NO_A_SLOT',cat:entry.ku.cat});
+            }
+            break;
           }
-          placeSize5InACol(s5,ac,entry.ku.cat);
+          // 在此 A col 連續填入溢出碼 (用 avail 中最小 layer 開始)
+          const avail=[...(aColAvail[ac]||[])].sort((a,b)=>a-b);
+          for(const L of avail){
+            if(oIdx>=overflowSkus.length)break;
+            const s5=overflowSkus[oIdx];
+            if(placeOneSku(s5,aisle,ac,L,entry.ku.cat)){
+              aColAvail[ac]=(aColAvail[ac]||[]).filter(x=>x!==L);
+              oIdx++;
+            }
+          }
         }
         entry.size5Placed=true;
       }
@@ -3646,13 +3688,32 @@ function plnRunNewEngine(config,initialCells){
         }
         candidate.placed=true;
 
-        // 5 碼另找 A col
-        for(const s5 of candidate.size5Skus){
-          const ac5=findNearestACol(rackACol,1,freeA);
-          if(ac5!==null)placeSize5InACol(s5,ac5,candidate.ku.cat);
-          else failed.push({kc:candidate.kc,n:candidate.ku.n,reason:'NO_A_SLOT',cat:candidate.ku.cat});
+        // 溢出碼 (5碼+): 也用連續層原則排入 A col
+        if(candidate.size5Skus.length>0){
+          let oIdx=0;
+          const overflowSkus=candidate.size5Skus;
+          while(oIdx<overflowSkus.length){
+            const allAvailACols=Object.keys(aColAvail)
+              .map(Number)
+              .filter(ac=>(aColAvail[ac]||[]).length>0)
+              .sort((a,b)=>Math.abs(a-rackACol)-Math.abs(b-rackACol));
+            const ac5=allAvailACols[0]??null;
+            if(ac5===null){
+              for(let i=oIdx;i<overflowSkus.length;i++)
+                failed.push({kc:candidate.kc,n:candidate.ku.n,reason:'NO_A_SLOT',cat:candidate.ku.cat});
+              break;
+            }
+            const avail5=[...(aColAvail[ac5]||[])].sort((a,b)=>a-b);
+            for(const L of avail5){
+              if(oIdx>=overflowSkus.length)break;
+              if(placeOneSku(overflowSkus[oIdx],aisle,ac5,L,candidate.ku.cat)){
+                aColAvail[ac5]=(aColAvail[ac5]||[]).filter(x=>x!==L);
+                oIdx++;
+              }
+            }
+          }
+          candidate.size5Placed=true;
         }
-        candidate.size5Placed=true;
       }
     } // end rack loop
 
