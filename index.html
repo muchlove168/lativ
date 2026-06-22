@@ -4101,7 +4101,8 @@ function plannerRunAllSteps(){
         const placedN=r.selected.length;
         const failedSkuN=(r.failed||[]).reduce((s,f)=>s+f.n,0);
         const qTotal=r.queueTotal||placedN;
-        const skipMsg=failedSkuN?` | 跳過 ${failedSkuN} 個 SKU (空格不足)`:'';\n        statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} / 佇列 ${qTotal} 個 SKU${skipMsg}`;
+        const skipMsg=failedSkuN?` | 跳過 ${failedSkuN} 個 SKU (空格不足)`:'';
+        statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} / 佇列 ${qTotal} 個 SKU${skipMsg}`;
         statusEl.style.color=failedSkuN?'#d4a017':'var(--accent)';
       }
       continue;
