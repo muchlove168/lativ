@@ -3557,9 +3557,9 @@ function plannerRenderConfigUI(){
   const aisles=plnGetAislesInReport();
   const overflow=plnGetOverflowAisles();
   
-  if(aisles.length<2){
+  if(aisles.length===0){
     body.innerHTML=`<div style="padding:24px;text-align:center;color:var(--text3)">
-      走道報表只偵測到 ${aisles.length} 個走道 (${aisles.join(', ')||'無'})，至少需要 2 個 (來源 + 目的)
+      走道報表未偵測到任何走道，請先上傳含資料的走道報表
     </div>`;
     document.getElementById('planner-result-card').style.display='none';
     return;
@@ -3568,7 +3568,10 @@ function plannerRenderConfigUI(){
   // ★ 多步驟: 重置為 1 步, 渲染 step 容器 + 控制列
   PLN_STEPS_COUNT=1;
   const ovfTxt=overflow.length?`溢位區: ${overflow.join('+')} (自動)`:'溢位區: 無 XX 區';
+  // ★ 單走道提示: 僅 1 個走道時，限制為內部整理 / 新品模式
+  const singleAisleNotice=aisles.length===1?`<div style="padding:6px 10px;margin-bottom:8px;background:rgba(120,76,150,0.08);border-left:3px solid #784c96;border-radius:3px;font-size:12px;color:var(--text2)">⚠ 走道報表僅偵測到 1 個走道 (${aisles[0]})，挑選模式鎖定為「內部整理」或「新品」</div>`:'';
   body.innerHTML=`
+    ${singleAisleNotice}
     <div id="pln-steps-wrap" style="display:flex;flex-direction:column;gap:10px"></div>
     <div style="display:flex;align-items:center;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border)">
       <button onclick="plannerAddStep()" class="upload-btn" style="font-size:12px;padding:4px 12px">+ 新增步驟</button>
@@ -3576,7 +3579,8 @@ function plannerRenderConfigUI(){
       <button onclick="plannerRunAllSteps()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
     </div>
   `;
-  plannerRenderStep(1,aisles,[],[],'','high');
+  const defaultMode=aisles.length===1?'internal':'high';
+  plannerRenderStep(1,aisles,[],[],'',defaultMode);
   // ★ 掛載事件監聽: 任何 checkbox/radio/N 變更 → debounce 後重算所有 step 顯示數字
   const wrap=document.getElementById('pln-steps-wrap');
   wrap.addEventListener('change',plannerHandleInternalBind);  // 內部整理: src/dst 互鎖 + 單選
@@ -3616,8 +3620,8 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
       <span style="color:var(--text2)">目的走道</span><div>${dstHtml}</div>
       <span style="color:var(--text2)">挑選</span>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''}>高庫存</label>
-        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''}>低庫存</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:${aisles.length<2?'not-allowed':'pointer'};${aisles.length<2?'opacity:0.4':''}" title="${aisles.length<2?'走道數不足，需 2 個以上才能跨走道調撥':''}"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''} ${aisles.length<2?'disabled':''}>高庫存</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:${aisles.length<2?'not-allowed':'pointer'};${aisles.length<2?'opacity:0.4':''}" title="${aisles.length<2?'走道數不足，需 2 個以上才能跨走道調撥':''}"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''} ${aisles.length<2?'disabled':''}>低庫存</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="internal" ${defaultSortMode==='internal'?'checked':''}>內部整理</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;color:#784c96"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="new" ${defaultSortMode==='new'?'checked':''}>新品</label>
       </div>
@@ -3632,7 +3636,8 @@ function plannerAddStep(){
   const aisles=plnGetAislesInReport();
   PLN_STEPS_COUNT++;
   // 預設 source=第一個未被前步驟用過的, 但簡化: 預設全空, 讓使用者勾
-  plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],'','high');
+  const defMode=aisles.length===1?'internal':'high';
+  plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],'',defMode);
   plannerScheduleRefresh();
 }
 
@@ -4591,6 +4596,8 @@ function renderArrangeCompare(){
       if(catEntries.length===0)return;
       const totalRows=catEntries.length;
       const arrivalNotify=(grp.arrivalNotifyTotal>0)?grp.arrivalNotifyTotal.toLocaleString():'—';
+      // ★ 檢查該櫃是否有任一類別需要安排儲位 (全部都是無待安排 → 隱藏整櫃 checkbox)
+      const hasAnyArrange=catEntries.some(([cat,s])=>!(cat==='未匹配'&&(s.skuCount||0)===0));
 
       catEntries.forEach(([cat,s],idx)=>{
         const tr=document.createElement('tr');
@@ -4623,9 +4630,10 @@ function renderArrangeCompare(){
         if(idx===0){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.arrivalDate}</td>`;
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;font-family:monospace;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.importNo}</td>`;
-          // ★ 櫃號/櫃型 cell: 加入 container checkbox (整櫃選取)
+          // ★ 櫃號/櫃型 cell: 加入 container checkbox (整櫃選取); 全櫃無待安排則隱藏 checkbox
           const _gkEsc=String(grpKey).replace(/"/g,'&quot;');
-          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle"><label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;justify-content:center"><input type="checkbox" class="forecast-cb-container" data-key="${_gkEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer">${grp.containerType}</label></td>`;
+          const containerCbHtml=hasAnyArrange?`<input type="checkbox" class="forecast-cb-container" data-key="${_gkEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer">`:'';
+          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle"><label style="display:inline-flex;align-items:center;gap:4px;cursor:${hasAnyArrange?'pointer':'default'};justify-content:center">${containerCbHtml}${grp.containerType}</label></td>`;
         }
         // ★ 未匹配 + skuCount=0（不在儲位安排報表內）→ 顯示為「無待安排儲位」
         const displayCat=isNoArrange?'無待安排儲位':cat;
