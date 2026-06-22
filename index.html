@@ -3359,6 +3359,11 @@ function plnRunNewEngine(config,initialCells){
           const okNextCol=(lastCol===col-1&&lastLayer===4&&L===1);
           if(!okSameCol&&!okNextCol){runs.push(cur);cur=[];}
         }
+        // ★ FIX: run 必須由 L=1 起始 (placeKuanInRun 假設 run[0]=L1; 跨欄續接也保證 i 位置=Li%4+1)
+        //   原本若 L1 被佔, 由 L2 起會把後續整段 (含下個欄位整段) 一起吞, 導致 findBestRun 完全找不到合法段
+        if(cur.length===0 && L!==1){
+          continue;
+        }
         cur.push(cs);
         lastCol=col;lastLayer=L;
       }
@@ -3474,9 +3479,14 @@ function plnRunNewEngine(config,initialCells){
     //   即使某色只有 1 個 SKU 也會佔用整個 bin. 5 個 SKU 分 5 色 ⇒ 需要 20 cells.
     //   原本傳 n 進 findBestRun / 內部整理 nToPick, 導致即使 F01 有 351 個空格,
     //   切碎後找不到「>= 5 cells 且首格 layer=1 且不含 locked」的連續段就誤判失敗.
-    const colorSet=new Set();
-    ku.skus.forEach(s=>colorSet.add(String(s.code||'').substring(0,7)));
-    const needCells=4*colorSet.size;
+    // ★ FIX 2 (XXL 漏排 bug): 4*色數 沒算到 spillover. 1 色 5 SKU (S/M/L/XL/XXL) 4 層都用滿,
+    //   XXL 需 spill 至第 5 格. 公式應改為 Σ max(4, n_per_color). 否則 run 剛好等於 4*色數 時 XXL 被丟棄.
+    const colorCount={};
+    ku.skus.forEach(s=>{
+      const c=String(s.code||'').substring(0,7);
+      colorCount[c]=(colorCount[c]||0)+1;
+    });
+    const needCells=Object.values(colorCount).reduce((a,b)=>a+Math.max(4,b),0);
     
     // (a) 先找有連續段 ≥ needCells 的走道, 取最短的
     let bestAisle=null, bestRun=null;
