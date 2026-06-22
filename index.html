@@ -3118,11 +3118,14 @@ function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
 }
 
 // ★ Deep clone cells (multi-step 用, 避免上一步 state 污染後續)
-function plnCloneCells(src){
+function plnCloneCells(src,preserveLocked){
   const out={};
   Object.entries(src).forEach(([k,v])=>{
-    out[k]={cell:v.cell,aisle:v.aisle,col:v.col,layer:v.layer,layout:v.layout,sku:v.sku,info:v.info,locked:false};
+    out[k]={cell:v.cell,aisle:v.aisle,col:v.col,layer:v.layer,layout:v.layout,sku:v.sku,info:v.info,
+      locked:preserveLocked?!!v.locked:false};
     // locked 重置: 一個 step 內的 locked 是防 chained displacement, 跨 step 不繼承
+    // 但「新品安排 → 內部整理 consolidation」例外: 需保留已放入新品的 lock, 避免新品被當成 displacee 搬出後該儲位被下一款覆寫
+    // 觸發方式: 呼叫端 config.preserveLocked=true → plnRunInternalEngine 內以 config.preserveLocked 傳入此參數
   });
   return out;
 }
@@ -3145,7 +3148,7 @@ function plnCloneCells(src){
 //        Greedy 順序: 先處理「目標層 refuge 數最少」的 displacee, 避免搶位
 //   5. 不做 XX/TX overflow, 不做款色分組, 直接逐筆 move
 function plnRunInternalEngine(config,initialCells){
-  const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
+  const cells=initialCells?plnCloneCells(initialCells,config.preserveLocked):plnBuildState();
   const moves=[];
   const failed=[];
   
@@ -3439,15 +3442,20 @@ function plnRunNewEngine(config,initialCells){
       }
       cursor=binStart+4;
     }
-    // 安置 spill: 優先 freeSlots → 否則 cursor 後續
+    // 安置 spill: 優先 freeSlots (bin 內未用層) → 否則 aisle-wide 評分搜索
+    // ★ aisle-wide 評分採用「預設底層排入邏輯」優先序: [layerMatch, adjConflict, dist, col]
+    //   避免 XXL spill 到 bin 旁 L1 → 與 bin 的 S (同款色 L1) 相鄰造成補錯商品
     freeSlots.sort((a,b)=>a-b);
+    const aisle=run[0]?.aisle;
+    const binCol=run[0]?.col||0;
     for(const sp of spillQueue){
       let done=false;
+      // (1) 試 intra-bin freeSlots
       while(freeSlots.length){
         const idx=freeSlots.shift();
         if(usedIdx.has(idx))continue;
         const cell=run[idx].cell;
-        if(!cells[cell].sku){
+        if(!cells[cell].sku && !cells[cell].locked){
           const info={'商品編號':sp.code,'商品名稱':sp.name||'','尺寸':sp.size||'','顏色':'','銷售庫存':0,'架上數量':0,'未到量':sp.pending||0,'未抓貨':0,'保留數量':0,'商品包材':sp.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
           cells[cell].sku=sp.code;cells[cell].info=info;cells[cell].locked=true;
           moves.push({phase:'NEW_PRODUCT',sku:sp.code,src:'',dst:cell,dstLayout:run[idx].layout||''});
@@ -3458,15 +3466,31 @@ function plnRunNewEngine(config,initialCells){
         }
       }
       if(done)continue;
-      while(cursor<run.length&&(usedIdx.has(cursor)||cells[run[cursor].cell].sku))cursor++;
-      if(cursor>=run.length)break;  // run 用盡 (理論上不會發生因事先檢查)
-      const cell=run[cursor].cell;
+      // (2) Aisle-wide 評分搜索
+      const spLayer=plnGetTargetLayer(sp.code,sp.size);
+      const spKuanSe=plnSkuKuanSe(sp.code);
+      let bestCell=null, bestScore=null;
+      Object.values(cells).forEach(cs=>{
+        if(cs.aisle!==aisle)return;
+        if(cs.sku||cs.locked)return;
+        const layerMatch=(spLayer!=null && cs.layer===spLayer)?0:1;
+        let adjConflict=0;
+        for(const dc of [-1,1]){
+          const nb=cells[plnCellId(cs.aisle,cs.col+dc,cs.layer)];
+          if(nb && nb.sku && plnSkuKuanSe(nb.sku)===spKuanSe)adjConflict++;
+        }
+        const dist=Math.abs(cs.col-binCol);
+        const score=[layerMatch,adjConflict,dist,cs.col];
+        if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){
+          bestScore=score;bestCell=cs;
+        }
+      });
+      if(!bestCell)break;
+      const cell=bestCell.cell;
       const info={'商品編號':sp.code,'商品名稱':sp.name||'','尺寸':sp.size||'','顏色':'','銷售庫存':0,'架上數量':0,'未到量':sp.pending||0,'未抓貨':0,'保留數量':0,'商品包材':sp.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
       cells[cell].sku=sp.code;cells[cell].info=info;cells[cell].locked=true;
-      moves.push({phase:'NEW_PRODUCT',sku:sp.code,src:'',dst:cell,dstLayout:run[cursor].layout||''});
+      moves.push({phase:'NEW_PRODUCT',sku:sp.code,src:'',dst:cell,dstLayout:bestCell.layout||''});
       placed.push(info);
-      usedIdx.add(cursor);
-      cursor++;
     }
   }
   
@@ -3511,12 +3535,14 @@ function plnRunNewEngine(config,initialCells){
     
     if(consolAisle){
       // 呼叫 plnRunInternalEngine 產生連續 needCells 空格
+      // ★ preserveLocked: true — 保留前面已置入新品的 lock, 避免被當 displacee 搬走後其儲位被本款 S 覆蓋 (重複 SKU bug)
       const intCfg={
         source:[consolAisle],
         destination:[consolAisle],
         overflow:[],
         nToPick:needCells,
         sortMode:'internal',
+        preserveLocked:true,
         aisleGeometry:config.aisleGeometry||plnGetAisleGeometry(),
       };
       const intR=plnRunInternalEngine(intCfg,cells);
@@ -4037,13 +4063,37 @@ function plannerRenderResult(r){
 function plannerExportResult(){
   if(!PLN_LAST_RESULT){alert('先執行計畫');return;}
   const r=PLN_LAST_RESULT;
-  // === Sheet 1: 挑選清單 (★ 按商品編號升冪排序, 刪除分數+Tier1 兩欄) ===
-  const cols1=['商品編號','商品名稱','顏色','尺寸','儲位','未到量','未抓貨','保留數量','銷售庫存','架上數量'];
-  const aoa1=[cols1];
-  [...r.selected].sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號']))).forEach(s=>{
-    aoa1.push([s['商品編號'],s['商品名稱'],s['顏色'],s['尺寸'],s['儲位'],
-      s['未到量']||0,s['未抓貨']||0,s['保留數量']||0,s['銷售庫存']||0,s['架上數量']||0]);
-  });
+  // === Sheet 1: 挑選清單 / 新品安排 ===
+  // ★ 新品模式偵測: 所有 selected 皆為 _isNewProduct → 切換為「新品安排」格式
+  //   - sheet 名: 新品安排
+  //   - 欄位: 商品編號 / 商品名稱 / 尺寸 / 儲位 / 擺法 / 倉位 / 未到量
+  //   - 刪除: 顏色 / 未抓貨 / 保留數量 / 銷售庫存 / 架上數量
+  //   - 擺法: 從 STORAGE_MASTER 比對 cell 對應 layout (新品安排當下儲位 = 最終儲位)
+  //   - 倉位: 空白讓使用者自行填入
+  const isNewMode = r.selected.length>0 && r.selected.every(s=>s['_isNewProduct']);
+  // 建立 cell → layout map (STORAGE_MASTER: {sheetName:[{slot,layout}]})
+  const slotLayoutMap={};
+  Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(({slot,layout})=>{
+    if(slot && !slotLayoutMap[slot]) slotLayoutMap[slot]=layout||'';
+  }));
+  let cols1, aoa1, sheet1Name;
+  if(isNewMode){
+    sheet1Name='新品安排';
+    cols1=['商品編號','商品名稱','尺寸','儲位','擺法','倉位','未到量'];
+    aoa1=[cols1];
+    [...r.selected].sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號']))).forEach(s=>{
+      const slot=s['儲位']||'';
+      aoa1.push([s['商品編號'],s['商品名稱'],s['尺寸'],slot,slotLayoutMap[slot]||'','',s['未到量']||0]);
+    });
+  } else {
+    sheet1Name='挑選清單';
+    cols1=['商品編號','商品名稱','顏色','尺寸','儲位','未到量','未抓貨','保留數量','銷售庫存','架上數量'];
+    aoa1=[cols1];
+    [...r.selected].sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號']))).forEach(s=>{
+      aoa1.push([s['商品編號'],s['商品名稱'],s['顏色'],s['尺寸'],s['儲位'],
+        s['未到量']||0,s['未抓貨']||0,s['保留數量']||0,s['銷售庫存']||0,s['架上數量']||0]);
+    });
+  }
 
   // === Sheet 2: 待移 ===
   // ★ 走道分組 bin-packing 排版 (取代舊版線性切欄):
@@ -4259,11 +4309,16 @@ function plannerExportResult(){
 
   const wb=XLSX.utils.book_new();
 
-  // ─── Sheet 1: 挑選清單 (商品編號=13.3, 儲位=12.5 對齊新規格) ───
+  // ─── Sheet 1: 挑選清單 / 新品安排 (新品模式有不同欄寬) ───
   const ws1=XLSX.utils.aoa_to_sheet(aoa1);
-  ws1['!cols']=[{wch:13.3},{wch:30},{wch:8},{wch:6},{wch:12.5},{wch:7},{wch:7},{wch:8},{wch:8},{wch:8}];
+  if(isNewMode){
+    // 商品編號=13.3, 商品名稱=30, 尺寸=6, 儲位=12.5, 擺法=8, 倉位=8, 未到量=7
+    ws1['!cols']=[{wch:13.3},{wch:30},{wch:6},{wch:12.5},{wch:8},{wch:8},{wch:7}];
+  } else {
+    ws1['!cols']=[{wch:13.3},{wch:30},{wch:8},{wch:6},{wch:12.5},{wch:7},{wch:7},{wch:8},{wch:8},{wch:8}];
+  }
   applyStyleFull(ws1,{headerRows:[0]});
-  XLSX.utils.book_append_sheet(wb,ws1,'挑選清單');
+  XLSX.utils.book_append_sheet(wb,ws1,sheet1Name);
 
   // ─── Sheet 2: 待移 (★ 走道分組 bin-packing + 待移.xlsx 模板框線) ───
   const ws2=XLSX.utils.aoa_to_sheet(aoa2);
