@@ -3300,17 +3300,17 @@ function plnRunInternalEngine(config,initialCells){
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// ★ 新品安置引擎 plnRunNewEngine (v3)
+// ★ 新品安置引擎 plnRunNewEngine (v4)
 // ═══════════════════════════════════════════════════════════════════
 // AAGGGG 架構 (AG走道):
-//   每「架」= 6 col: A,A,G,G,G,G (從 col 1 開始, 每6為一架)
-//   G col (4個): 放1-4碼 (S/M/L/XL), 各佔1 layer (1-4層)
-//   A col (2個): 優先放5碼 (XXL); 剩餘A空格給未到量最低款色的1-4碼
-//   同架原則: 一款色的5碼盡量放在對應G col 同架的A col內
-//   若當架A col已滿 → 找相鄰架(前後1架)的A col
-//   非AG走道 → 一般連續段(bin-packing)邏輯
-// ★ 永遠強制: 同款同色不同尺寸不排相鄰 col 同層 (adjConflict)
-// ★ 最少移動原則: 目的走道有足夠連續空格時直接排入, 不觸發內部整理
+//   每「架」= 6 col: A,A,G,G,G,G (從 col 1 起, 每 6 為一架)
+//   G col (4個): 放 1-4 碼的 S/M/L/XL, 各佔 1 layer
+//   A col (2個): 優先放 5 碼 (XXL); 剩餘 A 層給未到量最低款色
+//   ★ 同款色不重複排入 — 一旦任何 SKU 被放入 cells, 立即標記整個 entry 為已處理
+//   ★ 3碼款: 佔 col 3層, 第4層讓未到量高的款色用來放 5碼
+//   ★ 跨架5碼: 同架 A col 優先; 滿了找全走道最近的 A col
+// 非AG走道 → 一般連續段 (bin-packing) 邏輯
+// ★ 最少移動: 有足夠連續空格時直接排入, 不觸發內部整理
 // ═══════════════════════════════════════════════════════════════════
 function plnRunNewEngine(config,initialCells){
   const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
@@ -3340,29 +3340,18 @@ function plnRunNewEngine(config,initialCells){
     .sort((a,b)=>(b.n-a.n)||(a.kc<b.kc?-1:1));
 
   // ── 通用工具 ──
-  function isSize5(sku,size){
-    const code=String(sku||'').substring(7,9);
-    return code==='50'||/^(XXL|XXXL|3XL|4XL|5XL)$/i.test(String(size||''));
+  function isSize5(code,size){
+    const c=String(code||'').substring(7,9);
+    return c==='50'||/^(XXL|XXXL|3XL|4XL|5XL)$/i.test(String(size||''));
   }
   function getColLayout(aisle,col){
-    // 取走道某 col 的擺法 (從任何一個 layer 讀)
     for(let L=1;L<=4;L++){
       const cs=cells[plnCellId(aisle,col,L)];
       if(cs&&cs.layout)return cs.layout;
     }
     return '';
   }
-  function isColFree(aisle,col){
-    // col 所有 layer 都沒有 sku 且 cell 存在
-    for(let L=1;L<=4;L++){
-      const cs=cells[plnCellId(aisle,col,L)];
-      if(!cs)continue;
-      if(cs.sku||cs.locked)return false;
-    }
-    return true;
-  }
   function colEmptyLayers(aisle,col){
-    // 回傳此 col 中空的 layers 陣列
     const empty=[];
     for(let L=1;L<=4;L++){
       const cs=cells[plnCellId(aisle,col,L)];
@@ -3370,6 +3359,14 @@ function plnRunNewEngine(config,initialCells){
     }
     return empty;
   }
+  function isColFree(aisle,col){
+    for(let L=1;L<=4;L++){
+      const cs=cells[plnCellId(aisle,col,L)];
+      if(cs&&(cs.sku||cs.locked))return false;
+    }
+    return true;
+  }
+  // ★ 核心: 排入單一 SKU 到指定儲位 (返回 bool)
   function placeOneSku(s,aisle,col,layer,kuCat){
     const cell=plnCellId(aisle,col,layer);
     const cs=cells[cell];
@@ -3377,13 +3374,13 @@ function plnRunNewEngine(config,initialCells){
     const info={'商品編號':s.code,'商品名稱':s.name||'','尺寸':s.size||'','顏色':'',
       '銷售庫存':0,'架上數量':0,'未到量':s.pending||0,'未抓貨':0,'保留數量':0,
       '商品包材':s.packaging||'','類別':kuCat,'儲位':cell,'_isNewProduct':true};
-    cells[cell].sku=s.code;cells[cell].info=info;cells[cell].locked=true;
+    cs.sku=s.code;cs.info=info;cs.locked=true;
     moves.push({phase:'NEW_PRODUCT',sku:s.code,src:'',dst:cell,dstLayout:cs.layout||''});
     placed.push(info);
     return true;
   }
 
-  // ── 一般連續段 (非AG 走道用) ──
+  // ── 一般連續段 (非AG走道 fallback) ──
   function getRunsForAisle(a){
     const cols=plnValidCols(cells,a);
     const runs=[];
@@ -3397,9 +3394,8 @@ function plnRunNewEngine(config,initialCells){
           lastCol=null;lastLayer=null;continue;
         }
         if(cur.length){
-          const okSame=(lastCol===col&&lastLayer===L-1);
-          const okNext=(lastCol===col-1&&lastLayer===4&&L===1);
-          if(!okSame&&!okNext){runs.push(cur);cur=[];}
+          const ok=(lastCol===col&&lastLayer===L-1)||(lastCol===col-1&&lastLayer===4&&L===1);
+          if(!ok){runs.push(cur);cur=[];}
         }
         if(cur.length===0&&L!==1)continue;
         cur.push(cs);lastCol=col;lastLayer=L;
@@ -3412,13 +3408,10 @@ function plnRunNewEngine(config,initialCells){
     const runs=getRunsForAisle(a);
     const fit=runs.filter(r=>r.length>=needN&&r[0].layer===1);
     if(!fit.length)return null;
-    fit.sort((x,y)=>(x.length-y.length)||(x[0].col-y[0].col));
-    return fit[0];
+    return fit.sort((x,y)=>(x.length-y.length)||(x[0].col-y[0].col))[0];
   }
   function countEmptyInAisle(a){
-    let n=0;
-    Object.values(cells).forEach(cs=>{if(cs.aisle===a&&!cs.sku&&!cs.locked)n++;});
-    return n;
+    return Object.values(cells).filter(c=>c.aisle===a&&!c.sku&&!c.locked).length;
   }
   function placeKuanInRun(ku,run){
     const colorMap={};
@@ -3428,38 +3421,30 @@ function plnRunNewEngine(config,initialCells){
       colorMap[c].push(s);
     });
     const colors=Object.keys(colorMap).sort();
-    const usedIdx=new Set();
-    const freeSlots=[];
-    const spillQueue=[];
-    let cursor=0;
+    const usedIdx=new Set();const freeSlots=[];const spillQueue=[];let cursor=0;
     for(const c of colors){
-      const skusInColor=colorMap[c];
-      const binStart=cursor;
+      const skusInColor=colorMap[c];const binStart=cursor;
       if(binStart+4>run.length){skusInColor.forEach(s=>spillQueue.push(s));continue;}
       const usedLayers=new Set();
       skusInColor.forEach(s=>{
         const L=plnGetTargetLayer(s.code,s.size);
         if(L>=1&&L<=4&&!usedLayers.has(L)){
-          const slotIdx=binStart+(L-1);
-          if(slotIdx<run.length&&run[slotIdx].layer===L){
-            const cell=run[slotIdx].cell;
+          const si=binStart+(L-1);
+          if(si<run.length&&run[si].layer===L){
+            const cell=run[si].cell;
             const info={'商品編號':s.code,'商品名稱':s.name||'','尺寸':s.size||'','顏色':'',
               '銷售庫存':0,'架上數量':0,'未到量':s.pending||0,'未抓貨':0,'保留數量':0,
               '商品包材':s.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
             cells[cell].sku=s.code;cells[cell].info=info;cells[cell].locked=true;
-            moves.push({phase:'NEW_PRODUCT',sku:s.code,src:'',dst:cell,dstLayout:run[slotIdx].layout||''});
-            placed.push(info);
-            usedIdx.add(slotIdx);usedLayers.add(L);return;
+            moves.push({phase:'NEW_PRODUCT',sku:s.code,src:'',dst:cell,dstLayout:run[si].layout||''});
+            placed.push(info);usedIdx.add(si);usedLayers.add(L);return;
           }
         }
         spillQueue.push(s);
       });
       for(let L=1;L<=4;L++){
-        if(!usedLayers.has(L)){
-          const slotIdx=binStart+(L-1);
-          if(slotIdx<run.length&&run[slotIdx].layer===L&&!usedIdx.has(slotIdx))
-            freeSlots.push(slotIdx);
-        }
+        if(!usedLayers.has(L)){const si=binStart+(L-1);
+          if(si<run.length&&run[si].layer===L&&!usedIdx.has(si))freeSlots.push(si);}
       }
       cursor=binStart+4;
     }
@@ -3467,8 +3452,7 @@ function plnRunNewEngine(config,initialCells){
     for(const sp of spillQueue){
       let done=false;
       while(freeSlots.length){
-        const idx=freeSlots.shift();
-        if(usedIdx.has(idx))continue;
+        const idx=freeSlots.shift();if(usedIdx.has(idx))continue;
         const cell=run[idx].cell;
         if(!cells[cell].sku){
           const info={'商品編號':sp.code,'商品名稱':sp.name||'','尺寸':sp.size||'','顏色':'',
@@ -3493,316 +3477,259 @@ function plnRunNewEngine(config,initialCells){
   }
 
   // ════════════════════════════════════════════════════════════
-  // ★ AG 模式引擎
-  // 架構: 每 6 col 一架 (AAGGGG), 從 col 1 起
-  // 步驟:
-  //   1. 掃描走道空架 (全空或僅A-col layer-1已佔)
-  //   2. 每架的 4 個 G col 各放一款色的 1-4 碼
-  //   3. 每架的 2 個 A col 依序放這 4 款色的 5 碼 (每 A col 可放 4 個 5碼)
-  //   4. 若一架 G col 放了 <4 款色 (如 3 款色 + 3 碼款), 空出的 A col 層給未到量低的款色
+  // ★ AG 模式引擎 (v4 — 無重複排入)
+  // 設計原則:
+  //   colorEntry.placed 一旦設為 true 表示主碼(1-4碼)已確定安置
+  //   (可能在 G col 或 A col), 之後任何迴圈都不再選取這個 entry
+  //   5 碼 (XXL) 獨立追蹤, 用 entry.size5Placed 標記
   // ════════════════════════════════════════════════════════════
   function isAgAisle(a){
-    const layouts=new Set();
-    Object.values(cells).forEach(cs=>{if(cs.aisle===a&&cs.layout)layouts.add(cs.layout);});
-    return layouts.has('A')&&layouts.has('G')&&[...layouts].every(l=>l==='A'||l==='G');
+    const ls=new Set();
+    Object.values(cells).forEach(cs=>{if(cs.aisle===a&&cs.layout)ls.add(cs.layout);});
+    return ls.has('A')&&ls.has('G')&&[...ls].every(l=>l==='A'||l==='G');
   }
 
   function runAgEngine(aisle,kuansToPlace){
-    // 取走道所有 col, 計算 col→layout
+    const RACK=6;
     const allCols=new Set();
     Object.values(cells).forEach(cs=>{if(cs.aisle===aisle)allCols.add(cs.col);});
-    const sortedAllCols=[...allCols].sort((a,b)=>a-b);
+    function rackStart(c){return Math.floor((c-1)/RACK)*RACK+1;}
 
-    // 依 AAGGGG 規律, 從 col 1 起每6為一架
-    // 找第一架的起點
-    const minCol=sortedAllCols[0]||1;
-    // 架起點: 1,7,13,19... (每6一架)
-    // 如果 minCol 不是1, 找所屬架的起點
-    const RACK_SIZE=6;
-    function rackStart(col){return Math.floor((col-1)/RACK_SIZE)*RACK_SIZE+1;}
-
-    // 建立架列表
-    const rackStartCols=new Set();
-    sortedAllCols.forEach(c=>rackStartCols.add(rackStart(c)));
-    const racks=[...rackStartCols].sort((a,b)=>a-b).map(rs=>{
-      const rCols=[];
-      for(let c=rs;c<rs+RACK_SIZE;c++){
-        if(allCols.has(c))rCols.push(c);
-      }
-      return {start:rs,cols:rCols,
+    const rackStartSet=new Set([...allCols].map(rackStart));
+    const racks=[...rackStartSet].sort((a,b)=>a-b).map(rs=>{
+      const rCols=[...allCols].filter(c=>c>=rs&&c<rs+RACK).sort((a,b)=>a-b);
+      return {
+        start:rs,
         aCols:rCols.filter(c=>getColLayout(aisle,c)==='A'),
-        gCols:rCols.filter(c=>getColLayout(aisle,c)==='G')};
+        gCols:rCols.filter(c=>getColLayout(aisle,c)==='G'),
+      };
     });
 
-    // 以款色 (7碼) 為單位分組
-    // 每個 entry: {kc, color7, mainSkus(1-4碼), size5Skus(5碼), totalPending, ku}
+    // 建 colorEntries: 以 color7 (7碼前綴) 為單位
+    // placed: 主碼已安置  size5Placed: 5碼已安置  partialPlaced: 部分主碼已排 (此輪不再選)
     const colorEntries=[];
     kuansToPlace.forEach(ku=>{
-      const colorMap={};
+      const cm={};
       ku.skus.forEach(s=>{
         const c7=String(s.code||'').substring(0,7);
-        if(!colorMap[c7])colorMap[c7]={main:[],size5:[],ku};
-        if(isSize5(s.code,s.size))colorMap[c7].size5.push(s);
-        else colorMap[c7].main.push(s);
+        if(!cm[c7])cm[c7]={main:[],size5:[]};
+        if(isSize5(s.code,s.size))cm[c7].size5.push(s);
+        else cm[c7].main.push(s);
       });
-      Object.entries(colorMap).forEach(([c7,{main,size5,ku}])=>{
-        const totalPending=[...main,...size5].reduce((s,sk)=>s+(sk.pending||0),0);
-        colorEntries.push({kc:ku.kc,color7:c7,mainSkus:main,size5Skus:size5,totalPending,ku,placed:false});
+      Object.entries(cm).forEach(([c7,{main,size5}])=>{
+        const tp=[...main,...size5].reduce((s,sk)=>s+(sk.pending||0),0);
+        colorEntries.push({kc:ku.kc,color7:c7,mainSkus:main,size5Skus:size5,
+          totalPending:tp,ku,placed:false,size5Placed:false,partialPlaced:false});
       });
     });
-
-    // 排序: 5碼款色 (SKU多) 優先; 同等時未到量高的先
+    // 初始排序: 5碼款優先; 同等則未到量高的先 (G col 優先給多款色 + 高銷量)
     colorEntries.sort((a,b)=>{
-      const aHas5=a.size5Skus.length>0?1:0;
-      const bHas5=b.size5Skus.length>0?1:0;
-      if(aHas5!==bHas5)return bHas5-aHas5;
+      const a5=a.size5Skus.length>0?1:0,b5=b.size5Skus.length>0?1:0;
+      if(a5!==b5)return b5-a5;
       return b.totalPending-a.totalPending;
     });
 
-    // 追蹤每個 A col 剩餘可用的 layers
-    const aColAvailLayers={}; // col -> [available layer numbers]
-    rackStartCols.forEach(rs=>{
-      const rack=racks.find(r=>r.start===rs);
-      if(!rack)return;
-      rack.aCols.forEach(ac=>{
-        aColAvailLayers[ac]=colEmptyLayers(aisle,ac);
-      });
+    // A col 可用 layer 追蹤 (全走道)
+    const aColAvail={};
+    Object.values(cells).forEach(cs=>{
+      if(cs.aisle===aisle&&cs.layout==='A'){
+        if(!aColAvail[cs.col])aColAvail[cs.col]=[];
+        if(!cs.sku&&!cs.locked)aColAvail[cs.col].push(cs.layer);
+      }
     });
+    Object.keys(aColAvail).forEach(c=>{aColAvail[c].sort((a,b)=>a-b);});
 
-    const failedColors=[];
+    // 找距離 refCol 最近的 A col (有 ≥ minLayers 可用層), 優先同架 fallback 全走道
+    function findNearestACol(refCol,minLayers,rackACols){
+      // 同架優先
+      const sameRack=rackACols.filter(ac=>(aColAvail[ac]||[]).length>=minLayers);
+      if(sameRack.length){
+        return sameRack.reduce((b,c)=>Math.abs(c-refCol)<Math.abs(b-refCol)?c:b,sameRack[0]);
+      }
+      // 全走道
+      const all=Object.keys(aColAvail).map(Number)
+        .filter(ac=>(aColAvail[ac]||[]).length>=minLayers)
+        .sort((a,b)=>Math.abs(a-refCol)-Math.abs(b-refCol));
+      return all[0]??null;
+    }
 
-    // 逐架處理
+    // 排 5 碼到指定 A col (layer 優先 plnGetTargetLayer, 否則取第一個空層)
+    function placeSize5InACol(s5,aCol,kuCat){
+      const avail=aColAvail[aCol]||[];
+      if(!avail.length)return false;
+      const prefL=plnGetTargetLayer(s5.code,s5.size);
+      const L=avail.includes(prefL)?prefL:avail[0];
+      if(!placeOneSku(s5,aisle,aCol,L,kuCat))return false;
+      aColAvail[aCol]=avail.filter(x=>x!==L);
+      return true;
+    }
+
+    // ── 逐架處理 ──
     for(const rack of racks){
-      if(!rack.gCols.length&&!rack.aCols.length)continue;
+      // 此架空的 G col
+      const freeG=rack.gCols.filter(c=>isColFree(aisle,c));
+      // 此架有空層的 A col
+      const freeA=rack.aCols.filter(c=>(aColAvail[c]||[]).length>0);
+      if(!freeG.length&&!freeA.length)continue;
 
-      // 找此架可用的 G col (整個 col 都空)
-      const freeGCols=rack.gCols.filter(c=>isColFree(aisle,c));
-      // 找此架可用的 A col (有空 layer)
-      const freeACols=rack.aCols.filter(c=>(aColAvailLayers[c]||[]).length>0);
-
-      if(!freeGCols.length&&!freeACols.length)continue;
-
-      // 從未排款色中找要放在此架 G col 的款色 (有1-4碼的)
-      // 規則: 每個 G col 放 1 個款色的1-4碼
-      const toPlaceInGCols=[]; // 要放在此架 G col 的款色 entry
-      const toPlaceInACols=[]; // 此架 5 碼的款色 entry (對應到 G col 的)
-
-      // 先分配 G col: 找有 main SKU 且未排的款色
-      // ★ 不用 shift() 修改原陣列，改用 filter 取可用的然後再標記
-      let gSlotIdx=0;
-      for(const gc of freeGCols){
-        // 從 colorEntries 找下一個未排且有主碼的款色
-        const entry=colorEntries.find(e=>!e.placed&&e.mainSkus.length>0&&!toPlaceInGCols.some(t=>t.entry===e));
+      // ── Phase 1: G col → 分配主碼 ──
+      // 未排且有主碼的 entry (按排序)
+      const unplacedMain=colorEntries.filter(e=>!e.placed&&!e.partialPlaced&&e.mainSkus.length>0);
+      const gAssign=[]; // {gc, entry}
+      for(const gc of freeG){
+        const entry=unplacedMain.find(e=>!gAssign.some(a=>a.entry===e));
         if(!entry)break;
-        toPlaceInGCols.push({gc,entry});
-        if(entry.size5Skus.length>0)toPlaceInACols.push(entry);
+        gAssign.push({gc,entry});
       }
-
       // 排入 G col
-      for(const {gc,entry} of toPlaceInGCols){
-        const mainSkus=entry.mainSkus;
-        let allOk=true;
-        for(const s of mainSkus){
+      for(const {gc,entry} of gAssign){
+        let anyPlaced=false;
+        for(const s of entry.mainSkus){
           const L=plnGetTargetLayer(s.code,s.size);
-          if(L&&L>=1&&L<=4){
-            if(!placeOneSku(s,aisle,gc,L,entry.ku.cat))allOk=false;
-          } else {
-            // 找空 layer
-            const emptyLs=colEmptyLayers(aisle,gc);
-            if(emptyLs.length){
-              if(!placeOneSku(s,aisle,gc,emptyLs[0],entry.ku.cat))allOk=false;
-            } else allOk=false;
+          let ok=false;
+          if(L>=1&&L<=4){ok=placeOneSku(s,aisle,gc,L,entry.ku.cat);}
+          if(!ok){
+            // 找此 G col 空層
+            const emptyL=colEmptyLayers(aisle,gc);
+            for(const eL of emptyL){ok=placeOneSku(s,aisle,gc,eL,entry.ku.cat);if(ok)break;}
           }
+          if(ok)anyPlaced=true;
         }
-        entry.placed=true; // 主碼已排 (5碼另行處理)
+        // ★ G col 已排, 標記主碼 placed (無論成功幾個)
+        entry.placed=true;
       }
 
-      // 排入 A col 的 5 碼
-      // 優先找此架的 A col; 若滿則找相鄰架的 A col
-      for(const entry of toPlaceInACols){
+      // ── Phase 2: 5 碼 → 放到最近 A col ──
+      for(const {gc,entry} of gAssign){
+        if(!entry.size5Skus.length)continue;
         for(const s5 of entry.size5Skus){
-          const L5=plnGetTargetLayer(s5.code,s5.size)||1;
-          // 找有空 layer L5 的 A col (優先本架, 再鄰架)
-          let placed5=false;
-          // 候選 A col: 本架 → 前一架 → 後一架
-          const candidateACols=[
-            ...freeACols,
-            ...racks.filter(r=>Math.abs(r.start-rack.start)===RACK_SIZE)
-              .flatMap(r=>r.aCols.filter(c=>(aColAvailLayers[c]||[]).length>0))
-          ];
-          for(const ac of candidateACols){
-            const avail=aColAvailLayers[ac]||[];
-            // 嘗試用 L5; 若 L5 不可用則用任何可用層
-            const targetL=avail.includes(L5)?L5:(avail[0]||null);
-            if(targetL===null)continue;
-            if(placeOneSku(s5,aisle,ac,targetL,entry.ku.cat)){
-              // 更新 avail
-              aColAvailLayers[ac]=avail.filter(l=>l!==targetL);
-              placed5=true;break;
-            }
+          // 找最近有空層的 A col (同架優先)
+          const ac=findNearestACol(gc,1,freeA);
+          if(ac===null){
+            // 完全找不到 A col → failed
+            failed.push({kc:entry.kc,n:entry.ku.n,reason:'NO_A_SLOT',cat:entry.ku.cat});
+            continue;
           }
-          if(!placed5){
-            // 找走道內任何有空 layer 的 A col
-            const allAvailA=Object.entries(aColAvailLayers)
-              .filter(([c,ls])=>ls.length>0)
-              .sort(([c1],[c2])=>parseInt(c1)-parseInt(c2));
-            for(const [acStr,avail] of allAvailA){
-              const ac=parseInt(acStr);
-              const targetL=avail[0];
-              if(placeOneSku(s5,aisle,ac,targetL,entry.ku.cat)){
-                aColAvailLayers[ac]=avail.filter(l=>l!==targetL);
-                placed5=true;break;
-              }
-            }
-            if(!placed5){
-              // 完全排不下 → 記錄失敗
-              failedColors.push({entry,sku:s5});
-            }
-          }
+          placeSize5InACol(s5,ac,entry.ku.cat);
         }
+        entry.size5Placed=true;
       }
 
-      // ★ 若有剩餘 A col 空層 → 給未到量最低的未排款色 (含只有主碼的款色)
-      // 找此架 A col 的剩餘空槽 (排完5碼後)
-      const remainingASlots=Object.entries(aColAvailLayers)
-        .filter(([c,ls])=>rack.aCols.map(Number).includes(parseInt(c))&&ls.length>0);
+      // ── Phase 3: 剩餘 A 空層 → 給未到量最低款色的主碼 ──
+      // 目標: 找 !placed && !partialPlaced 的 entry, 按 totalPending ASC
+      // ★ 一次只取一個 entry; 若主碼全放入 → placed=true; 若部分放入 → partialPlaced=true (不再選)
+      for(const rackACol of rack.aCols){
+        let avail=aColAvail[rackACol]||[];
+        if(!avail.length)continue;
 
-      if(remainingASlots.length>0){
-        // 找未排且有 main SKU 的款色, 按未到量 ASC (最低優先)
-        const unplacedSorted=colorEntries
-          .filter(e=>!e.placed&&e.mainSkus.length>0)
-          .sort((a,b)=>a.totalPending-b.totalPending);
+        // 找未到量最低且完全未排的 entry
+        const candidate=colorEntries
+          .filter(e=>!e.placed&&!e.partialPlaced&&e.mainSkus.length>0)
+          .sort((a,b)=>a.totalPending-b.totalPending)[0];
+        if(!candidate)break;
 
-        for(const [acStr,avail] of remainingASlots){
-          const ac=parseInt(acStr);
-          if(!unplacedSorted.length)break;
-          // 取未到量最低的款色放入此 A col 空層
-          const entry=unplacedSorted[0];
-          const mainSkus=entry.mainSkus;
-          // 只放 <= avail.length 個 SKU
-          const slotsToUse=avail.slice(0,mainSkus.length);
-          let allOk=true;
-          for(let i=0;i<slotsToUse.length&&i<mainSkus.length;i++){
-            const s=mainSkus[i];
-            const prefL=plnGetTargetLayer(s.code,s.size)||slotsToUse[i];
-            const finalL=avail.includes(prefL)?prefL:slotsToUse[i];
-            if(!placeOneSku(s,aisle,ac,finalL,entry.ku.cat))allOk=false;
-            else aColAvailLayers[ac]=(aColAvailLayers[ac]||[]).filter(l=>l!==finalL);
+        const mainSkus=candidate.mainSkus;
+        const placedLayers=[]; // 實際排入的 layers
+        for(const s of mainSkus){
+          const prefL=plnGetTargetLayer(s.code,s.size);
+          const L=(avail.includes(prefL)?prefL:avail[0])??null;
+          if(L===null)break; // 此 A col 已滿
+          if(placeOneSku(s,aisle,rackACol,L,candidate.ku.cat)){
+            avail=avail.filter(x=>x!==L);
+            aColAvail[rackACol]=avail;
+            placedLayers.push(L);
           }
-          if(mainSkus.length<=avail.length){
-            entry.placed=true;
-            unplacedSorted.shift();
-            // 此款色的 5 碼安排到下一個可用 A col
-            if(entry.size5Skus.length>0){
-              for(const s5 of entry.size5Skus){
-                const L5=plnGetTargetLayer(s5.code,s5.size)||1;
-                let placed5=false;
-                const allAvailA=Object.entries(aColAvailLayers)
-                  .filter(([c2,ls2])=>ls2.length>0)
-                  .sort(([c1],[c2])=>parseInt(c1)-parseInt(c2));
-                for(const [acStr2,avail2] of allAvailA){
-                  const ac2=parseInt(acStr2);
-                  const targetL=avail2.includes(L5)?L5:avail2[0];
-                  if(!targetL)continue;
-                  if(placeOneSku(s5,aisle,ac2,targetL,entry.ku.cat)){
-                    aColAvailLayers[ac2]=avail2.filter(l=>l!==targetL);
-                    placed5=true;break;
-                  }
-                }
-                if(!placed5)failedColors.push({entry,sku:s5});
-              }
-            }
+        }
+
+        if(placedLayers.length===0)continue; // 完全放不下, 跳過
+
+        if(placedLayers.length>=mainSkus.length){
+          // 主碼全放入
+          candidate.placed=true;
+          // 5 碼另找 A col
+          for(const s5 of candidate.size5Skus){
+            const ac5=findNearestACol(rackACol,1,freeA);
+            if(ac5!==null)placeSize5InACol(s5,ac5,candidate.ku.cat);
+            else failed.push({kc:candidate.kc,n:candidate.ku.n,reason:'NO_A_SLOT',cat:candidate.ku.cat});
           }
+          candidate.size5Placed=true;
+        }else{
+          // 部分放入 → 標記 partialPlaced, 後續迴圈不再選此 entry
+          // 也不讓它進 fallback G col (已有部分 SKU 在 cells 但 placed=false)
+          candidate.partialPlaced=true;
         }
       }
     } // end rack loop
 
-    // 回傳未能排入的 kuans (款級)
-    const failedKcs=new Set(failedColors.map(f=>f.entry.kc));
-    // 也包含完全未排到的款
-    colorEntries.filter(e=>!e.placed).forEach(e=>failedKcs.add(e.kc));
-    return kuansToPlace.filter(ku=>failedKcs.has(ku.kc));
+    // 回傳完全未排的款 (kc 級別)
+    const placedKcs=new Set(colorEntries.filter(e=>e.placed||e.partialPlaced).map(e=>e.kc));
+    return kuansToPlace.filter(ku=>!placedKcs.has(ku.kc));
   }
 
-  // ── Step 3: 執行安排 ──
+  // ── 主流程 ──
   const dstList=config.destination||[];
   const agAisles=dstList.filter(a=>isAgAisle(a));
   const nonAgAisles=dstList.filter(a=>!agAisles.includes(a));
 
-  // AG 走道: runAgEngine 回傳仍失敗的款; placed[] 為全局追蹤
   let remainKuans=[...kuans];
+
+  // AG 走道
   if(agAisles.length>0){
     const agSorted=[...agAisles].sort((a,b)=>countEmptyInAisle(b)-countEmptyInAisle(a));
     for(const agAisle of agSorted){
       if(!remainKuans.length)break;
-      // 記錄排入前的 placed 長度, 事後判斷哪些款已被排
-      const placedBefore=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
+      const prevPlacedKcs=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
       const stillFailed=runAgEngine(agAisle,remainKuans);
       const failedKcSet=new Set(stillFailed.map(k=>k.kc));
-      // 只保留: 排入前就沒有 且 仍失敗的款
-      remainKuans=remainKuans.filter(ku=>!placedBefore.has(ku.kc)&&failedKcSet.has(ku.kc));
-      // 去重
+      // 只保留: AG 前就沒排 且 仍失敗 的款
+      remainKuans=remainKuans.filter(ku=>!prevPlacedKcs.has(ku.kc)&&failedKcSet.has(ku.kc));
       const seen=new Set();
-      remainKuans=remainKuans.filter(ku=>{
-        if(seen.has(ku.kc))return false; seen.add(ku.kc); return true;
-      });
+      remainKuans=remainKuans.filter(ku=>{if(seen.has(ku.kc))return false;seen.add(ku.kc);return true;});
     }
   }
 
-  // 非AG走道 + 剩餘款 (fallback 連續段)
+  // Fallback: 非AG走道 + 剩餘款 (連續段)
   const placedKcsFinal=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
   const fallbackDst=[...nonAgAisles,...agAisles];
   for(const ku of remainKuans){
-    // ★ 防止重複: 若此款在 AG 排入過直接跳過
-    if(placedKcsFinal.has(ku.kc))continue;
-
+    if(placedKcsFinal.has(ku.kc))continue; // ★ 防重複
     const colorCount={};
-    ku.skus.forEach(s=>{
-      const c=String(s.code||'').substring(0,7);
-      colorCount[c]=(colorCount[c]||0)+1;
-    });
+    ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);colorCount[c]=(colorCount[c]||0)+1;});
     const needCells=Object.values(colorCount).reduce((a,b)=>a+Math.max(4,b),0);
-
-    // (a) 找連續段
     let bestAisle=null,bestRun=null;
     for(const a of fallbackDst){
       const run=findBestRun(a,needCells);
       if(run&&(!bestRun||run.length<bestRun.length)){bestAisle=a;bestRun=run;}
     }
     if(bestRun){placeKuanInRun(ku,bestRun);continue;}
-
-    // (b) 內部整理 (最少移動)
-    let consolAisle=null,consolEmpty=0,consolCost=Infinity;
+    // 內部整理 (最少移動)
+    let consolAisle=null,consolCost=Infinity,consolEmpty=0;
     for(const a of fallbackDst){
-      const en=countEmptyInAisle(a);
-      if(en<needCells)continue;
-      const aisleCells2=Object.values(cells).filter(c=>c.aisle===a);
-      const cellByPos2={};
-      aisleCells2.forEach(c=>{if(!cellByPos2[c.col])cellByPos2[c.col]={};cellByPos2[c.col][c.layer]=c;});
-      const cols2=plnValidCols(cells,a);
+      const en=countEmptyInAisle(a);if(en<needCells)continue;
+      const cellByPos={};
+      Object.values(cells).filter(c=>c.aisle===a).forEach(c=>{
+        if(!cellByPos[c.col])cellByPos[c.col]={};cellByPos[c.col][c.layer]=c;
+      });
+      const cols=plnValidCols(cells,a);
       let minCost=Infinity;
-      for(const startCol of cols2){
+      for(const sc of cols){
         const range=[];
-        for(const col of cols2){
-          if(col<startCol)continue;
-          for(let layer=1;layer<=4&&range.length<needCells;layer++){
-            if(cellByPos2[col]&&cellByPos2[col][layer])range.push(cellByPos2[col][layer]);
+        for(const col of cols){
+          if(col<sc)continue;
+          for(let L=1;L<=4&&range.length<needCells;L++){
+            if(cellByPos[col]&&cellByPos[col][L])range.push(cellByPos[col][L]);
           }
           if(range.length>=needCells)break;
         }
-        if(range.length<needCells)continue;
-        if(range.some(c=>c.locked))continue;
+        if(range.length<needCells||range.some(c=>c.locked))continue;
         const cost=range.filter(c=>c.sku).length;
         if(cost<minCost)minCost=cost;
       }
-      if(minCost<consolCost||(minCost===consolCost&&en>consolEmpty)){
-        consolAisle=a;consolEmpty=en;consolCost=minCost;
-      }
+      if(minCost<consolCost||(minCost===consolCost&&en>consolEmpty)){consolAisle=a;consolCost=minCost;consolEmpty=en;}
     }
     if(consolAisle){
-      const intCfg={source:[consolAisle],destination:[consolAisle],overflow:[],
-        nToPick:needCells,sortMode:'internal',
-        aisleGeometry:config.aisleGeometry||plnGetAisleGeometry()};
+      const intCfg={source:[consolAisle],destination:[consolAisle],overflow:[],nToPick:needCells,
+        sortMode:'internal',aisleGeometry:config.aisleGeometry||plnGetAisleGeometry()};
       const intR=plnRunInternalEngine(intCfg,cells);
       if(intR&&!intR._internalError){
         intR.moves.forEach(m=>moves.push({...m,phase:'NEW_PRODUCT_CONSOLIDATION'}));
@@ -3810,28 +3737,38 @@ function plnRunNewEngine(config,initialCells){
         const run2=findBestRun(consolAisle,needCells);
         if(run2){placeKuanInRun(ku,run2);continue;}
       }
-      failed.push({kc:ku.kc,n:ku.n,reason:'NEW_NO_FIT',cat:ku.cat});
-      continue;
     }
     failed.push({kc:ku.kc,n:ku.n,reason:'NEW_NO_FIT',cat:ku.cat});
   }
 
-  return {
-    selected:placed,
-    capacity:plnAuditCapacity(cells,config),
-    deficit:0,
-    moves,
-    failed,
-    config,
-    xxSalesMax:0,
-    finalCells:cells,
-  };
+  return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells};
 }
 
 
 // ═══ UI: 多步驟 (pipeline) ═══
 // PLN_STEPS: 預設 1 個 step, 使用者可加減
 let PLN_STEPS_COUNT=1;
+
+// ★ 重設情境配置: 清除從「傳送至儲位調整」傳入的新品佇列, 還原至初始狀態
+function plannerResetConfig(){
+  if(!window.NEW_PRODUCT_QUEUE||!window.NEW_PRODUCT_QUEUE.length){
+    // 沒有傳送過新品 → 只重新渲染
+    PLN_STEPS_COUNT=1;
+    plannerRenderConfigUI();
+    return;
+  }
+  if(!confirm('確定要清除已傳送的新品安排，並還原情境配置至初始狀態嗎？')){return;}
+  // 清除新品佇列
+  window.NEW_PRODUCT_QUEUE=[];
+  // 重設步驟數
+  PLN_STEPS_COUNT=1;
+  // 清除執行結果
+  PLN_LAST_RESULT=null;
+  const resultCard=document.getElementById('planner-result-card');
+  if(resultCard)resultCard.style.display='none';
+  // 重新渲染
+  plannerRenderConfigUI();
+}
 
 function plannerRenderConfigUI(){
   const body=document.getElementById('planner-config-body');
@@ -7553,7 +7490,14 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 
     <!-- 情境配置 -->
     <div class="card" id="planner-config-card">
-      <div class="card-title"><span class="dot"></span>情境配置</div>
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span><span class="dot"></span>情境配置</span>
+        <button id="pln-reset-btn" onclick="plannerResetConfig()" title="清除傳送的新品並還原情境配置至初始狀態"
+          style="background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:2px 7px;font-size:13px;color:var(--text2);line-height:1.4;display:flex;align-items:center;gap:4px"
+          onmouseover="this.style.background='var(--hover)'" onmouseout="this.style.background='none'">
+          ↺ 重設
+        </button>
+      </div>
       <div id="planner-config-body" style="padding:6px 0;font-size:12px">
         <div style="padding:24px;text-align:center;color:var(--text3)">請先上傳走道報表 + 儲位總表</div>
       </div>
