@@ -3573,173 +3573,193 @@ function plnRunNewEngine(config,initialCells){
     smallColsAvail.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
 
     // ════════════════════════════════════════════════════════════
-    // PHASE A: 全域分配主碼 col
-    //   主碼優先放大材積 (C/G), 依 avgPending DESC + 架序緊湊
-    //   大材積不夠 → 用小材積 col 放主碼 (標記 usedSmallForMain, 不可再當溢出區)
+    // PHASE A (NEW): 以「架」為單位 packing (Gordon 手排邏輯)
+    //   每架 6 col, 角色分配:
+    //     A col #1 = XXL 集中區 (poolCol)
+    //     A col #2 = 主碼 fallback (整 col 放 1 個 mainSkus.length===4 的 entry)
+    //     G col    = 主碼區 (3/4/5 碼任意)
+    //   3 碼款 layer-4 由同架/相鄰架 5 碼 XXL 借用 (hanging3 機制)
+    //   queue 按 (kc, color7) ASC → 同款不同色自然相鄰
+    //   ★ 本版暫不考慮未到量 (Gordon 確認先拿掉, 純結構處理)
     // ════════════════════════════════════════════════════════════
-    const entriesWithMain=colorEntries.filter(e=>e.mainSkus.length>0);
-    entriesWithMain.sort((a,b)=>b.avgPending-a.avgPending);
-
-    // ────────────────────────────────────────────────────────────
-    // PHASE A0: 3碼 ⇄ 5碼 XXL 配對 (不浪費 layer-4)
-    //   核心: 為每個 3碼 entry 借一個 5碼 entry 的 XXL 來填 layer-4
-    //   配對偏好:
-    //     (a) 同款 (kc 相同) 5碼色優先
-    //     (b) 跨款時, 已部分被用過的 kc 優先繼續用 (避免 B/C/E 款散開)
-    //     (c) 都沒被用過時, 色數多的 kc 優先 + avgPending 高優先
-    //   標記:
-    //     g3e.donorPartner = g5e   (3碼指向出借方)
-    //     g5e.donorOf = g3e        (5碼反向指向收方, Phase C 用)
-    //   ★ Gordon 規範: 配對 > 同款聚集 > 高未到量→大材積
-    // ────────────────────────────────────────────────────────────
     {
-      const g3List=entriesWithMain.filter(e=>e.mainSkus.length===3&&e.size5Skus.length===0);
-      const g5List=entriesWithMain.filter(e=>e.size5Skus.length>=1);
-      const g5UsedC7=new Set();
-      const g3Sorted=[...g3List].sort((a,b)=>b.avgPending-a.avgPending);
-      for(const g3e of g3Sorted){
-        let partner=null;
-        const sameKuan=g5List.filter(e=>e.kc===g3e.kc&&!g5UsedC7.has(e.color7));
-        if(sameKuan.length){
-          sameKuan.sort((a,b)=>String(a.color7).localeCompare(String(b.color7)));
-          partner=sameKuan[0];
+      // 偵測架結構: cols 升冪每 6 個 1 架
+      const sortedCols=[...allCols].sort((a,b)=>a-b);
+      const racks=[];
+      for(let i=0;i<sortedCols.length;i+=6){
+        const cols=sortedCols.slice(i,i+6);
+        const aColsInRack=cols.filter(c=>isSmallLayout(getColLayout(aisle,c)));
+        const gColsInRack=cols.filter(c=>isBigLayout(getColLayout(aisle,c)));
+        racks.push({idx:Math.floor(i/6),cols,aCols:aColsInRack,gCols:gColsInRack});
+      }
+
+      // queue: 所有 entries 按 (kc, color7) ASC
+      const queue=colorEntries.filter(e=>e.mainSkus.length>0)
+        .sort((a,b)=>
+          String(a.kc).localeCompare(String(b.kc))||
+          String(a.color7).localeCompare(String(b.color7))
+        );
+
+      let queueIdx=0;
+      const spillXxl=[];   // 跨架待入集中區: [{donor,sku}]
+      const hanging3=[];   // 待填 layer-4 的 3 碼款: [{col,rackIdx,entry}]
+
+      function takeNextFromQueue(){
+        while(queueIdx<queue.length&&(queue[queueIdx].placed||queue[queueIdx]._takenByFallback))queueIdx++;
+        return queueIdx<queue.length?queue[queueIdx++]:null;
+      }
+      function findNextFullColInQueue(startIdx){
+        for(let i=startIdx;i<queue.length;i++){
+          const e=queue[i];
+          if(e.placed||e._takenByFallback)continue;
+          if(e.mainSkus.length===4)return i;
+        }
+        return -1;
+      }
+
+      for(const rack of racks){
+        // A col 分類: partial = 已部分占用但仍有空 layer; fullEmpty = 全空
+        const partialAs=rack.aCols.filter(c=>!colFullyFree(c)&&emptyLayers(c).length>0);
+        const fullEmptyAs=rack.aCols.filter(c=>colFullyFree(c));
+        const fullEmptyGs=rack.gCols.filter(c=>colFullyFree(c));
+        if(partialAs.length===0&&fullEmptyAs.length===0&&fullEmptyGs.length===0)continue;
+
+        // 集中區: partial A col 優先 (回收散空) > fullEmpty A col
+        // fallback: 必須整 col 空 (要放整 4 層主碼)
+        let poolCol=null,fallbackCol=null;
+        if(partialAs.length>0){
+          poolCol=partialAs[0];
+          fallbackCol=fullEmptyAs[0]||null;
+        } else if(fullEmptyAs.length>=2){
+          poolCol=fullEmptyAs[0];
+          fallbackCol=fullEmptyAs[1];
+        } else if(fullEmptyAs.length===1){
+          poolCol=fullEmptyAs[0];
+        }
+        const mainCols=fullEmptyGs;
+        const gAssignments=[];
+
+        // G col 分主碼 entries
+        for(const gc of mainCols){
+          const e=takeNextFromQueue();
+          if(!e)break;
+          e.mainCol=gc;e.mainRackIdx=rack.idx;
+          gAssignments.push({col:gc,entry:e,isFallback:false});
+        }
+
+        // fallback A col 找下個 mainSkus.length===4 的 entry
+        if(fallbackCol){
+          const idx=findNextFullColInQueue(queueIdx);
+          if(idx>=0){
+            const f=queue[idx];
+            f._takenByFallback=true;
+            f.mainCol=fallbackCol;f.mainRackIdx=rack.idx;
+            gAssignments.push({col:fallbackCol,entry:f,isFallback:true});
+          }
+        }
+
+        // 放主碼
+        for(const {col,entry} of gAssignments){
+          for(const s of entry.mainSkus){
+            const L=plnGetTargetLayer(s.code,s.size);
+            if(L>=1&&L<=4)placeOneSku(s,aisle,col,L,entry.ku.cat);
+          }
+          entry.placed=true;
+        }
+
+        // 收集本架 XXL pool
+        const rackPool=[];
+        for(const {entry} of gAssignments){
+          for(const x of entry.size5Skus)rackPool.push({donor:entry,sku:x});
+        }
+
+        // 本架 hanging (3 碼款 layer-4 待填)
+        const newHangs=[];
+        for(const {col,entry,isFallback} of gAssignments){
+          if(entry.mainSkus.length===3&&!isFallback){
+            newHangs.push({col,rackIdx:rack.idx,entry});
+          }
+        }
+
+        // Step 1: 本架 hanging 優先吃本架 rackPool (Gordon 偏好: 同款配對 > 集中區滿)
+        while(newHangs.length&&rackPool.length){
+          const h=newHangs.shift();
+          const cs=cells[plnCellId(aisle,h.col,4)];
+          if(cs&&!cs.sku&&!cs.locked){
+            const {donor,sku}=rackPool.shift();
+            placeOneSku(sku,aisle,h.col,4,donor.ku.cat);
+          }
+        }
+        // 沒填到的本架 hanging 加入跨架 hanging3
+        hanging3.push(...newHangs);
+
+        // Step 2: 跨架 hanging3 (上架留下的) 優先吃 spillXxl
+        let hIdx=0;
+        while(hIdx<hanging3.length&&spillXxl.length){
+          const h=hanging3[hIdx];
+          const cs=cells[plnCellId(aisle,h.col,4)];
+          if(cs&&!cs.sku&&!cs.locked){
+            const {donor,sku}=spillXxl.shift();
+            placeOneSku(sku,aisle,h.col,4,donor.ku.cat);
+            hanging3.splice(hIdx,1);
+          } else {
+            hIdx++;
+          }
+        }
+
+        // Step 3: 集中區放剩餘 spillXxl + rackPool
+        if(poolCol){
+          const xxlSeq=[...spillXxl,...rackPool];
+          spillXxl.length=0;rackPool.length=0;
+          let consumed=0;
+          for(let L=1;L<=4&&consumed<xxlSeq.length;L++){
+            const cs=cells[plnCellId(aisle,poolCol,L)];
+            if(!cs||cs.sku||cs.locked)continue;
+            const {donor,sku}=xxlSeq[consumed++];
+            placeOneSku(sku,aisle,poolCol,L,donor.ku.cat);
+          }
+          spillXxl.push(...xxlSeq.slice(consumed));
         } else {
-          const kcMap={};
-          g5List.forEach(e=>{
-            if(!kcMap[e.kc])kcMap[e.kc]={used:0,unused:[]};
-            if(g5UsedC7.has(e.color7))kcMap[e.kc].used++;
-            else kcMap[e.kc].unused.push(e);
-          });
-          const kcs=Object.keys(kcMap).filter(k=>kcMap[k].unused.length>0);
-          if(kcs.length){
-            kcs.sort((a,b)=>{
-              const ma=kcMap[a],mb=kcMap[b];
-              if(ma.used!==mb.used)return mb.used-ma.used;
-              if(ma.unused.length!==mb.unused.length)return mb.unused.length-ma.unused.length;
-              const avgA=ma.unused.reduce((s,e)=>s+e.avgPending,0)/ma.unused.length;
-              const avgB=mb.unused.reduce((s,e)=>s+e.avgPending,0)/mb.unused.length;
-              return avgB-avgA;
-            });
-            const pool=kcMap[kcs[0]].unused.slice();
-            pool.sort((a,b)=>String(a.color7).localeCompare(String(b.color7)));
-            partner=pool[0];
-          }
-        }
-        if(partner){
-          g5UsedC7.add(partner.color7);
-          g3e.donorPartner=partner;
-          partner.donorOf=g3e;
+          spillXxl.push(...rackPool);
         }
       }
-    }
 
-    const usedSmallForMain=new Set();
-    let gi=0;
-    for(const e of entriesWithMain){
-      if(gi>=bigColsAvail.length)break;
-      e.mainCol=bigColsAvail[gi];e.mainRackIdx=rackIdx(bigColsAvail[gi]);gi++;
-    }
-    // 大材積用完 → 用小材積 col 放主碼
-    let ai=0;
-    for(const e of entriesWithMain){
-      if(e.mainCol!==null)continue;
-      if(ai>=smallColsAvail.length)break;
-      const sc=smallColsAvail[ai];
-      e.mainCol=sc;e.mainRackIdx=rackIdx(sc);usedSmallForMain.add(sc);ai++;
-    }
-
-    // ── PHASE B: 排入主碼 (主碼放自己的 col, 無相鄰風險) ──
-    for(const e of entriesWithMain){
-      if(e.mainCol===null)continue;
-      for(const s of e.mainSkus){
-        const L=plnGetTargetLayer(s.code,s.size);
-        let ok=false;
-        if(L>=1&&L<=4)ok=placeOneSku(s,aisle,e.mainCol,L,e.ku.cat);
-        if(!ok){
-          for(const eL of emptyLayers(e.mainCol)){
-            if(placeOneSku(s,aisle,e.mainCol,eL,e.ku.cat)){ok=true;break;}
-          }
-        }
+      // 收尾 1: 仍有 hanging3 用 spillXxl 填
+      while(hanging3.length&&spillXxl.length){
+        const h=hanging3.shift();
+        const cs=cells[plnCellId(aisle,h.col,4)];
+        if(!cs||cs.sku||cs.locked)continue;
+        const {donor,sku}=spillXxl.shift();
+        placeOneSku(sku,aisle,h.col,4,donor.ku.cat);
       }
-      e.placed=true;
-    }
 
-    // ════════════════════════════════════════════════════════════
-    // PHASE C: 排入溢出碼 (逐架就近, 重用 3碼款的大材積 layer-4 空格)
-    //   溢出可用空間 = 「未被主碼占用的小材積 col」+「大材積 col 的剩餘層 (3碼款layer4)」
-    //   優先序:
-    //     0. (硬性) 不可同款色同層相鄰
-    //     1. 距主碼架最近 (需求2)
-    //     2. 同 col 連續層放完 (需求1)
-    //     3. 擺法: 高 avg → 大材積, 低 avg → 小材積 (需求4)
-    //   ★ 處理順序: 主碼架序 → 確保就近 col 仍空時優先排入
-    // ════════════════════════════════════════════════════════════
-    // 判斷某 col 是否可作溢出區
-    function isOverflowCol(c,ownMainCol){
-      if(c===ownMainCol)return true; // 自己的主碼 col 剩餘層 (3碼款layer4)
-      const lay=getColLayout(aisle,c);
-      if(isSmallLayout(lay)&&!usedSmallForMain.has(c))return true; // 未被占用的小材積
-      if(isBigLayout(lay)&&emptyLayers(c).length>0&&emptyLayers(c).length<4)return true; // 大材積部分填充(3碼leftover)
-      return false;
-    }
-
-    const eov=entriesWithMain.filter(e=>e.size5Skus.length>0);
-    eov.sort((a,b)=>((a.mainRackIdx??999)-(b.mainRackIdx??999))||((a.mainCol??0)-(b.mainCol??0)));
-    // C/B 偏好: 以「同主碼架款色」未到量中位數判斷高/低
-    const rackAvgMap={};
-    eov.forEach(e=>{const r=e.mainRackIdx;if(!rackAvgMap[r])rackAvgMap[r]=[];rackAvgMap[r].push(e.avgPending);});
-    const rackMedian={};
-    Object.keys(rackAvgMap).forEach(r=>{const arr=rackAvgMap[r].slice().sort((a,b)=>a-b);rackMedian[r]=arr[Math.floor(arr.length/2)];});
-
-    for(const e of eov){
-      const ov=e.size5Skus;
-      let oIdx=0;
-      // ★ donor 配對: 把第一個 XXL 強制放到配對 3碼 mainCol 的 layer 4
-      if(e.donorOf&&e.donorOf.mainCol!==null&&ov.length>0){
-        const dstCol=e.donorOf.mainCol;
-        const dstCell=cells[plnCellId(aisle,dstCol,4)];
-        if(dstCell&&!dstCell.sku&&!dstCell.locked){
-          if(placeOneSku(ov[0],aisle,dstCol,4,e.ku.cat))oIdx=1;
-        }
-      }
-      const home=e.mainRackIdx;
-      const isHigh=e.avgPending>=(rackMedian[home]??0);
-      while(oIdx<ov.length){
-        const need=ov.length-oIdx;
-        const cands=[];
-        for(const c of allCols){
-          if(!isOverflowCol(c,e.mainCol))continue;
-          const validLayers=emptyLayers(c).filter(L=>!adjConflict(c,L,e.color7));
-          if(!validLayers.length)continue;
-          const rd=Math.abs(rackIdx(c)-home);
+      // 收尾 2: 仍有 spillXxl, 找任意空格 (偏好 A col)
+      for(const {donor,sku} of spillXxl){
+        let done=false;
+        for(const c of [...allCols].sort((a,b)=>a-b)){
+          if(done)break;
           const lay=getColLayout(aisle,c);
-          const layPref=isHigh?(isBigLayout(lay)?0:1):(isSmallLayout(lay)?0:1);
-          const fitsAll=(validLayers.length>=need)?0:1;
-          cands.push({c,rd,fitsAll,layPref,validLayers});
-        }
-        if(!cands.length){
-          for(let i=oIdx;i<ov.length;i++)
-            failed.push({kc:e.kc,n:e.ku.n,reason:'NO_A_SLOT',cat:e.ku.cat});
-          break;
-        }
-        cands.sort((x,y)=>(x.rd-y.rd)||(x.fitsAll-y.fitsAll)||(x.layPref-y.layPref)||(x.c-y.c));
-        const chosen=cands[0];
-        const c=chosen.c;
-        let placedAny=false;
-        for(const L of [...chosen.validLayers].sort((a,b)=>a-b)){
-          if(oIdx>=ov.length)break;
-          if(adjConflict(c,L,e.color7))continue;
-          if(placeOneSku(ov[oIdx],aisle,c,L,e.ku.cat)){oIdx++;placedAny=true;}
-        }
-        if(!placedAny){
-          // 防無限迴圈: 此輪完全放不進 → 檢查是否還有任何可用空間
-          const still=[...allCols].some(c=>isOverflowCol(c,e.mainCol)&&
-            emptyLayers(c).some(L=>!adjConflict(c,L,e.color7)));
-          if(!still){
-            for(let i=oIdx;i<ov.length;i++)
-              failed.push({kc:e.kc,n:e.ku.n,reason:'NO_A_SLOT',cat:e.ku.cat});
-            break;
+          if(!isSmallLayout(lay))continue;
+          for(let L=1;L<=4;L++){
+            const cs=cells[plnCellId(aisle,c,L)];
+            if(cs&&!cs.sku&&!cs.locked){
+              placeOneSku(sku,aisle,c,L,donor.ku.cat);done=true;break;
+            }
           }
+        }
+        if(!done){
+          for(const c of [...allCols].sort((a,b)=>a-b)){
+            if(done)break;
+            for(let L=1;L<=4;L++){
+              const cs=cells[plnCellId(aisle,c,L)];
+              if(cs&&!cs.sku&&!cs.locked){
+                placeOneSku(sku,aisle,c,L,donor.ku.cat);done=true;break;
+              }
+            }
+          }
+        }
+        if(!done){
+          failed.push({kc:donor.kc,n:donor.ku.n,reason:'NO_XXL_SLOT',cat:donor.ku.cat});
         }
       }
     }
