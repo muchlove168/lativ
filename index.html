@@ -4328,127 +4328,145 @@ function plannerExportResult(){
     aoa1.push([s['商品編號'],s['商品名稱'],s['顏色']||'',s['尺寸'],slot,layout,'',s['未到量']||0]);
   });
 
-  // === Sheet 2: 待移 ===
-  // ★ 走道分組 bin-packing 排版 (取代舊版線性切欄):
-  //   1. 按 src 走道分組, 組內按 (src col, src layer) 升冪
-  //   2. 每 block 上限 58 列 (1 標題 + 57 資料), 每頁 2 block 並排 (= 114 資料列)
-  //   3. 走道 ≤57 列 → 1 block; 走道 >57 → 拆 chunk, 接續同頁第二區塊 (跨頁占連續頁)
-  //   4. 多 chunk 走道末頁奇數 → 留空槽給單 chunk 走道填
-  //   5. 剩餘單 chunk 走道用 FFD (largest+smallest pairing) 平衡每頁列數
-  //   6. 頁內 block 依走道字母左→右; 整體頁面依首 chunk 走道字母序
-  // 框線規則 (符合 待移.xlsx 模板): 標題=灰底+粗體+全框; 商品編號/儲位 cell=全框; NEW/擺法 cell=無框
+  const wb=XLSX.utils.book_new();
+
+  // ─── Sheet 1: 新品安排 ───
+  const ws1=XLSX.utils.aoa_to_sheet(aoa1);
+  ws1['!cols']=[{wch:13.3},{wch:30},{wch:8},{wch:6},{wch:12.5},{wch:5},{wch:14},{wch:8}];
+
+  // === Sheet 2+: 每個 Step 一個「待移」sheet ===
+  // 命名規則: 單步驟 → "待移"; 多步驟 → "Step 1_待移", "Step 2_待移", ...
+  // 每個 sheet 只包含該步驟的 moves (src 有值的搬移動作)
+  // 頁面排版沿用既有的 bin-packing 邏輯 (走道分組, 每頁 2 block)
   
   const aisleOf=cell=>String(cell||'').substring(0,3);
   const colOf=cell=>{const m=String(cell||'').match(/-(\d+)-/);return m?parseInt(m[1]):0;};
   const layerOf=cell=>{const m=String(cell||'').match(/-(\d+)$/);return m?parseInt(m[1]):0;};
   
-  // ── Step 1: 按 src 走道分組 + 組內排序 ──
-  const tyByAisle={};
-  (r.moves||[]).forEach(m=>{
-    const a=aisleOf(m.src);
-    if(!a)return;
-    if(!tyByAisle[a])tyByAisle[a]=[];
-    tyByAisle[a].push(m);
-  });
-  Object.values(tyByAisle).forEach(arr=>{
-    arr.sort((a,b)=>colOf(a.src)-colOf(b.src)||layerOf(a.src)-layerOf(b.src));
-  });
-  
-  // ── Step 2: 切 chunks (每 chunk ≤57 moves) + 分多/單 ──
-  const TY_BLOCK_DATA=57;
-  const tyMultiPages=[];
-  const tyOpenSlots=[];
-  const tySingleChunks=[];
-  Object.keys(tyByAisle).sort().forEach(a=>{
-    const mvs=tyByAisle[a];
-    const cs=[];
-    for(let i=0;i<mvs.length;i+=TY_BLOCK_DATA){
-      cs.push({aisle:a, moves:mvs.slice(i,i+TY_BLOCK_DATA)});
+  // 將一組 moves 轉成 待移 sheet 的 aoa (bin-packing 排版)
+  function buildTaiYiAoa(movesForStep){
+    // 過濾: 只有 src 有值的才是真正的搬移 (新品放入沒有 src)
+    const validMoves=movesForStep.filter(m=>m.src&&m.src.trim());
+    if(!validMoves.length){
+      return [['商品編號','NEW','擺法','儲位']]; // 空 sheet 保底
     }
-    if(cs.length>=2){
-      // 多 chunk: 2 chunk 1 頁, 末頁奇數則留空槽
-      for(let i=0;i<cs.length;i+=2){
-        if(i+1<cs.length){
-          tyMultiPages.push([cs[i],cs[i+1]]);
-        } else {
-          const p=[cs[i]];
-          tyMultiPages.push(p);
-          tyOpenSlots.push(p);
-        }
-      }
-    } else if(cs.length===1){
-      tySingleChunks.push(cs[0]);
-    }
-  });
-  
-  // ── Step 3: 單 chunk DESC 排序, 填多 chunk 走道末頁空槽 ──
-  tySingleChunks.sort((a,b)=>b.moves.length-a.moves.length);
-  let tySi=0;
-  while(tySi<tySingleChunks.length && tyOpenSlots.length>0){
-    tyOpenSlots.shift().push(tySingleChunks[tySi++]);
-  }
-  
-  // ── Step 4: 剩餘單 chunk 用 largest+smallest pairing ──
-  const tySingles=tySingleChunks.slice(tySi);
-  const tyPairedPages=[];
-  let tyL=0,tyR=tySingles.length-1;
-  while(tyL<=tyR){
-    if(tyL===tyR){
-      tyPairedPages.push([tySingles[tyL]]);tyL++;
-    } else {
-      tyPairedPages.push([tySingles[tyL],tySingles[tyR]]);tyL++;tyR--;
-    }
-  }
-  
-  // ── Step 5: 合併頁面, 每頁內依走道字母排序; 整體頁面依首 chunk 走道字母序 ──
-  const tyPages=[...tyMultiPages,...tyPairedPages];
-  tyPages.forEach(p=>{
-    if(p.length===2 && p[0].aisle>p[1].aisle){[p[0],p[1]]=[p[1],p[0]];}
-  });
-  tyPages.sort((a,b)=>a[0].aisle.localeCompare(b[0].aisle));
-  
-  // ── Step 6: 渲染 aoa2 (每頁 9 col + 頁間 sep) ──
-  // 頁結構: [塊1×4col, intra-sep×1, 塊2×4col] + inter-sep (除末頁)
-  // 總列數 = max(chunk.moves.length + 1 for header) 跨所有 chunks
-  const tyMaxRows = tyPages.length ? Math.max(...tyPages.flatMap(p=>p.map(c=>c.moves.length+1))) : 1;
-  const aoa2=[];
-  for(let rIdx=0; rIdx<tyMaxRows; rIdx++){
-    const row=[];
-    tyPages.forEach((page,pi)=>{
-      // Block 1
-      const c1=page[0];
-      if(rIdx===0){
-        row.push('商品編號','NEW','擺法','儲位');
-      } else if(rIdx-1<c1.moves.length){
-        const m=c1.moves[rIdx-1];
-        row.push(m.sku||'', m.dst||'', m.dstLayout||'', m.src||'');
-      } else {
-        row.push('','','','');
-      }
-      // Intra-page sep
-      row.push('');
-      // Block 2 (可能不存在)
-      if(page.length>=2){
-        const c2=page[1];
-        if(rIdx===0){
-          row.push('商品編號','NEW','擺法','儲位');
-        } else if(rIdx-1<c2.moves.length){
-          const m=c2.moves[rIdx-1];
-          row.push(m.sku||'', m.dst||'', m.dstLayout||'', m.src||'');
-        } else {
-          row.push('','','','');
-        }
-      } else {
-        row.push('','','','');
-      }
-      // Inter-page sep (除末頁)
-      if(pi<tyPages.length-1) row.push('');
+    // 按 src 走道分組 + 組內排序
+    const byAisle={};
+    validMoves.forEach(m=>{
+      const a=aisleOf(m.src);
+      if(!a)return;
+      if(!byAisle[a])byAisle[a]=[];
+      byAisle[a].push(m);
     });
-    aoa2.push(row);
+    Object.values(byAisle).forEach(arr=>{
+      arr.sort((a,b)=>colOf(a.src)-colOf(b.src)||layerOf(a.src)-layerOf(b.src));
+    });
+    // 切 chunks (每 chunk ≤57 moves)
+    const TY_BLOCK=57;
+    const multiPages=[];const openSlots=[];const singleChunks=[];
+    Object.keys(byAisle).sort().forEach(a=>{
+      const mvs=byAisle[a];
+      const cs=[];
+      for(let i=0;i<mvs.length;i+=TY_BLOCK) cs.push({aisle:a,moves:mvs.slice(i,i+TY_BLOCK)});
+      if(cs.length>=2){
+        for(let i=0;i<cs.length;i+=2){
+          if(i+1<cs.length){multiPages.push([cs[i],cs[i+1]]);}
+          else{const p=[cs[i]];multiPages.push(p);openSlots.push(p);}
+        }
+      } else if(cs.length===1){singleChunks.push(cs[0]);}
+    });
+    // 填 openSlots + pairing
+    singleChunks.sort((a,b)=>b.moves.length-a.moves.length);
+    let si2=0;
+    while(si2<singleChunks.length&&openSlots.length>0) openSlots.shift().push(singleChunks[si2++]);
+    const singles=singleChunks.slice(si2);const pairedPages=[];
+    let L=0,R=singles.length-1;
+    while(L<=R){
+      if(L===R){pairedPages.push([singles[L]]);L++;}
+      else{pairedPages.push([singles[L],singles[R]]);L++;R--;}
+    }
+    const pages=[...multiPages,...pairedPages];
+    pages.forEach(p=>{if(p.length===2&&p[0].aisle>p[1].aisle)[p[0],p[1]]=[p[1],p[0]];});
+    pages.sort((a,b)=>a[0].aisle.localeCompare(b[0].aisle));
+    // 渲染 aoa
+    const maxRows=pages.length?Math.max(...pages.flatMap(p=>p.map(c=>c.moves.length+1))):1;
+    const aoa=[];
+    for(let rIdx=0;rIdx<maxRows;rIdx++){
+      const row=[];
+      pages.forEach((page,pi)=>{
+        const c1=page[0];
+        if(rIdx===0) row.push('商品編號','NEW','擺法','儲位');
+        else if(rIdx-1<c1.moves.length){const m=c1.moves[rIdx-1];row.push(m.sku||'',m.dst||'',m.dstLayout||'',m.src||'');}
+        else row.push('','','','');
+        row.push(''); // intra sep
+        if(page.length>=2){
+          const c2=page[1];
+          if(rIdx===0) row.push('商品編號','NEW','擺法','儲位');
+          else if(rIdx-1<c2.moves.length){const m=c2.moves[rIdx-1];row.push(m.sku||'',m.dst||'',m.dstLayout||'',m.src||'');}
+          else row.push('','','','');
+        } else {row.push('','','','');}
+        if(pi<pages.length-1) row.push(''); // inter sep
+      });
+      aoa.push(row);
+    }
+    if(!aoa.length) aoa.push(['商品編號','NEW','擺法','儲位']);
+    return aoa;
   }
-  // 空結果保底 (沒有任何 move 時)
-  if(!aoa2.length) aoa2.push(['商品編號','NEW','擺法','儲位']);
   
+  // 建立每個 step 的待移 sheet 並加入 workbook
+  const stepResults=r.stepResults||[];
+  const multiStep=stepResults.length>1;
+  
+  if(stepResults.length===0){
+    // 沒有 stepResults → 回退到合併 moves
+    const aoa2=buildTaiYiAoa(r.moves||[]);
+    const ws2=XLSX.utils.aoa_to_sheet(aoa2);
+    const cw2=[];
+    const pages2=[];// rebuild pages count from aoa width
+    const colCount=aoa2[0]?aoa2[0].length:4;
+    const pageCount=Math.ceil(colCount/10);
+    for(let pi=0;pi<pageCount;pi++){
+      cw2.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5},{wch:3},{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});
+      if(pi<pageCount-1) cw2.push({wch:6});
+    }
+    ws2['!cols']=cw2.length?cw2:[{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}];
+    styleTaiYiSheet(ws2);
+    ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
+    XLSX.utils.book_append_sheet(wb,ws2,'待移');
+  } else {
+    stepResults.forEach((sr,i)=>{
+      const stepIdx=sr.stepIdx||(i+1);
+      const sheetName=multiStep?`Step ${stepIdx}_待移`:'待移';
+      const stepMoves=sr.moves||[];
+      const aoa2=buildTaiYiAoa(stepMoves);
+      const ws2=XLSX.utils.aoa_to_sheet(aoa2);
+      // 欄寬: 依 aoa2[0] 的寬度計算
+      const cw2=[];
+      const colCount=(aoa2[0]||[]).length;
+      // 每頁 10 cols (4+1+4+1) 或 9 cols (末頁無 inter-sep)
+      let ci=0;
+      while(ci<colCount){
+        const rem=colCount-ci;
+        if(rem>=9){
+          cw2.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5},{wch:3},{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});
+          ci+=9;
+          if(ci<colCount){cw2.push({wch:6});ci++;}
+        } else {
+          // 末頁剩餘 (4+1+4 = 9 or less)
+          cw2.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});ci+=4;
+          if(ci<colCount){cw2.push({wch:3});ci++;}
+          if(ci<colCount){cw2.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});ci+=4;}
+          break;
+        }
+      }
+      ws2['!cols']=cw2.length?cw2:[{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}];
+      styleTaiYiSheet(ws2);
+      ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
+      XLSX.utils.book_append_sheet(wb,ws2,sheetName);
+    });
+  }
+
+
   // ═══════ 樣式工具 1: 挑選清單/各走道 sheet (全 cell 置中; header 加灰底+粗體+下框) ═══════
   function applyStyleFull(ws,opts){
     if(!ws['!ref'])return;
@@ -4472,7 +4490,7 @@ function plannerExportResult(){
       }
     }
   }
-  
+
   // ═══════ 樣式工具 2: 待移 sheet (商品編號/儲位 全框, NEW/擺法 無框, 標題全框灰底) ═══════
   function styleTaiYiSheet(ws){
     if(!ws['!ref'])return;
@@ -4485,21 +4503,18 @@ function plannerExportResult(){
     };
     for(let R=range.s.r;R<=range.e.r;R++){
       for(let C=range.s.c;C<=range.e.c;C++){
-        // 每頁 10 cols: 0-3=block1(商品/NEW/擺法/儲位) 4=intra-sep 5-8=block2 9=inter-sep
         const inPageCol=C%10;
         let colType='sep';
-        if(inPageCol===0||inPageCol===5) colType='product';   // 商品編號
-        else if(inPageCol===1||inPageCol===6) colType='new';    // NEW
-        else if(inPageCol===2||inPageCol===7) colType='layout'; // 擺法
-        else if(inPageCol===3||inPageCol===8) colType='loc';    // 儲位
+        if(inPageCol===0||inPageCol===5) colType='product';
+        else if(inPageCol===1||inPageCol===6) colType='new';
+        else if(inPageCol===2||inPageCol===7) colType='layout';
+        else if(inPageCol===3||inPageCol===8) colType='loc';
         if(colType==='sep') continue;
-        
         const ref=XLSX.utils.encode_cell({r:R,c:C});
         if(!ws[ref])ws[ref]={t:'s',v:''};
         const v=ws[ref].v;
         const hasValue=v!==''&&v!=null;
         const isHeader=(R===0)&&hasValue;
-        
         const style={
           alignment:{horizontal:'center',vertical:'center'},
           font:isHeader?{name:'Microsoft JhengHei',sz:11,bold:true}:{name:'Microsoft JhengHei',sz:11}
@@ -4508,67 +4523,39 @@ function plannerExportResult(){
           style.fill={patternType:'solid',fgColor:{rgb:'FFEAEAEA'}};
           style.border=fullBorder;
         } else if(hasValue){
-          // 資料 cell: 商品編號/儲位 加全框, NEW/擺法 不加框
-          if(colType==='product'||colType==='loc'){
-            style.border=fullBorder;
-          }
+          if(colType==='product'||colType==='loc') style.border=fullBorder;
         }
         ws[ref].s=style;
       }
     }
   }
 
-  // ═══════ 檔名: 來源_目的; 多走道同區→prefix; 多區→排序連接 prefixes; 多 step→括號連接 ═══════
-  function buildAisleLabel(aisles){
-    if(!aisles||!aisles.length)return '';
-    if(aisles.length===1)return aisles[0];
-    const prefixes=[...new Set(aisles.map(a=>String(a).replace(/\d+$/,'')))].sort();
-    return prefixes.length===1?prefixes[0]:prefixes.join('');
-  }
+  // ═══════ 檔名: 來源_目的; 多步驟→括號連接 ═══════
   function buildFilename(){
     const steps=r.stepResults||[];
     if(!steps.length)return '待移.xlsx';
+    function buildAisleLabel(aisles){
+      if(!aisles||!aisles.length)return '';
+      if(aisles.length===1)return aisles[0];
+      const prefixes=[...new Set(aisles.map(a=>String(a).replace(/\d+$/,'')))].sort();
+      return prefixes.length===1?prefixes[0]:prefixes.join('');
+    }
     const labels=steps.map(s=>{
       const src=buildAisleLabel(s.config.source);
       const dst=buildAisleLabel(s.config.destination);
-      // 內部整理: src=dst 同走道 → "走道_內部" 取代 "A09_A09"
-      if(s.config.sortMode==='internal' && src===dst){
-        return `${src}_內部`;
-      }
+      if(s.config.sortMode==='internal'&&src===dst) return `${src}_內部`;
       return `${src}_${dst}`;
     });
     return labels.length===1?`${labels[0]}.xlsx`:`${labels.map(l=>`(${l})`).join('_')}.xlsx`;
   }
 
-  const wb=XLSX.utils.book_new();
-
-  // ─── Sheet 1: 新品安排 (商品編號, 商品名稱, 顏色, 尺寸, 儲位, 擺法, 倉位, 未到量) ───
-  const ws1=XLSX.utils.aoa_to_sheet(aoa1);
-  ws1['!cols']=[{wch:13.3},{wch:30},{wch:8},{wch:6},{wch:12.5},{wch:5},{wch:14},{wch:8}];
-  applyStyleFull(ws1,{headerRows:[0]});
-  XLSX.utils.book_append_sheet(wb,ws1,'新品安排');
-
-  // ─── Sheet 2: 待移 (★ 走道分組 bin-packing + 待移.xlsx 模板框線) ───
-  const ws2=XLSX.utils.aoa_to_sheet(aoa2);
-  // 欄寬: 每頁 [block1×4 + intra-sep + block2×4] + inter-sep (除末頁)
-  const cw=[];
-  if(tyPages.length){
-    tyPages.forEach((page,pi)=>{
-      cw.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}); // block 1
-      cw.push({wch:3});                                     // intra-page sep (窄)
-      cw.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}); // block 2
-      if(pi<tyPages.length-1) cw.push({wch:6});             // inter-page sep (寬, 視覺斷頁)
-    });
-  } else {
-    cw.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});
-  }
-  ws2['!cols']=cw;
-  styleTaiYiSheet(ws2);
-  // A4 列印邊距 (與 待移.xlsx 模板一致, 邊距=0)
-  ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
-  XLSX.utils.book_append_sheet(wb,ws2,'待移');
-
   // ─── Sheet 3+: 各走道最終狀態 (套用所有 step 的 moves 後) ───
+  // 加入 ws1 (新品安排) - 必須在 applyStyleFull 定義後才能 call
+  if(aoa1.length>1){
+    // 有新品才加新品安排 sheet
+    if(typeof applyStyleFull==='function') applyStyleFull(ws1,{headerRows:[0]});
+    XLSX.utils.book_append_sheet(wb,ws1,'新品安排');
+  }
   // 演算法:
   //   1. 從 AISLE_REPORT_DATA 建初始 SKU→儲位 對應 + 完整 row data
   //   2. 依序套用 r.moves 更新 SKU 當前儲位 (跨 step 已 merged)
