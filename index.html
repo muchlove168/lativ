@@ -3506,22 +3506,7 @@ function plnRunNewEngine(config,initialCells){
     const RACK=6;
     const allCols=new Set();
     Object.values(cells).forEach(cs=>{if(cs.aisle===aisle)allCols.add(cs.col);});
-    function rackStart(c){return Math.floor((c-1)/RACK)*RACK+1;}
-
-    const rackStartSet=new Set([...allCols].map(rackStart));
-    const racks=[...rackStartSet].sort((a,b)=>a-b).map((rs,idx)=>{
-      const rCols=[...allCols].filter(c=>c>=rs&&c<rs+RACK).sort((a,b)=>a-b);
-      // 架內位置分類 (AAGGGG: pos1,2=溢出區; CBCCCC: pos1(C),2(B)=溢出區, pos3-6=主碼區)
-      const smallColsInRack=rCols.filter(c=>isSmallLayout(getColLayout(aisle,c)));
-      let aCols,gCols;
-      if(smallColsInRack.length>=2){
-        aCols=rCols.filter(c=>isSmallLayout(getColLayout(aisle,c)));
-        gCols=rCols.filter(c=>isBigLayout(getColLayout(aisle,c)));
-      } else {
-        aCols=rCols.slice(0,2); gCols=rCols.slice(2);
-      }
-      return {start:rs,idx,aCols,gCols};
-    });
+    function rackIdx(c){return Math.floor((c-1)/RACK);}
 
     // ── 建 colorEntries (以 color7 為單位) ──
     // ★ 未到量均值公式 (需求4): avgPending = 全尺碼未到量加總 / 尺碼數
@@ -3534,7 +3519,6 @@ function plnRunNewEngine(config,initialCells){
         cm[c7].all.push(s);
       });
       Object.entries(cm).forEach(([c7,{all}])=>{
-        // 分主碼 / 溢出碼 (layer 衝突或 isSize5 → 溢出)
         const assignedLayers=new Set();
         const fittingMain=[];
         const overflow=[];
@@ -3548,7 +3532,6 @@ function plnRunNewEngine(config,initialCells){
         }
         const allOverflow=[...size5,...overflow].sort((a,b)=>
           String(a.code||'').localeCompare(String(b.code||'')));
-        // ★ 未到量均值 = 全尺碼未到量加總 / 尺碼數
         const totalPending=all.reduce((s,sk)=>s+(sk.pending||0),0);
         const numSizes=all.length||1;
         const avgPending=totalPending/numSizes;
@@ -3557,35 +3540,50 @@ function plnRunNewEngine(config,initialCells){
       });
     });
 
+    // ── 收集空 col, 依擺法分類 (★ 改用擺法本身, 不用架內位置) ──
+    //   C/G = 大材積 (主碼優先); B/A = 小材積 (溢出優先)
+    const bigColsAvail=[];   // {col, ridx} 大材積且完全空
+    const smallColsAvail=[]; // {col, ridx} 小材積且完全空
+    [...allCols].forEach(c=>{
+      if(!isColFree(aisle,c))return;
+      const lay=getColLayout(aisle,c);
+      if(isBigLayout(lay))bigColsAvail.push({col:c,ridx:rackIdx(c)});
+      else if(isSmallLayout(lay))smallColsAvail.push({col:c,ridx:rackIdx(c)});
+    });
+    bigColsAvail.sort((a,b)=>(a.ridx-b.ridx)||(a.col-b.col));
+    smallColsAvail.sort((a,b)=>(a.ridx-b.ridx)||(a.col-b.col));
+
     // ════════════════════════════════════════════════════════════
-    // PHASE A: 為每個有主碼的款色分配「主碼 col」(大材積/主碼區)
-    //   策略: avgPending DESC 排序款色; 主碼 col 依架序(rack→col)緊湊分配
-    //   → 高 avg 款色優先拿前段架; 同架4款的溢出碼會分配到同架溢出區
+    // PHASE A: 分配主碼 col
+    //   策略: 主碼優先放「大材積 C」(空間多), 依 avgPending DESC + 架序緊湊
+    //   若 C col 用完才用 B col (最後手段)
     // ════════════════════════════════════════════════════════════
     const entriesWithMain=colorEntries.filter(e=>e.mainSkus.length>0);
     entriesWithMain.sort((a,b)=>b.avgPending-a.avgPending);
 
-    // 收集所有可用主碼 col (gCols 中完全空的), 依 (rackIdx, col) 排序
-    const mainColsAvail=[];
-    racks.forEach(rk=>{
-      rk.gCols.forEach(c=>{
-        if(isColFree(aisle,c))mainColsAvail.push({col:c,rackIdx:rk.idx});
-      });
-    });
-    mainColsAvail.sort((a,b)=>(a.rackIdx-b.rackIdx)||(a.col-b.col));
-
-    // 分配主碼 col (緊湊填充)
     let mi=0;
     for(const e of entriesWithMain){
-      if(mi>=mainColsAvail.length)break;
-      e.mainCol=mainColsAvail[mi].col;
-      e.mainRackIdx=mainColsAvail[mi].rackIdx;
+      if(mi>=bigColsAvail.length)break;
+      e.mainCol=bigColsAvail[mi].col;
+      e.mainRackIdx=bigColsAvail[mi].ridx;
       mi++;
     }
+    // C col 不夠 → 用 B col 放主碼 (最後手段)
+    if(mi<entriesWithMain.length){
+      let bi=0;
+      for(let k=mi;k<entriesWithMain.length;k++){
+        if(bi>=smallColsAvail.length)break;
+        entriesWithMain[k].mainCol=smallColsAvail[bi].col;
+        entriesWithMain[k].mainRackIdx=smallColsAvail[bi].ridx;
+        bi++;
+      }
+    }
 
-    // ── PHASE B: 排入主碼 ──
+    // ── PHASE B: 排入主碼 (主碼一律放自己的 col, 無相鄰風險) ──
+    const usedMainCols=new Set();
     for(const e of entriesWithMain){
       if(e.mainCol===null)continue;
+      usedMainCols.add(e.mainCol);
       for(const s of e.mainSkus){
         const L=plnGetTargetLayer(s.code,s.size);
         let ok=false;
@@ -3598,86 +3596,106 @@ function plnRunNewEngine(config,initialCells){
       e.placed=true;
     }
 
-    // ════════════════════════════════════════════════════════════
-    // PHASE C: 排入溢出碼
-    //   優先序 (需求2 > 需求4):
-    //     1. 同款同色溢出碼集中「同一 col 連續層」(需求1)
-    //     2. 就近原則: 距主碼架最近 (需求2, 前後架)
-    //     3. 未到量 C/B: 同架內 avg 高→C, avg 低→B (需求4)
-    // ════════════════════════════════════════════════════════════
-    const overflowAvail={};       // col → [可用 layers]
-    const overflowColRackIdx={};  // col → rackIdx
-    const overflowColLayout={};   // col → 'C'/'B'/'A'
-    racks.forEach(rk=>{
-      rk.aCols.forEach(c=>{
-        const empties=colEmptyLayers(aisle,c);
-        if(empties.length){overflowAvail[c]=empties;}
-        overflowColRackIdx[c]=rk.idx;
-        overflowColLayout[c]=getColLayout(aisle,c);
-      });
+    // ── 相鄰衝突檢查 (同款色同層相鄰 col) ──
+    function adjConflict(col,layer,c7){
+      for(const dc of [-1,1]){
+        const nb=cells[plnCellId(aisle,col+dc,layer)];
+        if(nb&&nb.sku&&String(nb.sku).substring(0,7)===c7)return true;
+      }
+      return false;
+    }
+
+    // ── 溢出區可用層 (所有非主碼 col 的空層) ──
+    const overflowAvail={};
+    const ovrRackIdx={};
+    const ovrLayout={};
+    [...allCols].forEach(c=>{
+      if(usedMainCols.has(c))return; // 主碼 col 已滿
+      const empties=colEmptyLayers(aisle,c);
+      if(empties.length)overflowAvail[c]=empties;
+      ovrRackIdx[c]=rackIdx(c);
+      ovrLayout[c]=getColLayout(aisle,c);
     });
 
-    // 依架分組處理溢出 (同架款色一起排, 決定 C/B)
-    for(const rk of racks){
-      const rkEntries=entriesWithMain.filter(e=>e.mainRackIdx===rk.idx&&e.size5Skus.length>0);
-      if(!rkEntries.length)continue;
-      // 同架內 avg DESC 排序 → 高 avg 先拿 (才能優先選 C)
-      rkEntries.sort((a,b)=>b.avgPending-a.avgPending);
-      rkEntries.forEach((e,rank)=>{
-        const isHigh=rank<rkEntries.length/2; // 前半 = 高未到量
-        const ov=e.size5Skus;
-        let oIdx=0;
-        while(oIdx<ov.length){
-          const need=ov.length-oIdx;
-          // 候選溢出 col 評分: [架距離, 是否容納全部剩餘, 擺法偏好]
-          const cands=Object.keys(overflowAvail).map(Number)
-            .filter(c=>(overflowAvail[c]||[]).length>0)
-            .map(c=>{
-              const rd=Math.abs(overflowColRackIdx[c]-rk.idx);
-              const lay=overflowColLayout[c];
-              const pref=isHigh?(isBigLayout(lay)?0:1):(isSmallLayout(lay)?0:1);
-              const fitsAll=(overflowAvail[c].length>=need)?0:1; // 能容納全部剩餘優先 (需求1)
-              return {c,rd,fitsAll,pref};
-            });
-          if(!cands.length){
+    // ════════════════════════════════════════════════════════════
+    // PHASE C: 排入溢出碼
+    //   優先序:
+    //     0. (硬性) 不可與同款色同層相鄰
+    //     1. 距主碼架最近 (需求2)
+    //     2. 同 col 連續層放完 (需求1, fits_all)
+    //     3. 擺法: 高 avg → C, 低 avg → B (需求4)
+    // ════════════════════════════════════════════════════════════
+    const eov=entriesWithMain.filter(e=>e.size5Skus.length>0);
+    eov.sort((a,b)=>b.avgPending-a.avgPending);
+    const avgList=eov.map(e=>e.avgPending).sort((a,b)=>a-b);
+    const medianAvg=avgList.length?avgList[Math.floor(avgList.length/2)]:0;
+
+    for(const e of eov){
+      const ov=e.size5Skus;
+      let oIdx=0;
+      const home=e.mainRackIdx;
+      const isHigh=e.avgPending>=medianAvg;
+      while(oIdx<ov.length){
+        const need=ov.length-oIdx;
+        const cands=[];
+        for(const cStr of Object.keys(overflowAvail)){
+          const c=Number(cStr);
+          const avail=overflowAvail[c];
+          if(!avail||!avail.length)continue;
+          // ★ 硬性過濾: 只保留不會造成相鄰衝突的層
+          const validLayers=avail.filter(L=>!adjConflict(c,L,e.color7));
+          if(!validLayers.length)continue;
+          const rd=Math.abs(ovrRackIdx[c]-home);
+          const lay=ovrLayout[c];
+          const layPref=isHigh?(isBigLayout(lay)?0:1):(isSmallLayout(lay)?0:1);
+          const fitsAll=(validLayers.length>=need)?0:1;
+          cands.push({c,rd,fitsAll,layPref,validLayers});
+        }
+        if(!cands.length){
+          for(let i=oIdx;i<ov.length;i++)
+            failed.push({kc:e.kc,n:e.ku.n,reason:'NO_A_SLOT',cat:e.ku.cat});
+          break;
+        }
+        cands.sort((x,y)=>(x.rd-y.rd)||(x.fitsAll-y.fitsAll)||(x.layPref-y.layPref)||(x.c-y.c));
+        const chosen=cands[0];
+        const c=chosen.c;
+        for(const L of [...chosen.validLayers].sort((a,b)=>a-b)){
+          if(oIdx>=ov.length)break;
+          // 放入前再次確認 (前一個放入可能改變相鄰狀態)
+          if(adjConflict(c,L,e.color7))continue;
+          if(placeOneSku(ov[oIdx],aisle,c,L,e.ku.cat)){
+            overflowAvail[c]=overflowAvail[c].filter(x=>x!==L);
+            oIdx++;
+          }
+        }
+        // 若本輪沒放進任何 (全被相鄰擋掉) → 防無限迴圈
+        if(oIdx<ov.length){
+          const stillCands=Object.keys(overflowAvail).map(Number)
+            .some(c=>(overflowAvail[c]||[]).some(L=>!adjConflict(c,L,e.color7)));
+          if(!stillCands){
             for(let i=oIdx;i<ov.length;i++)
               failed.push({kc:e.kc,n:e.ku.n,reason:'NO_A_SLOT',cat:e.ku.cat});
             break;
           }
-          // 排序: 架距離 → 容納全部 → 擺法偏好 → col 號
-          cands.sort((x,y)=>(x.rd-y.rd)||(x.fitsAll-y.fitsAll)||(x.pref-y.pref)||(x.c-y.c));
-          const c=cands[0].c;
-          const avail=[...overflowAvail[c]].sort((a,b)=>a-b);
-          for(const L of avail){
-            if(oIdx>=ov.length)break;
-            if(placeOneSku(ov[oIdx],aisle,c,L,e.ku.cat)){
-              overflowAvail[c]=overflowAvail[c].filter(x=>x!==L);
-              oIdx++;
-            }
-          }
         }
-      });
+      }
     }
 
     // ════════════════════════════════════════════════════════════
-    // PHASE D: 剩餘溢出 col 空層 → 給「無主碼 col 可用」或「短碼款」填充
-    //   (需求5: 避免浪費空儲位)
-    //   把仍未排的款色 (3碼款等) 排入剩餘溢出空格
+    // PHASE D: 剩餘短碼款 (無主碼 col) 填入剩餘空格 (需求5)
     // ════════════════════════════════════════════════════════════
     const stillUnplaced=colorEntries.filter(e=>!e.placed&&e.mainSkus.length>0);
-    stillUnplaced.sort((a,b)=>a.avgPending-b.avgPending); // 低 avg 優先填 B
+    stillUnplaced.sort((a,b)=>a.avgPending-b.avgPending);
     for(const e of stillUnplaced){
-      // 找一個能容納所有主碼 (layer 對應) 的溢出 col
       const layers=e.mainSkus.map(s=>plnGetTargetLayer(s.code,s.size));
       if(layers.some(l=>l===null)||new Set(layers).size!==layers.length)continue;
-      // 找有這些 layer 的溢出 col
       let target=null;
       const sortedCols=Object.keys(overflowAvail).map(Number)
         .filter(c=>overflowAvail[c]&&overflowAvail[c].length>0)
         .sort((a,b)=>a-b);
       for(const c of sortedCols){
         const availSet=new Set(overflowAvail[c]);
-        if(layers.every(l=>availSet.has(l))){target=c;break;}
+        if(layers.every(l=>availSet.has(l))&&layers.every(l=>!adjConflict(c,l,e.color7))){target=c;break;}
       }
       if(target===null)continue;
       for(const s of e.mainSkus){
@@ -3687,17 +3705,17 @@ function plnRunNewEngine(config,initialCells){
         }
       }
       e.placed=true;
-      // 此款溢出碼
       if(e.size5Skus.length){
         let oIdx=0;
         while(oIdx<e.size5Skus.length){
           const cands=Object.keys(overflowAvail).map(Number)
-            .filter(c=>overflowAvail[c]&&overflowAvail[c].length>0)
+            .filter(c=>(overflowAvail[c]||[]).some(L=>!adjConflict(c,L,e.color7)))
             .sort((a,b)=>Math.abs(a-target)-Math.abs(b-target));
           if(!cands.length)break;
           const c=cands[0];
           for(const L of [...overflowAvail[c]].sort((a,b)=>a-b)){
             if(oIdx>=e.size5Skus.length)break;
+            if(adjConflict(c,L,e.color7))continue;
             if(placeOneSku(e.size5Skus[oIdx],aisle,c,L,e.ku.cat)){
               overflowAvail[c]=overflowAvail[c].filter(x=>x!==L);oIdx++;
             }
@@ -3706,7 +3724,6 @@ function plnRunNewEngine(config,initialCells){
       }
     }
 
-    // 回傳完全未排的款 (kc 級別)
     const placedKcs=new Set(colorEntries.filter(e=>e.placed).map(e=>e.kc));
     return kuansToPlace.filter(ku=>!placedKcs.has(ku.kc));
   }
