@@ -2205,6 +2205,8 @@ async function sendToPlannerFromForecast(){
       const totalSku=window.NEW_PRODUCT_QUEUE.reduce((s,e)=>s+e.skus.length,0);
       const nInp=step1.querySelector('input[data-grp="n"]');
       if(nInp){nInp.value=totalSku;}
+      // ★ 鎖死高庫存/低庫存/內部整理 (有新品來源時只能選新品)
+      if(typeof plannerUpdateSortModeLocks==='function')plannerUpdateSortModeLocks(step1);
       plannerRefreshStepCounts();
     }
   },50);
@@ -3624,17 +3626,29 @@ function plnRunNewEngine(config,initialCells){
     //     1. 距主碼架最近 (需求2)
     //     2. 同 col 連續層放完 (需求1, fits_all)
     //     3. 擺法: 高 avg → C, 低 avg → B (需求4)
+    // ★ 處理順序改為「主碼架序」(非全域 avg): 確保每款溢出碼在鄰近 col 仍空時就近排入,
+    //   避免後段款式因近處被佔而漂移到遠架
     // ════════════════════════════════════════════════════════════
     const eov=entriesWithMain.filter(e=>e.size5Skus.length>0);
-    eov.sort((a,b)=>b.avgPending-a.avgPending);
-    const avgList=eov.map(e=>e.avgPending).sort((a,b)=>a-b);
-    const medianAvg=avgList.length?avgList[Math.floor(avgList.length/2)]:0;
+    eov.sort((a,b)=>((a.mainRackIdx??999)-(b.mainRackIdx??999))||((a.mainCol??0)-(b.mainCol??0)));
+    // C/B 偏好: 以「同主碼架的款色」未到量中位數判斷高/低 (需求4 在地化)
+    const rackAvgMap={};
+    eov.forEach(e=>{
+      const r=e.mainRackIdx;
+      if(!rackAvgMap[r])rackAvgMap[r]=[];
+      rackAvgMap[r].push(e.avgPending);
+    });
+    const rackMedian={};
+    Object.keys(rackAvgMap).forEach(r=>{
+      const arr=rackAvgMap[r].slice().sort((a,b)=>a-b);
+      rackMedian[r]=arr[Math.floor(arr.length/2)];
+    });
 
     for(const e of eov){
       const ov=e.size5Skus;
       let oIdx=0;
       const home=e.mainRackIdx;
-      const isHigh=e.avgPending>=medianAvg;
+      const isHigh=e.avgPending>=(rackMedian[home]??0);
       while(oIdx<ov.length){
         const need=ov.length-oIdx;
         const cands=[];
@@ -3876,6 +3890,9 @@ function plannerRenderConfigUI(){
   wrap.addEventListener('change',plannerHandleInternalBind);  // 內部整理: src/dst 互鎖 + 單選
   wrap.addEventListener('change',plannerScheduleRefresh);
   wrap.addEventListener('input',plannerScheduleRefresh);
+  // ★ 初始套用挑選選項鎖定 (若預設已勾新品 src 則鎖死其他模式)
+  const step1El=document.getElementById('pln-step-1');
+  if(step1El&&typeof plannerUpdateSortModeLocks==='function')plannerUpdateSortModeLocks(step1El);
   plannerRefreshStepCounts();
 }
 
@@ -4022,9 +4039,18 @@ function plannerHandleInternalBind(e){
     stepEl.querySelectorAll('input[data-grp="src"],input[data-grp="dst"]').forEach(c=>{c.checked=false;});
     stepEl.querySelectorAll(`input[data-grp="src"]:not([data-virtual])[value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=true;});
   }
-  // mode === 'new' 時, 真實走道 src 不應被勾, 若使用者誤勾則強制取消
-  if(mode==='new' && t.dataset.grp==='src' && !t.dataset.virtual){
-    t.checked=false;
+  // ★ mode === 'new' 時, 使用者勾選真實走道 src → 自動彈開「新品」, 切回 high (或 internal)
+  //   (規格: 來源走道改成其他走道報表中的走道時, 自動彈開挑選的新品)
+  if(mode==='new' && t.dataset.grp==='src' && !t.dataset.virtual && t.checked){
+    // 取消所有虛擬新品 src
+    stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]').forEach(c=>{c.checked=false;});
+    // 切換挑選模式: 走道數 ≥2 → high; 否則 internal
+    const realAisleCount=stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').length;
+    const fallbackMode=realAisleCount>=2?'high':'internal';
+    const fbRadio=stepEl.querySelector(`input[data-grp="sortMode"][value="${fallbackMode}"]`);
+    if(fbRadio){fbRadio.checked=true;}
+    plannerUpdateSortModeLocks(stepEl);
+    return;
   }
   
   // ★ 勾選新品虛擬 src → 自動切到 '新品' 挑選 mode + 取消真實走道 src
@@ -4034,6 +4060,55 @@ function plannerHandleInternalBind(e){
     const newRadio=stepEl.querySelector('input[data-grp="sortMode"][value="new"]');
     if(newRadio){newRadio.checked=true;}
   }
+
+  // ★ 切到「新品」模式時, 自動鎖定排序第一個的新品類別 src
+  //   (規格: 切回新品 → 來源走道自動鎖定排序第一個新品類別)
+  if(t.dataset.grp==='sortMode' && mode==='new'){
+    const virtualSrcs=[...stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]')];
+    const anyChecked=virtualSrcs.some(c=>c.checked);
+    if(!anyChecked&&virtualSrcs.length){
+      // 取排序第一個 (依 value 排序) 的新品類別自動勾選
+      virtualSrcs.sort((a,b)=>String(a.value).localeCompare(String(b.value)));
+      virtualSrcs[0].checked=true;
+    }
+  }
+
+  // ★ 切到非新品模式 (high/low/internal) 時, 取消所有虛擬新品 src
+  //   (規格: 來源走道改成真實走道 → 挑選自動彈開「新品」, 已在上方 high/low/internal 分支處理)
+
+  // ★ 依「是否有勾選新品虛擬 src」更新挑選選項的鎖定狀態
+  plannerUpdateSortModeLocks(stepEl);
+}
+
+// ★ 更新挑選選項鎖定: 若有任一新品虛擬 src 被勾選 → 鎖死(disable) 高庫存/低庫存/內部整理, 只留新品
+//   反之 → 解除鎖定 (依走道數決定 high/low 是否可用)
+function plannerUpdateSortModeLocks(stepEl){
+  if(!stepEl)return;
+  const virtualSrcChecked=[...stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]')].some(c=>c.checked);
+  const aisleCount=stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').length;
+  const modeRadios={
+    high:stepEl.querySelector('input[data-grp="sortMode"][value="high"]'),
+    low:stepEl.querySelector('input[data-grp="sortMode"][value="low"]'),
+    internal:stepEl.querySelector('input[data-grp="sortMode"][value="internal"]'),
+  };
+  ['high','low','internal'].forEach(m=>{
+    const r=modeRadios[m];
+    if(!r)return;
+    const label=r.closest('label');
+    if(virtualSrcChecked){
+      // 鎖死: 有新品來源時只能選新品
+      r.disabled=true;
+      if(label){label.style.opacity='0.4';label.style.cursor='not-allowed';}
+    } else {
+      // 解除: high/low 仍受走道數限制 (<2 走道時 disabled)
+      const aisleLimited=(m==='high'||m==='low')&&aisleCount<2;
+      r.disabled=aisleLimited;
+      if(label){
+        label.style.opacity=aisleLimited?'0.4':'';
+        label.style.cursor=aisleLimited?'not-allowed':'pointer';
+      }
+    }
+  });
 }
 
 function plannerRefreshStepCounts(){
