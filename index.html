@@ -4148,14 +4148,18 @@ function plannerHandleInternalBind(e){
 
 // ★ 更新挑選選項鎖定: 若有任一新品虛擬 src 被勾選 → 鎖死(disable) 高庫存/低庫存/內部整理, 只留新品
 //   反之 → 解除鎖定 (依走道數決定 high/low 是否可用)
+//   ★ 新增: 若來源走道完全無新品虛擬 src 選項 → 鎖死「新品」選項 (灰掉不可選)
+//          若來源走道有新品但當前未勾選任何新品 src → 也鎖死「新品」選項
 function plannerUpdateSortModeLocks(stepEl){
   if(!stepEl)return;
   const virtualSrcChecked=[...stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]')].some(c=>c.checked);
+  const virtualSrcExist=stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]').length>0;
   const aisleCount=stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').length;
   const modeRadios={
     high:stepEl.querySelector('input[data-grp="sortMode"][value="high"]'),
     low:stepEl.querySelector('input[data-grp="sortMode"][value="low"]'),
     internal:stepEl.querySelector('input[data-grp="sortMode"][value="internal"]'),
+    new:stepEl.querySelector('input[data-grp="sortMode"][value="new"]'),
   };
   ['high','low','internal'].forEach(m=>{
     const r=modeRadios[m];
@@ -4175,6 +4179,25 @@ function plannerUpdateSortModeLocks(stepEl){
       }
     }
   });
+  // ★ 鎖死「新品」選項: 來源走道無新品虛擬 src，或有新品但未勾選任何新品 src
+  const newRadio=modeRadios['new'];
+  if(newRadio){
+    const newLabel=newRadio.closest('label');
+    const shouldLockNew=!virtualSrcExist || (!virtualSrcChecked && !newRadio.checked);
+    // 若來源走道完全沒有新品虛擬選項 → 鎖死
+    if(!virtualSrcExist){
+      newRadio.disabled=true;
+      if(newLabel){newLabel.style.opacity='0.4';newLabel.style.cursor='not-allowed';newLabel.title='來源走道沒有新品，請先從「預告進貨明細」傳送新品至儲位調整';}
+    } else if(!virtualSrcChecked && !newRadio.checked){
+      // 有新品但未勾選任何新品來源，且目前非新品模式 → 鎖死
+      newRadio.disabled=true;
+      if(newLabel){newLabel.style.opacity='0.4';newLabel.style.cursor='not-allowed';newLabel.title='請先在來源走道勾選「新品-XXX」才能使用新品模式';}
+    } else {
+      // 可用
+      newRadio.disabled=false;
+      if(newLabel){newLabel.style.opacity='';newLabel.style.cursor='pointer';newLabel.title='';}
+    }
+  }
 }
 
 function plannerRefreshStepCounts(){
@@ -4566,25 +4589,33 @@ function plannerExportResult(){
   
   if(stepResults.length===0){
     // 沒有 stepResults → 回退到合併 moves
-    const aoa2=buildTaiYiAoa(r.moves||[]);
-    const ws2=XLSX.utils.aoa_to_sheet(aoa2);
-    const cw2=[];
-    const pages2=[];// rebuild pages count from aoa width
-    const colCount=aoa2[0]?aoa2[0].length:4;
-    const pageCount=Math.ceil(colCount/10);
-    for(let pi=0;pi<pageCount;pi++){
-      cw2.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5},{wch:3},{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});
-      if(pi<pageCount-1) cw2.push({wch:6});
+    // ★ 若所有 moves 都是 NEW_PRODUCT（無 src），不輸出待移 sheet
+    const allMovesAreNewProduct=(r.moves||[]).every(m=>m.phase==='NEW_PRODUCT'||m.phase==='NEW_PRODUCT_CONSOLIDATION'||!m.src||!String(m.src).trim());
+    if(!allMovesAreNewProduct){
+      const aoa2=buildTaiYiAoa(r.moves||[]);
+      const ws2=XLSX.utils.aoa_to_sheet(aoa2);
+      const cw2=[];
+      const pages2=[];// rebuild pages count from aoa width
+      const colCount=aoa2[0]?aoa2[0].length:4;
+      const pageCount=Math.ceil(colCount/10);
+      for(let pi=0;pi<pageCount;pi++){
+        cw2.push({wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5},{wch:3},{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5});
+        if(pi<pageCount-1) cw2.push({wch:6});
+      }
+      ws2['!cols']=cw2.length?cw2:[{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}];
+      styleTaiYiSheet(ws2);
+      ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
+      XLSX.utils.book_append_sheet(wb,ws2,'待移');
     }
-    ws2['!cols']=cw2.length?cw2:[{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}];
-    styleTaiYiSheet(ws2);
-    ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
-    XLSX.utils.book_append_sheet(wb,ws2,'待移');
   } else {
     stepResults.forEach((sr,i)=>{
       const stepIdx=sr.stepIdx||(i+1);
       const sheetName=multiStep?`Step ${stepIdx}_待移`:'待移';
       const stepMoves=sr.moves||[];
+      // ★ 若此 step 是純新品模式且所有 moves 均無 src（直接安排入空格），跳過待移 sheet
+      const isNewOnlyStep=sr.config&&sr.config.sortMode==='new';
+      const hasRealMoves=stepMoves.some(m=>m.src&&String(m.src).trim());
+      if(isNewOnlyStep&&!hasRealMoves) return; // 跳過此 step 的待移 sheet
       const aoa2=buildTaiYiAoa(stepMoves);
       const ws2=XLSX.utils.aoa_to_sheet(aoa2);
       // 欄寬: 依 aoa2[0] 的寬度計算
@@ -4698,8 +4729,10 @@ function plannerExportResult(){
 
   // ─── Sheet 3+: 各走道最終狀態 (套用所有 step 的 moves 後) ───
   // 加入 ws1 (新品安排) - 必須在 applyStyleFull 定義後才能 call
-  if(aoa1.length>1){
-    // 有新品才加新品安排 sheet
+  // ★ 僅當有任何 step 為 'new' 模式時才加入新品安排 sheet
+  const hasNewModeStep=(r.stepResults||[]).some(sr=>sr.config&&sr.config.sortMode==='new');
+  if(aoa1.length>1 && hasNewModeStep){
+    // 有新品且情境包含新品模式才加新品安排 sheet
     if(typeof applyStyleFull==='function') applyStyleFull(ws1,{headerRows:[0]});
     XLSX.utils.book_append_sheet(wb,ws1,'新品安排');
   }
@@ -5023,21 +5056,39 @@ function renderArrangeCompare(){
       if(catEntries.length===0)return;
       const totalRows=catEntries.length;
       const arrivalNotify=(grp.arrivalNotifyTotal>0)?grp.arrivalNotifyTotal.toLocaleString():'—';
-      // ★ 檢查該櫃是否有任一類別需要安排儲位 (全部都是無待安排 → 隱藏整櫃 checkbox)
-      const hasAnyArrange=catEntries.some(([cat,s])=>!(cat==='未匹配'&&(s.skuCount||0)===0));
+      // ★ 檢查該櫃是否有任一類別需要安排儲位 (全部都是再次進倉 → 隱藏整櫃 checkbox)
+      // ★ 判斷：cat==='未匹配' 且 skuCount===0 → 「再次進倉」類別
+      const isCatReEntry=(cat,s)=>(cat==='未匹配'&&(s.skuCount||0)===0);
+      const hasAnyArrange=catEntries.some(([cat,s])=>!isCatReEntry(cat,s));
 
       catEntries.forEach(([cat,s],idx)=>{
         const tr=document.createElement('tr');
         tr.style.borderBottom=idx===catEntries.length-1?'2px solid var(--border)':'1px solid rgba(221,216,208,.3)';
-        // ★ 無待安排儲位 列 → 儲區/倉位 改用預告進貨表自己的欄位聚合
-        const isNoArrange=(cat==='未匹配'&&(s.skuCount||0)===0);
+        // ★ 判斷是否為「再次進倉」(非當季新品且無待儲位)
+        const isReEntry=isCatReEntry(cat,s);
+        // ★ 若該類別 checkbox 應顯示 (非再次進倉類別才顯示 checkbox)
+        // ★ 儲區/倉位: 優先用預告進貨表本身的 slot/plannedSlot (若有) 覆蓋 SKU儲位tab資料
+        //   - 若預告進貨表有 slot 資料 → 直接顯示首字母作為儲區，不用 catZoneLookup
+        //   - 若預告進貨表有 plannedSlot 資料 → 直接顯示，不用 ARRANGE_DATA 的 plannedSlots
+        const hasFcSlot=catSlotZones[cat]&&catSlotZones[cat].size>0;
+        const hasFcPlanned=catFcPlannedSlots[cat]&&catFcPlannedSlots[cat].size>0;
         let zone, slots;
-        if(isNoArrange){
-          zone=catSlotZones[cat]?Array.from(catSlotZones[cat]).sort().join(','):'—';
-          slots=catFcPlannedSlots[cat]?Array.from(catFcPlannedSlots[cat]).sort().join(','):'—';
+        if(isReEntry){
+          // 再次進倉: 用預告進貨表的 slot/plannedSlot
+          zone=hasFcSlot?Array.from(catSlotZones[cat]).sort().join(','):'—';
+          slots=hasFcPlanned?Array.from(catFcPlannedSlots[cat]).sort().join(','):'—';
         }else{
-          zone=cat==='未匹配'?'—':(catZoneLookup[cat]||'—');
-          slots=Array.from(s.plannedSlots).filter(x=>x).join(',')||'—';
+          // 一般新品: 若預告進貨表有 slot/plannedSlot 則覆蓋，否則用 SKU儲位tab資料
+          if(hasFcSlot){
+            zone=Array.from(catSlotZones[cat]).sort().join(',');
+          } else {
+            zone=cat==='未匹配'?'—':(catZoneLookup[cat]||'—');
+          }
+          if(hasFcPlanned){
+            slots=Array.from(catFcPlannedSlots[cat]).sort().join(',');
+          } else {
+            slots=Array.from(s.plannedSlots).filter(x=>x).join(',')||'—';
+          }
         }
 
         // ★ 跨櫃重複款號提醒：找出此類別內有哪些款號是跨櫃的
@@ -5057,19 +5108,19 @@ function renderArrangeCompare(){
         if(idx===0){
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.arrivalDate}</td>`;
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;font-family:monospace;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${grp.importNo}</td>`;
-          // ★ 櫃號/櫃型 cell: 加入 container checkbox (整櫃選取); 全櫃無待安排則隱藏 checkbox
+          // ★ 櫃號/櫃型 cell: 加入 container checkbox (整櫃選取); 全櫃均為再次進倉則隱藏 checkbox
           const _gkEsc=String(grpKey).replace(/"/g,'&quot;');
           const containerCbHtml=hasAnyArrange?`<input type="checkbox" class="forecast-cb-container" data-key="${_gkEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer">`:'';
           html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle"><label style="display:inline-flex;align-items:center;gap:4px;cursor:${hasAnyArrange?'pointer':'default'};justify-content:center">${containerCbHtml}${grp.containerType}</label></td>`;
         }
-        // ★ 未匹配 + skuCount=0（不在儲位安排報表內）→ 顯示為「無待安排儲位」
-        const displayCat=isNoArrange?'無待安排儲位':cat;
-        const catColor=isNoArrange?'color:var(--text3)':(cat==='未匹配'?'color:var(--red)':'');
-        const catTitle=cat==='未匹配'&&s.unmatchedStyles?(isNoArrange?'此貨櫃內款號未被列入儲位安排，可能為既有商品續進，沿用原儲位':'未匹配款號: '+Array.from(s.unmatchedStyles).join(', ')):'';
-        // ★ 類別 cell: 加入 category checkbox (個別類別選取)
+        // ★ 再次進倉 → 顯示「再次進倉」; 其他未匹配顯示紅色; 正常類別顯示原名稱
+        const displayCat=isReEntry?'再次進倉':cat;
+        const catColor=isReEntry?'color:var(--text3)':(cat==='未匹配'?'color:var(--red)':'');
+        const catTitle=cat==='未匹配'&&s.unmatchedStyles?(isReEntry?'此貨櫃內款號未被列入儲位安排，可能為既有商品續進或再次進倉，沿用原儲位':'未匹配款號: '+Array.from(s.unmatchedStyles).join(', ')):'';
+        // ★ 類別 cell: 再次進倉不顯示 checkbox；一般新品類別顯示 checkbox
         const _gkEsc=String(grpKey).replace(/"/g,'&quot;');
         const _catEsc=String(cat).replace(/"/g,'&quot;');
-        const cbHtml=isNoArrange?'':`<input type="checkbox" class="forecast-cb-category" data-key="${_gkEsc}" data-cat="${_catEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer;margin-right:4px">`;
+        const cbHtml=isReEntry?'':`<input type="checkbox" class="forecast-cb-category" data-key="${_gkEsc}" data-cat="${_catEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer;margin-right:4px">`;
         html+=`<td style="padding:4px 8px;text-align:center;${catColor}" title="${catTitle}">${cbHtml}<span style="cursor:default">${displayCat}</span></td>`;
         // SKU 數欄位：含跨櫃重複提醒
         const skuCell=dupAlert
