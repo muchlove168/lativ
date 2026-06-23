@@ -3580,6 +3580,59 @@ function plnRunNewEngine(config,initialCells){
     const entriesWithMain=colorEntries.filter(e=>e.mainSkus.length>0);
     entriesWithMain.sort((a,b)=>b.avgPending-a.avgPending);
 
+    // ────────────────────────────────────────────────────────────
+    // PHASE A0: 3碼 ⇄ 5碼 XXL 配對 (不浪費 layer-4)
+    //   核心: 為每個 3碼 entry 借一個 5碼 entry 的 XXL 來填 layer-4
+    //   配對偏好:
+    //     (a) 同款 (kc 相同) 5碼色優先
+    //     (b) 跨款時, 已部分被用過的 kc 優先繼續用 (避免 B/C/E 款散開)
+    //     (c) 都沒被用過時, 色數多的 kc 優先 + avgPending 高優先
+    //   標記:
+    //     g3e.donorPartner = g5e   (3碼指向出借方)
+    //     g5e.donorOf = g3e        (5碼反向指向收方, Phase C 用)
+    //   ★ Gordon 規範: 配對 > 同款聚集 > 高未到量→大材積
+    // ────────────────────────────────────────────────────────────
+    {
+      const g3List=entriesWithMain.filter(e=>e.mainSkus.length===3&&e.size5Skus.length===0);
+      const g5List=entriesWithMain.filter(e=>e.size5Skus.length>=1);
+      const g5UsedC7=new Set();
+      const g3Sorted=[...g3List].sort((a,b)=>b.avgPending-a.avgPending);
+      for(const g3e of g3Sorted){
+        let partner=null;
+        const sameKuan=g5List.filter(e=>e.kc===g3e.kc&&!g5UsedC7.has(e.color7));
+        if(sameKuan.length){
+          sameKuan.sort((a,b)=>String(a.color7).localeCompare(String(b.color7)));
+          partner=sameKuan[0];
+        } else {
+          const kcMap={};
+          g5List.forEach(e=>{
+            if(!kcMap[e.kc])kcMap[e.kc]={used:0,unused:[]};
+            if(g5UsedC7.has(e.color7))kcMap[e.kc].used++;
+            else kcMap[e.kc].unused.push(e);
+          });
+          const kcs=Object.keys(kcMap).filter(k=>kcMap[k].unused.length>0);
+          if(kcs.length){
+            kcs.sort((a,b)=>{
+              const ma=kcMap[a],mb=kcMap[b];
+              if(ma.used!==mb.used)return mb.used-ma.used;
+              if(ma.unused.length!==mb.unused.length)return mb.unused.length-ma.unused.length;
+              const avgA=ma.unused.reduce((s,e)=>s+e.avgPending,0)/ma.unused.length;
+              const avgB=mb.unused.reduce((s,e)=>s+e.avgPending,0)/mb.unused.length;
+              return avgB-avgA;
+            });
+            const pool=kcMap[kcs[0]].unused.slice();
+            pool.sort((a,b)=>String(a.color7).localeCompare(String(b.color7)));
+            partner=pool[0];
+          }
+        }
+        if(partner){
+          g5UsedC7.add(partner.color7);
+          g3e.donorPartner=partner;
+          partner.donorOf=g3e;
+        }
+      }
+    }
+
     const usedSmallForMain=new Set();
     let gi=0;
     for(const e of entriesWithMain){
@@ -3641,6 +3694,14 @@ function plnRunNewEngine(config,initialCells){
     for(const e of eov){
       const ov=e.size5Skus;
       let oIdx=0;
+      // ★ donor 配對: 把第一個 XXL 強制放到配對 3碼 mainCol 的 layer 4
+      if(e.donorOf&&e.donorOf.mainCol!==null&&ov.length>0){
+        const dstCol=e.donorOf.mainCol;
+        const dstCell=cells[plnCellId(aisle,dstCol,4)];
+        if(dstCell&&!dstCell.sku&&!dstCell.locked){
+          if(placeOneSku(ov[0],aisle,dstCol,4,e.ku.cat))oIdx=1;
+        }
+      }
       const home=e.mainRackIdx;
       const isHigh=e.avgPending>=(rackMedian[home]??0);
       while(oIdx<ov.length){
