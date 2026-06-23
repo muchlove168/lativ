@@ -3542,63 +3542,16 @@ function plnRunNewEngine(config,initialCells){
       });
     });
 
-    // ── 收集空 col, 依擺法分類 (★ 改用擺法本身, 不用架內位置) ──
-    //   C/G = 大材積 (主碼優先); B/A = 小材積 (溢出優先)
-    const bigColsAvail=[];   // {col, ridx} 大材積且完全空
-    const smallColsAvail=[]; // {col, ridx} 小材積且完全空
-    [...allCols].forEach(c=>{
-      if(!isColFree(aisle,c))return;
-      const lay=getColLayout(aisle,c);
-      if(isBigLayout(lay))bigColsAvail.push({col:c,ridx:rackIdx(c)});
-      else if(isSmallLayout(lay))smallColsAvail.push({col:c,ridx:rackIdx(c)});
-    });
-    bigColsAvail.sort((a,b)=>(a.ridx-b.ridx)||(a.col-b.col));
-    smallColsAvail.sort((a,b)=>(a.ridx-b.ridx)||(a.col-b.col));
-
-    // ════════════════════════════════════════════════════════════
-    // PHASE A: 分配主碼 col
-    //   策略: 主碼優先放「大材積 C」(空間多), 依 avgPending DESC + 架序緊湊
-    //   若 C col 用完才用 B col (最後手段)
-    // ════════════════════════════════════════════════════════════
-    const entriesWithMain=colorEntries.filter(e=>e.mainSkus.length>0);
-    entriesWithMain.sort((a,b)=>b.avgPending-a.avgPending);
-
-    let mi=0;
-    for(const e of entriesWithMain){
-      if(mi>=bigColsAvail.length)break;
-      e.mainCol=bigColsAvail[mi].col;
-      e.mainRackIdx=bigColsAvail[mi].ridx;
-      mi++;
-    }
-    // C col 不夠 → 用 B col 放主碼 (最後手段)
-    if(mi<entriesWithMain.length){
-      let bi=0;
-      for(let k=mi;k<entriesWithMain.length;k++){
-        if(bi>=smallColsAvail.length)break;
-        entriesWithMain[k].mainCol=smallColsAvail[bi].col;
-        entriesWithMain[k].mainRackIdx=smallColsAvail[bi].ridx;
-        bi++;
+    // ── 工具函式 ──
+    function emptyLayers(c){
+      const res=[];
+      for(let L=1;L<=4;L++){
+        const cell=cells[plnCellId(aisle,c,L)];
+        if(cell&&!cell.sku&&!cell.locked)res.push(L);
       }
+      return res;
     }
-
-    // ── PHASE B: 排入主碼 (主碼一律放自己的 col, 無相鄰風險) ──
-    const usedMainCols=new Set();
-    for(const e of entriesWithMain){
-      if(e.mainCol===null)continue;
-      usedMainCols.add(e.mainCol);
-      for(const s of e.mainSkus){
-        const L=plnGetTargetLayer(s.code,s.size);
-        let ok=false;
-        if(L>=1&&L<=4)ok=placeOneSku(s,aisle,e.mainCol,L,e.ku.cat);
-        if(!ok){
-          const emptyL=colEmptyLayers(aisle,e.mainCol);
-          for(const eL of emptyL){if(placeOneSku(s,aisle,e.mainCol,eL,e.ku.cat)){ok=true;break;}}
-        }
-      }
-      e.placed=true;
-    }
-
-    // ── 相鄰衝突檢查 (同款色同層相鄰 col) ──
+    function colFullyFree(c){return emptyLayers(c).length===4;}
     function adjConflict(col,layer,c7){
       for(const dc of [-1,1]){
         const nb=cells[plnCellId(aisle,col+dc,layer)];
@@ -3607,42 +3560,83 @@ function plnRunNewEngine(config,initialCells){
       return false;
     }
 
-    // ── 溢出區可用層 (所有非主碼 col 的空層) ──
-    const overflowAvail={};
-    const ovrRackIdx={};
-    const ovrLayout={};
+    // ── 收集空 col 依擺法分類 (★ 依擺法本身: C/G=大材積主碼; A/B=小材積) ──
+    const bigColsAvail=[];   // 完全空的大材積 col
+    const smallColsAvail=[]; // 完全空的小材積 col
     [...allCols].forEach(c=>{
-      if(usedMainCols.has(c))return; // 主碼 col 已滿
-      const empties=colEmptyLayers(aisle,c);
-      if(empties.length)overflowAvail[c]=empties;
-      ovrRackIdx[c]=rackIdx(c);
-      ovrLayout[c]=getColLayout(aisle,c);
+      if(!colFullyFree(c))return;
+      const lay=getColLayout(aisle,c);
+      if(isBigLayout(lay))bigColsAvail.push(c);
+      else if(isSmallLayout(lay))smallColsAvail.push(c);
     });
+    bigColsAvail.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
+    smallColsAvail.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
 
     // ════════════════════════════════════════════════════════════
-    // PHASE C: 排入溢出碼
-    //   優先序:
-    //     0. (硬性) 不可與同款色同層相鄰
-    //     1. 距主碼架最近 (需求2)
-    //     2. 同 col 連續層放完 (需求1, fits_all)
-    //     3. 擺法: 高 avg → C, 低 avg → B (需求4)
-    // ★ 處理順序改為「主碼架序」(非全域 avg): 確保每款溢出碼在鄰近 col 仍空時就近排入,
-    //   避免後段款式因近處被佔而漂移到遠架
+    // PHASE A: 全域分配主碼 col
+    //   主碼優先放大材積 (C/G), 依 avgPending DESC + 架序緊湊
+    //   大材積不夠 → 用小材積 col 放主碼 (標記 usedSmallForMain, 不可再當溢出區)
     // ════════════════════════════════════════════════════════════
+    const entriesWithMain=colorEntries.filter(e=>e.mainSkus.length>0);
+    entriesWithMain.sort((a,b)=>b.avgPending-a.avgPending);
+
+    const usedSmallForMain=new Set();
+    let gi=0;
+    for(const e of entriesWithMain){
+      if(gi>=bigColsAvail.length)break;
+      e.mainCol=bigColsAvail[gi];e.mainRackIdx=rackIdx(bigColsAvail[gi]);gi++;
+    }
+    // 大材積用完 → 用小材積 col 放主碼
+    let ai=0;
+    for(const e of entriesWithMain){
+      if(e.mainCol!==null)continue;
+      if(ai>=smallColsAvail.length)break;
+      const sc=smallColsAvail[ai];
+      e.mainCol=sc;e.mainRackIdx=rackIdx(sc);usedSmallForMain.add(sc);ai++;
+    }
+
+    // ── PHASE B: 排入主碼 (主碼放自己的 col, 無相鄰風險) ──
+    for(const e of entriesWithMain){
+      if(e.mainCol===null)continue;
+      for(const s of e.mainSkus){
+        const L=plnGetTargetLayer(s.code,s.size);
+        let ok=false;
+        if(L>=1&&L<=4)ok=placeOneSku(s,aisle,e.mainCol,L,e.ku.cat);
+        if(!ok){
+          for(const eL of emptyLayers(e.mainCol)){
+            if(placeOneSku(s,aisle,e.mainCol,eL,e.ku.cat)){ok=true;break;}
+          }
+        }
+      }
+      e.placed=true;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // PHASE C: 排入溢出碼 (逐架就近, 重用 3碼款的大材積 layer-4 空格)
+    //   溢出可用空間 = 「未被主碼占用的小材積 col」+「大材積 col 的剩餘層 (3碼款layer4)」
+    //   優先序:
+    //     0. (硬性) 不可同款色同層相鄰
+    //     1. 距主碼架最近 (需求2)
+    //     2. 同 col 連續層放完 (需求1)
+    //     3. 擺法: 高 avg → 大材積, 低 avg → 小材積 (需求4)
+    //   ★ 處理順序: 主碼架序 → 確保就近 col 仍空時優先排入
+    // ════════════════════════════════════════════════════════════
+    // 判斷某 col 是否可作溢出區
+    function isOverflowCol(c,ownMainCol){
+      if(c===ownMainCol)return true; // 自己的主碼 col 剩餘層 (3碼款layer4)
+      const lay=getColLayout(aisle,c);
+      if(isSmallLayout(lay)&&!usedSmallForMain.has(c))return true; // 未被占用的小材積
+      if(isBigLayout(lay)&&emptyLayers(c).length>0&&emptyLayers(c).length<4)return true; // 大材積部分填充(3碼leftover)
+      return false;
+    }
+
     const eov=entriesWithMain.filter(e=>e.size5Skus.length>0);
     eov.sort((a,b)=>((a.mainRackIdx??999)-(b.mainRackIdx??999))||((a.mainCol??0)-(b.mainCol??0)));
-    // C/B 偏好: 以「同主碼架的款色」未到量中位數判斷高/低 (需求4 在地化)
+    // C/B 偏好: 以「同主碼架款色」未到量中位數判斷高/低
     const rackAvgMap={};
-    eov.forEach(e=>{
-      const r=e.mainRackIdx;
-      if(!rackAvgMap[r])rackAvgMap[r]=[];
-      rackAvgMap[r].push(e.avgPending);
-    });
+    eov.forEach(e=>{const r=e.mainRackIdx;if(!rackAvgMap[r])rackAvgMap[r]=[];rackAvgMap[r].push(e.avgPending);});
     const rackMedian={};
-    Object.keys(rackAvgMap).forEach(r=>{
-      const arr=rackAvgMap[r].slice().sort((a,b)=>a-b);
-      rackMedian[r]=arr[Math.floor(arr.length/2)];
-    });
+    Object.keys(rackAvgMap).forEach(r=>{const arr=rackAvgMap[r].slice().sort((a,b)=>a-b);rackMedian[r]=arr[Math.floor(arr.length/2)];});
 
     for(const e of eov){
       const ov=e.size5Skus;
@@ -3652,15 +3646,12 @@ function plnRunNewEngine(config,initialCells){
       while(oIdx<ov.length){
         const need=ov.length-oIdx;
         const cands=[];
-        for(const cStr of Object.keys(overflowAvail)){
-          const c=Number(cStr);
-          const avail=overflowAvail[c];
-          if(!avail||!avail.length)continue;
-          // ★ 硬性過濾: 只保留不會造成相鄰衝突的層
-          const validLayers=avail.filter(L=>!adjConflict(c,L,e.color7));
+        for(const c of allCols){
+          if(!isOverflowCol(c,e.mainCol))continue;
+          const validLayers=emptyLayers(c).filter(L=>!adjConflict(c,L,e.color7));
           if(!validLayers.length)continue;
-          const rd=Math.abs(ovrRackIdx[c]-home);
-          const lay=ovrLayout[c];
+          const rd=Math.abs(rackIdx(c)-home);
+          const lay=getColLayout(aisle,c);
           const layPref=isHigh?(isBigLayout(lay)?0:1):(isSmallLayout(lay)?0:1);
           const fitsAll=(validLayers.length>=need)?0:1;
           cands.push({c,rd,fitsAll,layPref,validLayers});
@@ -3673,20 +3664,17 @@ function plnRunNewEngine(config,initialCells){
         cands.sort((x,y)=>(x.rd-y.rd)||(x.fitsAll-y.fitsAll)||(x.layPref-y.layPref)||(x.c-y.c));
         const chosen=cands[0];
         const c=chosen.c;
+        let placedAny=false;
         for(const L of [...chosen.validLayers].sort((a,b)=>a-b)){
           if(oIdx>=ov.length)break;
-          // 放入前再次確認 (前一個放入可能改變相鄰狀態)
           if(adjConflict(c,L,e.color7))continue;
-          if(placeOneSku(ov[oIdx],aisle,c,L,e.ku.cat)){
-            overflowAvail[c]=overflowAvail[c].filter(x=>x!==L);
-            oIdx++;
-          }
+          if(placeOneSku(ov[oIdx],aisle,c,L,e.ku.cat)){oIdx++;placedAny=true;}
         }
-        // 若本輪沒放進任何 (全被相鄰擋掉) → 防無限迴圈
-        if(oIdx<ov.length){
-          const stillCands=Object.keys(overflowAvail).map(Number)
-            .some(c=>(overflowAvail[c]||[]).some(L=>!adjConflict(c,L,e.color7)));
-          if(!stillCands){
+        if(!placedAny){
+          // 防無限迴圈: 此輪完全放不進 → 檢查是否還有任何可用空間
+          const still=[...allCols].some(c=>isOverflowCol(c,e.mainCol)&&
+            emptyLayers(c).some(L=>!adjConflict(c,L,e.color7)));
+          if(!still){
             for(let i=oIdx;i<ov.length;i++)
               failed.push({kc:e.kc,n:e.ku.n,reason:'NO_A_SLOT',cat:e.ku.cat});
             break;
@@ -3696,7 +3684,7 @@ function plnRunNewEngine(config,initialCells){
     }
 
     // ════════════════════════════════════════════════════════════
-    // PHASE D: 剩餘短碼款 (無主碼 col) 填入剩餘空格 (需求5)
+    // PHASE D: 仍未排的款 (主碼 col 都用完) → 找剩餘空間排入 (需求5)
     // ════════════════════════════════════════════════════════════
     const stillUnplaced=colorEntries.filter(e=>!e.placed&&e.mainSkus.length>0);
     stillUnplaced.sort((a,b)=>a.avgPending-b.avgPending);
@@ -3704,36 +3692,33 @@ function plnRunNewEngine(config,initialCells){
       const layers=e.mainSkus.map(s=>plnGetTargetLayer(s.code,s.size));
       if(layers.some(l=>l===null)||new Set(layers).size!==layers.length)continue;
       let target=null;
-      const sortedCols=Object.keys(overflowAvail).map(Number)
-        .filter(c=>overflowAvail[c]&&overflowAvail[c].length>0)
-        .sort((a,b)=>a-b);
+      const sortedCols=[...allCols].sort((a,b)=>a-b);
       for(const c of sortedCols){
-        const availSet=new Set(overflowAvail[c]);
-        if(layers.every(l=>availSet.has(l))&&layers.every(l=>!adjConflict(c,l,e.color7))){target=c;break;}
+        const av=new Set(emptyLayers(c));
+        if(layers.every(l=>av.has(l))&&layers.every(l=>!adjConflict(c,l,e.color7))){target=c;break;}
       }
       if(target===null)continue;
       for(const s of e.mainSkus){
         const L=plnGetTargetLayer(s.code,s.size);
-        if(placeOneSku(s,aisle,target,L,e.ku.cat)){
-          overflowAvail[target]=overflowAvail[target].filter(x=>x!==L);
-        }
+        placeOneSku(s,aisle,target,L,e.ku.cat);
       }
-      e.placed=true;
+      e.placed=true;e.mainCol=target;e.mainRackIdx=rackIdx(target);
+      // 此款溢出碼就近排
       if(e.size5Skus.length){
         let oIdx=0;
         while(oIdx<e.size5Skus.length){
-          const cands=Object.keys(overflowAvail).map(Number)
-            .filter(c=>(overflowAvail[c]||[]).some(L=>!adjConflict(c,L,e.color7)))
-            .sort((a,b)=>Math.abs(a-target)-Math.abs(b-target));
+          const cands=[...allCols].map(c=>({c,el:emptyLayers(c).filter(L=>!adjConflict(c,L,e.color7))}))
+            .filter(x=>x.el.length>0)
+            .sort((a,b)=>Math.abs(rackIdx(a.c)-e.mainRackIdx)-Math.abs(rackIdx(b.c)-e.mainRackIdx));
           if(!cands.length)break;
-          const c=cands[0];
-          for(const L of [...overflowAvail[c]].sort((a,b)=>a-b)){
+          const {c,el}=cands[0];
+          let any=false;
+          for(const L of el.sort((a,b)=>a-b)){
             if(oIdx>=e.size5Skus.length)break;
             if(adjConflict(c,L,e.color7))continue;
-            if(placeOneSku(e.size5Skus[oIdx],aisle,c,L,e.ku.cat)){
-              overflowAvail[c]=overflowAvail[c].filter(x=>x!==L);oIdx++;
-            }
+            if(placeOneSku(e.size5Skus[oIdx],aisle,c,L,e.ku.cat)){oIdx++;any=true;}
           }
+          if(!any)break;
         }
       }
     }
