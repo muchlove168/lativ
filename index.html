@@ -5094,7 +5094,9 @@ function renderArrangeCompare(){
       // ★ 檢查該櫃是否有任一類別需要安排儲位 (全部都是再次進倉 → 隱藏整櫃 checkbox)
       // ★ 判斷：cat==='未匹配' 且 skuCount===0 → 「再次進倉」類別
       const isCatReEntry=(cat,s)=>(cat==='未匹配'&&(s.skuCount||0)===0);
-      const hasAnyArrange=catEntries.some(([cat,s])=>!isCatReEntry(cat,s));
+      // ★ 待安排新品判定：該類別 SKU 數 > 0 才有待安排新品（才顯示 checkbox）
+      const catHasPending=(s)=>(s.skuCount||0)>0;
+      const hasAnyArrange=catEntries.some(([cat,s])=>catHasPending(s));
 
       catEntries.forEach(([cat,s],idx)=>{
         const tr=document.createElement('tr');
@@ -5155,21 +5157,21 @@ function renderArrangeCompare(){
         // ★ 類別 cell: 再次進倉不顯示 checkbox；一般新品類別顯示 checkbox
         const _gkEsc=String(grpKey).replace(/"/g,'&quot;');
         const _catEsc=String(cat).replace(/"/g,'&quot;');
-        const cbHtml=isReEntry?'':`<input type="checkbox" class="forecast-cb-category" data-key="${_gkEsc}" data-cat="${_catEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer;margin-right:4px">`;
-        html+=`<td style="padding:4px 8px;text-align:center;${catColor}" title="${catTitle}">${cbHtml}<span style="cursor:default">${displayCat}</span></td>`;
+        const cbHtml=catHasPending(s)?`<input type="checkbox" class="forecast-cb-category" data-key="${_gkEsc}" data-cat="${_catEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer;margin-right:4px">`:'';
+        html+=`<td style="padding:4px 8px;text-align:center;border-right:1px solid var(--border);${catColor}" title="${catTitle}">${cbHtml}<span style="cursor:default">${displayCat}</span></td>`;
         // SKU 數欄位：含跨櫃重複提醒
         const skuCell=dupAlert
           ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${s.skuCount||'—'}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
           : `${s.skuCount||'—'}`;
-        html+=`<td style="padding:4px 8px;text-align:right">${skuCell}</td>`;
-        html+=`<td style="padding:4px 8px;text-align:center;font-weight:600;color:var(--accent)">${zone}</td>`;
-        html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2)">${slots}</td>`;
+        html+=`<td style="padding:4px 8px;text-align:right;border-right:1px solid var(--border)">${skuCell}</td>`;
+        html+=`<td style="padding:4px 8px;text-align:center;font-weight:600;color:var(--accent);border-right:1px solid var(--border)">${zone}</td>`;
+        html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2);border-right:1px solid var(--border)">${slots}</td>`;
         // ★ 箱數（該類別總箱數）
         const boxNum=catBoxes[cat]||0;
         html+=`<td style="padding:4px 8px;text-align:right;font-weight:600">${boxNum?boxNum.toLocaleString():'—'}</td>`;
         if(idx===0){
-          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:right;border-left:1px solid var(--border);vertical-align:middle">${grp.priorityTotal||'—'}</td>`;
-          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;vertical-align:middle">${arrivalNotify}</td>`;
+          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:right;border-left:1px solid var(--border);border-right:1px solid var(--border);vertical-align:middle">${grp.priorityTotal||'—'}</td>`;
+          html+=`<td rowspan="${totalRows}" style="padding:6px 8px;text-align:center;border-right:1px solid var(--border);vertical-align:middle">${arrivalNotify}</td>`;
         }
         // ★ 進倉提醒欄 (per-category): 直接從預告進貨表 per款號 值順序呈現（去重、保留出現順序）
         const reminderTxt=catReminders[cat]?Array.from(catReminders[cat]).join('、'):'—';
@@ -7673,16 +7675,16 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <div style="max-height:560px;overflow:auto">
         <table style="width:100%;border-collapse:collapse;font-size:11px">
           <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">進倉日期</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">進口編號</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">櫃號/櫃型</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">類別</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">SKU 數</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">儲區</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">倉位</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">箱數</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">優先箱數</th>
-            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">貨到通知</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center">進倉日期</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:left">進口編號</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:left">櫃號/櫃型</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center">類別</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:right">SKU 數</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center">儲區</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center">倉位</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:right">箱數</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:right">優先箱數</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center">貨到通知</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">進倉提醒</th>
           </tr></thead>
           <tbody id="forecast-body"></tbody>
