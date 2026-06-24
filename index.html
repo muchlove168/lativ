@@ -3652,6 +3652,18 @@ function plnRunNewEngine(config,initialCells){
         return -1;
       }
 
+      // ★ 溢出碼填入 poolCol 時避免把同色(color7)的多碼溢出拆散到不同 col：
+      //   依 donor(同色)分組；poolCol 剩餘格數不足以整組放入時，改挑後面「能整組塞入剩餘格」的
+      //   最大組(best-fit，remain=1 即優先單碼色)，把大組延後到下一 col 保持完整。
+      function groupSeqByDonor(seq){
+        const groups=[];const map=new Map();
+        seq.forEach(it=>{
+          if(!map.has(it.donor)){const g={donor:it.donor,items:[]};map.set(it.donor,g);groups.push(g);}
+          map.get(it.donor).items.push(it);
+        });
+        return groups;
+      }
+
       for(const rack of racks){
         // A col 分類: partial = 已部分占用但仍有空 layer; fullEmpty = 全空
         const partialAs=rack.aCols.filter(c=>!colFullyFree(c)&&emptyLayers(c).length>0);
@@ -3742,18 +3754,34 @@ function plnRunNewEngine(config,initialCells){
           }
         }
 
-        // Step 3: 集中區放剩餘 spillXxl + rackPool
+        // Step 3: 集中區放剩餘 spillXxl + rackPool (★ 同色溢出碼整組優先，避免跨 col 拆散)
         if(poolCol){
           const xxlSeq=[...spillXxl,...rackPool];
           spillXxl.length=0;rackPool.length=0;
-          let consumed=0;
-          for(let L=1;L<=4&&consumed<xxlSeq.length;L++){
-            const cs=cells[plnCellId(aisle,poolCol,L)];
-            if(!cs||cs.sku||cs.locked)continue;
-            const {donor,sku}=xxlSeq[consumed++];
-            placeOneSku(sku,aisle,poolCol,L,donor.ku.cat);
+          const freeLs=emptyLayers(poolCol);   // poolCol 目前可用層 (升冪)
+          const groups=groupSeqByDonor(xxlSeq);
+          let slotPtr=0;
+          while(slotPtr<freeLs.length&&groups.length){
+            const remain=freeLs.length-slotPtr;
+            let gi=0;
+            if(groups[0].items.length>remain){
+              // 下一組會被拆散 → 找後面可整組塞入 remain 的最大組 (best-fit；remain=1 即優先單碼色)
+              let best=-1;
+              for(let i=0;i<groups.length;i++){
+                if(groups[i].items.length<=remain&&(best<0||groups[i].items.length>groups[best].items.length))best=i;
+              }
+              if(best>=0)gi=best;   // best<0 → 無任何組可整組塞入，只能拆散 groups[0]
+            }
+            const g=groups.splice(gi,1)[0];
+            for(const it of g.items){
+              if(slotPtr>=freeLs.length){spillXxl.push(it);continue;}
+              const L=freeLs[slotPtr++];
+              const cs=cells[plnCellId(aisle,poolCol,L)];
+              if(cs&&!cs.sku&&!cs.locked)placeOneSku(it.sku,aisle,poolCol,L,it.donor.ku.cat);
+              else spillXxl.push(it);
+            }
           }
-          spillXxl.push(...xxlSeq.slice(consumed));
+          groups.forEach(g=>g.items.forEach(it=>spillXxl.push(it)));
         } else {
           spillXxl.push(...rackPool);
         }
