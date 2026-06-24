@@ -240,7 +240,7 @@
 </div>
 
 <div class="tabs">
-  <div class="tab active" onclick="switchTab('sku')">SKU 儲位</div>
+  <div class="tab active" onclick="switchTab('sku')">儲區總覽</div>
   <div class="tab" onclick="switchTab('sales')">每日銷售</div>
   <div class="tab" onclick="switchTab('fw26')">26FW 新品</div>
   <div class="tab" onclick="switchTab('db')">資料庫</div>
@@ -947,6 +947,7 @@ async function handleUpload(event){
     await saveEPRData(dateLabel||new Date().toISOString().slice(0,10));
     histSave(dateLabel||new Date().toISOString().slice(0,10));
     checkMonthlyAutoSave();
+    ensureAislesFromDB();
     Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);
     renderAll();
     updateRelocStats();
@@ -974,6 +975,7 @@ async function loadEPRData(){
     buildCache();
     // buildCache 完成後重算 XX狀態（用新邏輯覆蓋舊存的值）
     DB.forEach(r=>{ r.XX狀態=getXXStatus(r); });
+    ensureAislesFromDB();
     Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);renderAll();updateRelocStats();return true;
   }catch(e){console.warn('EPR IDB load failed:',e);return false;}
 }
@@ -1010,6 +1012,35 @@ function loadAisleConfig(){
     const parsed=JSON.parse(saved);
     ['g1','g2','g3','g4'].forEach(g=>{if(!parsed[g])return;parsed[g].forEach(sr=>{const ex=AISLE_CONFIG[g].find(r=>r.走道===sr.走道);if(!ex)AISLE_CONFIG[g].push(sr);else ex['可用']=sr['可用'];});});
   }catch(e){}
+}
+// ★ 依 ERP 報表自動補登儲區總覽中缺少的走道（可用儲位預設 0，沿用 可用-已用<0 的反色警示）
+const ZONE_GROUP_MAP={B:'g1',A:'g1',F:'g1',C:'g2',D:'g2',E:'g2',P:'g3',M:'g3',L:'g4'};
+function aisleFromSlot(slot){
+  const code=String(slot||'').trim().toUpperCase().split('-')[0];
+  return /^[A-Z]\d+$/.test(code)?code:null;
+}
+function ensureAislesFromDB(){
+  if(!DB||!DB.length)return false;
+  const existing=new Set();
+  ['g1','g2','g3','g4'].forEach(g=>AISLE_CONFIG[g].forEach(a=>existing.add(a.走道)));
+  const seen=new Set();let added=0;
+  DB.forEach(r=>{
+    const code=aisleFromSlot(r.儲位);
+    if(!code||existing.has(code)||seen.has(code))return;
+    seen.add(code);
+    const group=ZONE_GROUP_MAP[code.charAt(0)]||'g1';
+    AISLE_CONFIG[group].push({走道:code,可用:0});
+    existing.add(code);added++;
+  });
+  if(added)saveAisleConfig();
+  return added>0;
+}
+// ★ 取得某 group 應顯示的區字母（預設順序 + 報表帶入的新區字母）
+function zoneLettersForGroup(groupId,preferred){
+  const letters=[...new Set((AISLE_CONFIG[groupId]||[]).map(a=>(a.走道||'').charAt(0)).filter(Boolean))];
+  const ordered=preferred.filter(l=>letters.includes(l));
+  const extras=letters.filter(l=>!preferred.includes(l)).sort();
+  return [...ordered,...extras];
 }
 function showDeleteAisleModal(){
   const list=document.getElementById('delete-aisle-list');list.innerHTML='';
@@ -1191,11 +1222,14 @@ function renderMergedGroup(tableId,groupId,zoneLetters){
   return{avail:totalAvail,used:totalUsed,zoneTotals:zoneTotals};
 }
 function renderSKUTables(){
-  const r1=renderMergedGroup('tbl-g1-merged','g1',['B','A','F']);
-  setHeaderTooltips('tbl-g1-merged',r1.zoneTotals,['B','A','F'],THRESHOLDS['g1']);
-  const r2=renderMergedGroup('tbl-g2-merged','g2',['C','D','E']);
-  setHeaderTooltips('tbl-g2-merged',r2.zoneTotals,['C','D','E'],THRESHOLDS['g2']);
-  const r3=renderMergedGroup('tbl-g34-merged','g3',['P','M']);
+  const z1=zoneLettersForGroup('g1',['B','A','F']);
+  const r1=renderMergedGroup('tbl-g1-merged','g1',z1);
+  setHeaderTooltips('tbl-g1-merged',r1.zoneTotals,z1,THRESHOLDS['g1']);
+  const z2=zoneLettersForGroup('g2',['C','D','E']);
+  const r2=renderMergedGroup('tbl-g2-merged','g2',z2);
+  setHeaderTooltips('tbl-g2-merged',r2.zoneTotals,z2,THRESHOLDS['g2']);
+  const z3=zoneLettersForGroup('g3',['P','M']);
+  const r3=renderMergedGroup('tbl-g34-merged','g3',z3);
   const g34tbody=document.querySelector('#tbl-g34-merged tbody');
   if(g34tbody){
     const thr4=THRESHOLDS['g4'];
@@ -1219,7 +1253,8 @@ function renderSKUTables(){
       r3.zoneTotals['L']={avail:lAvail,used:lUsed,empty:lEmpty,low:lLow};
     }
   }
-  setHeaderTooltips('tbl-g34-merged',r3.zoneTotals,['P','M','L'],THRESHOLDS['g3']);
+  const z34=[...z3,...zoneLettersForGroup('g4',['L'])];
+  setHeaderTooltips('tbl-g34-merged',r3.zoneTotals,z34,THRESHOLDS['g3']);
   renderSKUStats();renderFWSkuTable();if(DB.length>0)renderSeasonSKUTable();
 }
 function renderSKUStats(){
