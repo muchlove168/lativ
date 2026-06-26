@@ -2366,6 +2366,15 @@ function renderPlanner(){
 // ═══ 引擎常數 ═══
 const PLN_SIZE_TO_LAYER={'10':1,'20':2,'30':3,'40':4,'50':1,'60':2};
 const PLN_SIZE_NAME_TO_LAYER={'S':1,'M':2,'L':3,'XL':4,'XXL':1,'100':1,'110':1,'120':2,'130':3,'140':4,'150':1};
+// ★ 擺法 → 材積 (m³) 查表; 用於低庫存散戶配對「小材積優先」排序
+//   未列出的擺法視為 999 (永遠最後考慮)
+const PLN_LAYOUT_VOLUME={
+  A:1.334, B:0.909, C:1.819, D:2.214, E:2.316, F:2.316,
+  G:2.669, H:1.334, I:4.66,  J:2.316, K:5.747, L:2.57,
+  M:7.625, N:10.166, O:20.333, P:2.002, Q:3.389, R:2.57,
+  S:0.141, T:3.389, U:0,      V:172.088, W:3.53, X:4.236,
+  Y:63.54, Z:0.035
+};
 
 // ═══ 儲位解析 ═══
 function plnParseCell(cell){
@@ -3060,6 +3069,64 @@ function plnPackByFamily(cells,selected,config){
   return assignments;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ★ 低庫存散戶配對 plnPackScatteredLow
+// ═══════════════════════════════════════════════════════════════════
+// 用途: 低庫存模式下, 跳過 family-grouping 與 layer-match displacement,
+//       將散戶 SKU 直接配到目的走道的空格 (零 INTERNAL_DISPLACEMENT)
+// 規則 (Gordon 指定):
+//   - SKU 處理順序: (銷售庫存 + 架上數量) ASC; 量最少先挑位, 拿走最小材積
+//   - Cell 評分 (lower=better, lexicographic):
+//       1. vol           — PLN_LAYOUT_VOLUME[layout] 小材積優先
+//       2. adjConflict   — 避免相鄰同 7 碼 (mandatory base logic)
+//       3. layerMatch    — 目標層 (S/M/L/XL→1/2/3/4) 對齊優先, 但僅作 tiebreaker
+//       4. sameLayout    — 與來源同擺法優先
+//       5. col           — 欄號小者優先
+//   - 不 displace 既有 SKU: 若 layer 不對齊, 直接挑非對齊空格, 不挪動既存 SKU
+// 回傳: {sku: dstCell} map (可能為空 = 沒有空格)
+function plnPackScatteredLow(cells,selected,config){
+  if(!selected||!selected.length)return {};
+  if(!config.destination||!config.destination.length)return {};
+  // 排序: (銷售+架上) ASC, 再以 商品編號 為穩定 tie-break
+  const sorted=[...selected].sort((a,b)=>{
+    const sa=Number(a['銷售庫存']||0)+Number(a['架上數量']||0);
+    const sb=Number(b['銷售庫存']||0)+Number(b['架上數量']||0);
+    return sa-sb||String(a['商品編號']||'').localeCompare(String(b['商品編號']||''));
+  });
+  // skuMap 用於相鄰衝突檢查 (即時更新, 後續 SKU 看得到前面的 placement)
+  const skuMap=new Map();
+  Object.values(cells).forEach(cs=>{if(cs.sku)skuMap.set(cs.cell,cs.sku);});
+  const usedCells=new Set();
+  const assignments={};
+  for(const r of sorted){
+    const sku=String(r['商品編號']||'');
+    if(!sku)continue;
+    const targetL=plnGetTargetLayer(sku,r['尺寸']);
+    const srcCell=plnFindSkuCell(cells,sku,config.source);
+    const srcLayout=srcCell&&cells[srcCell]?cells[srcCell].layout:'';
+    let bestCell=null,bestScore=null;
+    Object.values(cells).forEach(cs=>{
+      if(cs.sku||cs.locked)return;
+      if(usedCells.has(cs.cell))return;
+      if(!config.destination.includes(cs.aisle))return;
+      const vol=(PLN_LAYOUT_VOLUME[cs.layout]!==undefined)?PLN_LAYOUT_VOLUME[cs.layout]:999;
+      const adj=plnAdjConflictByMap(skuMap,sku,cs.cell);
+      const layerMatch=(targetL!=null&&cs.layer===targetL)?0:1;
+      const sameLay=(srcLayout&&cs.layout===srcLayout)?0:1;
+      const score=[vol,adj,layerMatch,sameLay,cs.col];
+      if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){
+        bestScore=score;bestCell=cs;
+      }
+    });
+    if(bestCell){
+      assignments[sku]=bestCell.cell;
+      usedCells.add(bestCell.cell);
+      skuMap.set(bestCell.cell,sku);  // 即時更新, 影響後續 SKU 的相鄰衝突判定
+    }
+  }
+  return assignments;
+}
+
 // 引擎主執行 (★ 支援 initialCells: 多步驟串接時, 第 2+ step 從上一步結束狀態起算)
 function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
   // 多步驟: 若 initialCells 提供, 用 deep clone 作為起點; 否則從 STORAGE_MASTER 重建
@@ -3094,6 +3161,32 @@ function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
     const sku=String(r['商品編號']||'');
     return !moves.some(m=>m.phase==='XX_OVERFLOW'&&m.sku===sku);
   });
+  // ★ 低庫存散戶配對分支: 不做 family-grouping, 不做 layer-match displacement
+  //   走道內小材積優先 → adjConflict → layer 對齊 (僅 tiebreaker) → sameLayout → col
+  if(config.sortMode==='low'){
+    const lowAssigns=plnPackScatteredLow(cells,selectedAfterXX,config);
+    const entries=Object.entries(lowAssigns).sort((a,b)=>(a[1]<b[1]?-1:a[1]>b[1]?1:0));
+    entries.forEach(([sku,dstCell])=>{
+      const srcCell=plnFindSkuCell(cells,sku,config.source);
+      let srcInfo=null;
+      if(srcCell){
+        srcInfo=cells[srcCell].info;
+        cells[srcCell].sku=null;
+        cells[srcCell].info=null;
+      }
+      cells[dstCell].sku=sku;
+      cells[dstCell].info=srcInfo;
+      cells[dstCell].locked=true;
+      moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
+    });
+    const placed=new Set(Object.keys(lowAssigns));
+    const failed=[];
+    selectedAfterXX.forEach(r=>{
+      const sku=String(r['商品編號']||'');
+      if(!placed.has(sku))failed.push({kc:plnSkuKuan(sku),n:1});
+    });
+    return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells};
+  }
   const consec=plnPackByFamily(cells,selectedAfterXX,config);
   if(consec){
     // 直接套用 assignments → SOURCE_TO_DEST moves
