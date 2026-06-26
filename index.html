@@ -2156,12 +2156,22 @@ function forecastBuildSelectedSkus(selection){
     const st=String(r.code||'').substring(0,5);
     return st in includeStyleCat;
   });
-  const catLookup={};
+  // ★ 跨櫃 / ARRANGE_DATA 同 SKU 多筆 dedup: 保留首次出現的 row, 避免下游匯出/送 planner 重複
+  //   觸發情境: 1) 不同貨櫃勾選了同一款 2) 匯出儲位安排表中同 SKU 被預分配到多個預計倉位
+  const seenCodes=new Set();
+  const dedupedRows=[];
   rows.forEach(r=>{
+    const code=String(r.code||'').trim();
+    if(!code||seenCodes.has(code))return;
+    seenCodes.add(code);
+    dedupedRows.push(r);
+  });
+  const catLookup={};
+  dedupedRows.forEach(r=>{
     const st=String(r.code||'').substring(0,5);
     catLookup[r.code]=includeStyleCat[st]||'';
   });
-  return {rows, includeStyleCat, catLookup};
+  return {rows:dedupedRows, includeStyleCat, catLookup};
 }
 
 // 匯出待安排新品儲位報表 — 欄位: 商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 商品包材, 類別
