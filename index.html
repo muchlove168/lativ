@@ -3762,6 +3762,17 @@ function plnRunNewEngine(config,initialCells){
           String(a.color7).localeCompare(String(b.color7))
         );
 
+      // ★ CB 型走道(如 CBCCCC)偵測 + 架首 C 集合 (Gordon 確認):
+      //   小材積(B)欄若皆「孤立」(左右非小材積), 則每個 B 旁的「架首 C」(b-1) 應留給溢出對,
+      //   主碼避開它、改用內側 C → 溢出對(含50/60)可放架首 C 大材積, 整體更緊湊(不跨遠 B)。
+      const _smallSet=new Set(sortedCols.filter(c=>isSmallLayout(getColLayout(aisle,c))));
+      const isCBtype=_smallSet.size>0&&[...sortedCols.filter(c=>isSmallLayout(getColLayout(aisle,c)))].every(c=>!_smallSet.has(c-1)&&!_smallSet.has(c+1));
+      const firstCset=new Set();
+      if(isCBtype){
+        for(const b of _smallSet){ const fc=b-1; if(isBigLayout(getColLayout(aisle,fc)))firstCset.add(fc); }
+      }
+
+
       // ★ A材積降級 (Gordon 確認): G(大材積)欄不足以容納所有色時,
       //   把「款(5碼)全色全尺碼未到量總和」最低的款之色降到 A(小材積)；其餘維持佇列順序廣度優先排入 G。
       //   G 容量 = 本走道全空 G 欄總數; 超出的色數 = demoteN。
@@ -3833,7 +3844,8 @@ function plnRunNewEngine(config,initialCells){
         } else if(fullEmptyAs.length===1){
           poolCol=fullEmptyAs[0];
         }
-        const mainCols=fullEmptyGs;
+        // ★ CB 走道: 主碼避開架首 C(留給溢出對); 內側 C 不足時才由 PHASE D 用架首 C 補
+        const mainCols=fullEmptyGs.filter(c=>!firstCset.has(c));
         const gAssignments=[];
 
         // G col 分主碼 entries
@@ -3904,40 +3916,34 @@ function plnRunNewEngine(config,initialCells){
           const g=ovGroups.splice(pick,1)[0];
           placeOneSku(g.items[0].sku,aisle,h.col,4,g.donor.ku.cat);
         }
-        // ② 可用 bin: 小材積(B/A)欄連續空層 run 升冪; 每個 B 欄後「緊接其架首 C(c-1)」作就近補欄
-        //   (Gordon 確認: B 溢出欄填完後寧可用相鄰架首 C 補, 也不跳到遠的下一個 B → 溢出跨度最小)
-        //   其餘大材積 C 欄 append 末端作最終 fallback。
+        // ② 可用 bin: 「小材積 B + 架首 C(firstCset)」連續空層 run, 欄號升冪混合 → 低欄先填(最緊湊)。
+        //   (Gordon 確認: 架首 C 留給溢出, 對(含50/60)優先放架首 C 大材積、單碼優先放 B; 整批跨度最小、剩餘集中在後)
+        //   其餘大材積 C 欄(非架首C) append 末端作最終 fallback。
         const colRuns=(c)=>{ const free=emptyLayers(c); if(!free.length)return []; const out=[];let cur=[free[0]]; for(let k=1;k<free.length;k++){ if(free[k]===cur[cur.length-1]+1)cur.push(free[k]); else{out.push(cur);cur=[free[k]];} } out.push(cur);return out; };
-        const smallCols=[...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))).sort((a,b)=>a-b);
-        const bigSet=new Set([...allCols].filter(c=>isBigLayout(getColLayout(aisle,c))));
-        const usedBig=new Set();
+        const isBigCol=(c)=>isBigLayout(getColLayout(aisle,c));
+        const ovfBinCols=[...new Set([...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))||firstCset.has(c)))].sort((a,b)=>a-b);
         const bins=[];
-        for(const c of smallCols){
-          for(const run of colRuns(c))bins.push({col:c,run});
-          const adjC=c-1;   // 該 B 欄的架首 C (CBCCCC 中 B 在第2欄, 第1欄=B-1)
-          if(bigSet.has(adjC)&&!usedBig.has(adjC)){
-            for(const run of colRuns(adjC))bins.push({col:adjC,run});
-            usedBig.add(adjC);
-          }
-        }
-        for(const c of [...bigSet].sort((a,b)=>a-b)){
-          if(usedBig.has(c))continue;
-          for(const run of colRuns(c))bins.push({col:c,run});
-        }
-        // ③ 全走道 best-fit: 每 bin 用 0/1 knapsack(容量=run長度) 取「填滿層數最大→總未到量最大」的整組子集
+        for(const c of ovfBinCols)for(const run of colRuns(c))bins.push({col:c,run,isC:isBigCol(c)});
+        for(const c of [...allCols].filter(c=>isBigCol(c)&&!firstCset.has(c)).sort((a,b)=>a-b))
+          for(const run of colRuns(c))bins.push({col:c,run,isC:true});
+        // ③ 全走道 best-fit: 每 bin 用 0/1 knapsack(容量=run長度) 取「填滿層數最大→(材積偏好)→總未到量最大」的整組子集
+        //    材積偏好(Gordon): C bin 偏好成對(2碼)組、B bin 偏好單碼組 → 以小幅 bonus 體現, 不破壞填滿與密度。
         for(const bin of bins){
           if(!ovGroups.length)break;
           const R=bin.run.length;
           const cand=[];
           for(let i=0;i<ovGroups.length;i++) if(adjOKcol(ovGroups[i].c7,bin.col)) cand.push(i);
           if(!cand.length)continue;
-          // dp[w] = {pend, set:[groupIndex...]} 以剛好填滿 w 層的最佳(未到量)子集
-          const dp=new Array(R+1).fill(null); dp[0]={pend:0,set:[]};
+          const prefBonus=(gi)=>{ const sz=ovGroups[gi].items.length; return bin.isC?(sz>=2?1:0):(sz===1?1:0); };
+          // dp[w] = {pend, pref, set} 以剛好填滿 w 層的最佳子集 (先比 pref 再比 pend)
+          const dp=new Array(R+1).fill(null); dp[0]={pend:0,pref:0,set:[]};
           for(const gi of cand){
             const sz=ovGroups[gi].items.length; if(sz>R)continue;
-            const pd=ovGroups[gi].donor.totalPending||0;
+            const pd=ovGroups[gi].donor.totalPending||0; const pb=prefBonus(gi);
             for(let w=R;w>=sz;w--){
-              if(dp[w-sz]&&(!dp[w]||dp[w-sz].pend+pd>dp[w].pend)) dp[w]={pend:dp[w-sz].pend+pd,set:[...dp[w-sz].set,gi]};
+              if(!dp[w-sz])continue;
+              const np=dp[w-sz].pref+pb, ne=dp[w-sz].pend+pd;
+              if(!dp[w]||np>dp[w].pref||(np===dp[w].pref&&ne>dp[w].pend)) dp[w]={pend:ne,pref:np,set:[...dp[w-sz].set,gi]};
             }
           }
           let bw=0; for(let w=R;w>=1;w--){ if(dp[w]){bw=w;break;} }
