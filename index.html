@@ -3690,10 +3690,14 @@ function plnRunNewEngine(config,initialCells){
       return res;
     }
     function colFullyFree(c){return emptyLayers(c).length===4;}
+    // ★ 1.3a(Gordon 確認): 相鄰 = 欄位相鄰(col±1)。同款同色(color7)不可放在相鄰欄(任一層)。
+    //   (layer 參數保留相容呼叫端, 實際以「整欄任一層」判定)
     function adjConflict(col,layer,c7){
       for(const dc of [-1,1]){
-        const nb=cells[plnCellId(aisle,col+dc,layer)];
-        if(nb&&nb.sku&&String(nb.sku).substring(0,7)===c7)return true;
+        for(let L=1;L<=4;L++){
+          const nb=cells[plnCellId(aisle,col+dc,L)];
+          if(nb&&nb.sku&&String(nb.sku).substring(0,7)===c7)return true;
+        }
       }
       return false;
     }
@@ -3758,13 +3762,35 @@ function plnRunNewEngine(config,initialCells){
           String(a.color7).localeCompare(String(b.color7))
         );
 
+      // ★ A材積降級 (Gordon 確認): G(大材積)欄不足以容納所有色時,
+      //   把「款(5碼)全色全尺碼未到量總和」最低的款之色降到 A(小材積)；其餘維持佇列順序廣度優先排入 G。
+      //   G 容量 = 本走道全空 G 欄總數; 超出的色數 = demoteN。
+      //   ★ Gordon 確認 (v0.3): 降級以「款總和」為主鍵, 避免高款總和的多色款被誤降 A
+      //     (例: 某款全尺碼總和最高, 但拆成多色後每色看似偏低, 不應被降級)。
+      //   tie-break: 款總和→同款內色未到量低者→溢出碼少者(越接近純4碼,塞A越乾淨)→kc/color7。
+      const gCapTotal=racks.reduce((s,rk)=>s+rk.gCols.filter(c=>colFullyFree(c)).length,0);
+      const demoteN=Math.max(0,queue.length-gCapTotal);
+      if(demoteN>0){
+        const kuanPending={};
+        queue.forEach(e=>{kuanPending[e.kc]=(kuanPending[e.kc]||0)+(e.totalPending||0);});
+        const byPending=[...queue].sort((a,b)=>
+          ((kuanPending[a.kc]||0)-(kuanPending[b.kc]||0))||
+          (a.totalPending-b.totalPending)||
+          (a.size5Skus.length-b.size5Skus.length)||
+          String(a.kc).localeCompare(String(b.kc))||
+          String(a.color7).localeCompare(String(b.color7))
+        );
+        for(let i=0;i<demoteN&&i<byPending.length;i++)byPending[i]._forceA=true;
+      }
+
       let queueIdx=0;
       const spillXxl=[];   // 跨架待入集中區: [{donor,sku}]
       const hanging3=[];   // 待填 layer-4 的 3 碼款: [{col,rackIdx,entry}]
-      const deferredOverflow=[];   // ★ 因同層相鄰同色被擋下的溢位碼, 收尾交給 placeOverflowSafe
+      const deferredOverflow=[];   // (保留宣告; 全走道打包後多未使用)
+      const allOverflow=[];   // ★ 全走道溢出碼收集池: [{donor,sku}] (迴圈後統一打包)
 
       function takeNextFromQueue(){
-        while(queueIdx<queue.length&&(queue[queueIdx].placed||queue[queueIdx]._takenByFallback))queueIdx++;
+        while(queueIdx<queue.length&&(queue[queueIdx].placed||queue[queueIdx]._takenByFallback||queue[queueIdx]._forceA))queueIdx++;
         return queueIdx<queue.length?queue[queueIdx++]:null;
       }
       function findNextFullColInQueue(startIdx){
@@ -3818,11 +3844,11 @@ function plnRunNewEngine(config,initialCells){
           gAssignments.push({col:gc,entry:e,isFallback:false});
         }
 
-        // fallback A col 找下個 mainSkus.length===4 的 entry
+        // fallback A col: 只放「被降級(forceA)」的色 (未到量最低者), 不再proactively抓佇列下一個
+        //   未降級時不使用 fallbackCol 放主碼 → 避免把高未到量色誤塞 A 材積
         if(fallbackCol){
-          const idx=findNextFullColInQueue(queueIdx);
-          if(idx>=0){
-            const f=queue[idx];
+          const f=queue.find(e=>e._forceA&&!e.placed&&!e._takenByFallback&&e.mainSkus.length>=1);
+          if(f){
             f._takenByFallback=true;
             f.mainCol=fallbackCol;f.mainRackIdx=rack.idx;
             gAssignments.push({col:fallbackCol,entry:f,isFallback:true});
@@ -3838,110 +3864,87 @@ function plnRunNewEngine(config,initialCells){
           entry.placed=true;
         }
 
-        // 收集本架 XXL pool
-        const rackPool=[];
+        // ── 收集本架溢出碼 + 3碼款 hanging slot (全走道統一打包, 見迴圈後 GLOBAL OVERFLOW) ──
         for(const {entry} of gAssignments){
-          for(const x of entry.size5Skus)rackPool.push({donor:entry,sku:x});
+          for(const x of entry.size5Skus)allOverflow.push({donor:entry,sku:x});
         }
-
-        // 本架 hanging (3 碼款 layer-4 待填)
-        const newHangs=[];
         for(const {col,entry,isFallback} of gAssignments){
           if(entry.mainSkus.length===3&&!isFallback){
-            newHangs.push({col,rackIdx:rack.idx,entry});
+            const cs=cells[plnCellId(aisle,col,4)];
+            if(cs&&!cs.sku&&!cs.locked)hanging3.push({col,rackIdx:rack.idx,entry});
           }
-        }
-
-        // Step 1: 本架 hanging 優先吃本架 rackPool (Gordon 偏好: 同款配對 > 集中區滿)
-        //   ★ 守則: 只配對「放此 hanging 不違反同層相鄰同色」的 XXL
-        for(let hi=0; hi<newHangs.length && rackPool.length; ){
-          const h=newHangs[hi];
-          const cs=cells[plnCellId(aisle,h.col,4)];
-          if(!cs||cs.sku||cs.locked){newHangs.splice(hi,1);continue;}
-          const pi=rackPool.findIndex(it=>!adjConflict(h.col,4,it.donor.color7));
-          if(pi<0){hi++;continue;}   // 此 hanging 無可配對 XXL → 保留(留空或後續填)
-          const it=rackPool.splice(pi,1)[0];
-          placeOneSku(it.sku,aisle,h.col,4,it.donor.ku.cat);
-          newHangs.splice(hi,1);
-        }
-        // 沒填到的本架 hanging 加入跨架 hanging3
-        hanging3.push(...newHangs);
-
-        // Step 2: 跨架 hanging3 (上架留下的) 優先吃 spillXxl (★ 守則: 不違反同層相鄰同色)
-        let hIdx=0;
-        while(hIdx<hanging3.length&&spillXxl.length){
-          const h=hanging3[hIdx];
-          const cs=cells[plnCellId(aisle,h.col,4)];
-          if(!cs||cs.sku||cs.locked){hIdx++;continue;}
-          const pi=spillXxl.findIndex(it=>!adjConflict(h.col,4,it.donor.color7));
-          if(pi<0){hIdx++;continue;}
-          const it=spillXxl.splice(pi,1)[0];
-          placeOneSku(it.sku,aisle,h.col,4,it.donor.ku.cat);
-          hanging3.splice(hIdx,1);
-        }
-
-        // Step 3: 集中區放剩餘 spillXxl + rackPool (★ 同色溢出碼整組優先，避免跨 col 拆散)
-        if(poolCol){
-          const xxlSeq=[...spillXxl,...rackPool];
-          spillXxl.length=0;rackPool.length=0;
-          const freeLs=emptyLayers(poolCol);   // poolCol 目前可用層 (升冪)
-          const groups=groupSeqByDonor(xxlSeq);
-          let slotPtr=0;
-          while(slotPtr<freeLs.length&&groups.length){
-            const remain=freeLs.length-slotPtr;
-            let gi=0;
-            if(groups[0].items.length>remain){
-              // 下一組會被拆散 → 找後面可整組塞入 remain 的最大組 (best-fit；remain=1 即優先單碼色)
-              let best=-1;
-              for(let i=0;i<groups.length;i++){
-                if(groups[i].items.length<=remain&&(best<0||groups[i].items.length>groups[best].items.length))best=i;
-              }
-              if(best>=0)gi=best;   // best<0 → 無任何組可整組塞入，只能拆散 groups[0]
-            }
-            const g=groups.splice(gi,1)[0];
-            for(const it of g.items){
-              if(slotPtr>=freeLs.length){spillXxl.push(it);continue;}
-              const L=freeLs[slotPtr++];
-              // ★ 守則: poolCol 此層若與同色主碼同層相鄰 → 不放此處, 交給 resolver
-              if(adjConflict(poolCol,L,it.donor.color7)){deferredOverflow.push(it);continue;}
-              const cs=cells[plnCellId(aisle,poolCol,L)];
-              if(cs&&!cs.sku&&!cs.locked)placeOneSku(it.sku,aisle,poolCol,L,it.donor.ku.cat);
-              else deferredOverflow.push(it);
-            }
-          }
-          groups.forEach(g=>g.items.forEach(it=>spillXxl.push(it)));
-        } else {
-          spillXxl.push(...rackPool);
         }
       }
 
-      // 收尾 1: 仍有 hanging3 用 spillXxl 填 (★ 守則: 不違反同層相鄰同色)
-      for(let hi=0; hi<hanging3.length && spillXxl.length; ){
-        const h=hanging3[hi];
-        const cs=cells[plnCellId(aisle,h.col,4)];
-        if(!cs||cs.sku||cs.locked){hi++;continue;}
-        const pi=spillXxl.findIndex(it=>!adjConflict(h.col,4,it.donor.color7));
-        if(pi<0){hi++;continue;}
-        const it=spillXxl.splice(pi,1)[0];
-        placeOneSku(it.sku,aisle,h.col,4,it.donor.ku.cat);
-        hanging3.splice(hi,1);
-      }
-
-      // 收尾 2: 仍有 spillXxl + deferredOverflow → 以「非同層相鄰」就近排入 (placeOverflowSafe)
-      //   找不到任何非相鄰空格時, 最後手段強放任意空格 (避免漏排), 並記錄為相鄰例外
-      for(const it of [...spillXxl,...deferredOverflow]){
-        if(placeOverflowSafe(it))continue;
-        // 最後手段: 任意空格 (理論上極少發生; A col 偏好)
-        let done=false;
-        const colsSorted=[...allCols].sort((a,b)=>(isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)||a-b);
-        for(const c of colsSorted){
-          if(done)break;
-          for(let L=1;L<=4;L++){
-            const cs=cells[plnCellId(aisle,c,L)];
-            if(cs&&!cs.sku&&!cs.locked){placeOneSku(it.sku,aisle,c,L,it.donor.ku.cat);done=true;break;}
+      // ════════════════════════════════════════════════════════════
+      // GLOBAL OVERFLOW: 全走道一次打包 (Gordon 密度邏輯)
+      //   ① 同色溢出碼整組連續、不拆  ② 不同色湊滿整欄  ③ 剩餘集中在最後
+      //   ④ 真的湊不出才迫不得已拆     ⑤ 相鄰守則(1.3a): 不放同色主碼相鄰欄
+      //   3碼款 hanging(layer4) 只用「單碼溢出組」填, 不為 hanging 拆散成對溢出
+      // ════════════════════════════════════════════════════════════
+      {
+        // 溢出組: 以 donor 色分組, 維持碼順序
+        const ovGroups=[];
+        {
+          const seen=new Map();
+          for(const it of allOverflow){
+            const c7=it.donor.color7;
+            if(!seen.has(c7)){const g={donor:it.donor,c7,items:[]};seen.set(c7,g);ovGroups.push(g);}
+            seen.get(c7).items.push(it);
           }
         }
-        if(!done)failed.push({kc:it.donor.kc,n:it.donor.ku.n,reason:'NO_XXL_SLOT',cat:it.donor.ku.cat});
+        const adjOKcol=(c7,col)=>{ for(const dc of[-1,1])for(let L=1;L<=4;L++){const nb=cells[plnCellId(aisle,col+dc,L)];if(nb&&nb.sku&&String(nb.sku).substring(0,7)===c7)return false;} return true; };
+        // ① 3碼款 hanging(layer4): 優先用單碼組(n==1)填, 不拆成對
+        for(const h of hanging3){
+          const cs=cells[plnCellId(aisle,h.col,4)];
+          if(!cs||cs.sku||cs.locked)continue;
+          let pick=-1;
+          for(let i=0;i<ovGroups.length;i++){ if(ovGroups[i].items.length===1&&adjOKcol(ovGroups[i].c7,h.col)){pick=i;break;} }
+          if(pick<0)continue;
+          const g=ovGroups.splice(pick,1)[0];
+          placeOneSku(g.items[0].sku,aisle,h.col,4,g.donor.ku.cat);
+        }
+        // ② 可用 bin: 小材積(A/B)欄連續空層 run 升冪; 不足再 append 大材積剩餘
+        const colRuns=(c)=>{ const free=emptyLayers(c); if(!free.length)return []; const out=[];let cur=[free[0]]; for(let k=1;k<free.length;k++){ if(free[k]===cur[cur.length-1]+1)cur.push(free[k]); else{out.push(cur);cur=[free[k]];} } out.push(cur);return out; };
+        const smallCols=[...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))).sort((a,b)=>a-b);
+        const bigCols=[...allCols].filter(c=>isBigLayout(getColLayout(aisle,c))).sort((a,b)=>a-b);
+        const bins=[];
+        for(const c of smallCols)for(const run of colRuns(c))bins.push({col:c,run});
+        for(const c of bigCols)for(const run of colRuns(c))bins.push({col:c,run});
+        // ③ 全走道 best-fit: 每 bin 用 0/1 knapsack(容量=run長度) 取「填滿層數最大→總未到量最大」的整組子集
+        for(const bin of bins){
+          if(!ovGroups.length)break;
+          const R=bin.run.length;
+          const cand=[];
+          for(let i=0;i<ovGroups.length;i++) if(adjOKcol(ovGroups[i].c7,bin.col)) cand.push(i);
+          if(!cand.length)continue;
+          // dp[w] = {pend, set:[groupIndex...]} 以剛好填滿 w 層的最佳(未到量)子集
+          const dp=new Array(R+1).fill(null); dp[0]={pend:0,set:[]};
+          for(const gi of cand){
+            const sz=ovGroups[gi].items.length; if(sz>R)continue;
+            const pd=ovGroups[gi].donor.totalPending||0;
+            for(let w=R;w>=sz;w--){
+              if(dp[w-sz]&&(!dp[w]||dp[w-sz].pend+pd>dp[w].pend)) dp[w]={pend:dp[w-sz].pend+pd,set:[...dp[w-sz].set,gi]};
+            }
+          }
+          let bw=0; for(let w=R;w>=1;w--){ if(dp[w]){bw=w;break;} }
+          if(bw===0)continue;
+          // 高未到量組先放(靠前層)
+          const chosen=dp[bw].set.slice().sort((a,b)=>(ovGroups[b].donor.totalPending||0)-(ovGroups[a].donor.totalPending||0));
+          let ptr=0; const placed=[];
+          for(const gi of chosen){ const g=ovGroups[gi]; for(const it of g.items){const L=bin.run[ptr++]; placeOneSku(it.sku,aisle,bin.col,L,g.donor.ku.cat);} placed.push(g); }
+          for(const g of placed){const idx=ovGroups.indexOf(g); if(idx>=0)ovGroups.splice(idx,1);}
+        }
+        // ④ 仍未排(整組放不下任何 bin) → 迫不得已逐碼 placeOverflowSafe, 最後手段強放
+        for(const g of ovGroups){
+          for(const it of g.items){
+            if(placeOverflowSafe(it))continue;
+            let done=false;
+            const colsSorted=[...allCols].sort((a,b)=>(isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)||a-b);
+            for(const c of colsSorted){ if(done)break; for(let L=1;L<=4;L++){const cs=cells[plnCellId(aisle,c,L)]; if(cs&&!cs.sku&&!cs.locked){placeOneSku(it.sku,aisle,c,L,g.donor.ku.cat);done=true;break;}} }
+            if(!done)failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat});
+          }
+        }
       }
     }
 
@@ -3954,7 +3957,12 @@ function plnRunNewEngine(config,initialCells){
       const layers=e.mainSkus.map(s=>plnGetTargetLayer(s.code,s.size));
       if(layers.some(l=>l===null)||new Set(layers).size!==layers.length)continue;
       let target=null;
-      const sortedCols=[...allCols].sort((a,b)=>a-b);
+      // ★ PHASE D 材積偏好 (v0.3): 降級色(_forceA)偏小材積 A/B; 未降級色偏大材積 G/C, 避免高款色漏入 A
+      const sortedCols=[...allCols].sort((a,b)=>{
+        const am=getColLayout(aisle,a), bm=getColLayout(aisle,b);
+        const pref=(m)=>e._forceA?(isSmallLayout(m)?0:1):(isBigLayout(m)?0:1);
+        return pref(am)-pref(bm)||a-b;
+      });
       for(const c of sortedCols){
         const av=new Set(emptyLayers(c));
         if(layers.every(l=>av.has(l))&&layers.every(l=>!adjConflict(c,l,e.color7))){target=c;break;}
