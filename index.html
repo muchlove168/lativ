@@ -3904,13 +3904,26 @@ function plnRunNewEngine(config,initialCells){
           const g=ovGroups.splice(pick,1)[0];
           placeOneSku(g.items[0].sku,aisle,h.col,4,g.donor.ku.cat);
         }
-        // ② 可用 bin: 小材積(A/B)欄連續空層 run 升冪; 不足再 append 大材積剩餘
+        // ② 可用 bin: 小材積(B/A)欄連續空層 run 升冪; 每個 B 欄後「緊接其架首 C(c-1)」作就近補欄
+        //   (Gordon 確認: B 溢出欄填完後寧可用相鄰架首 C 補, 也不跳到遠的下一個 B → 溢出跨度最小)
+        //   其餘大材積 C 欄 append 末端作最終 fallback。
         const colRuns=(c)=>{ const free=emptyLayers(c); if(!free.length)return []; const out=[];let cur=[free[0]]; for(let k=1;k<free.length;k++){ if(free[k]===cur[cur.length-1]+1)cur.push(free[k]); else{out.push(cur);cur=[free[k]];} } out.push(cur);return out; };
         const smallCols=[...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))).sort((a,b)=>a-b);
-        const bigCols=[...allCols].filter(c=>isBigLayout(getColLayout(aisle,c))).sort((a,b)=>a-b);
+        const bigSet=new Set([...allCols].filter(c=>isBigLayout(getColLayout(aisle,c))));
+        const usedBig=new Set();
         const bins=[];
-        for(const c of smallCols)for(const run of colRuns(c))bins.push({col:c,run});
-        for(const c of bigCols)for(const run of colRuns(c))bins.push({col:c,run});
+        for(const c of smallCols){
+          for(const run of colRuns(c))bins.push({col:c,run});
+          const adjC=c-1;   // 該 B 欄的架首 C (CBCCCC 中 B 在第2欄, 第1欄=B-1)
+          if(bigSet.has(adjC)&&!usedBig.has(adjC)){
+            for(const run of colRuns(adjC))bins.push({col:adjC,run});
+            usedBig.add(adjC);
+          }
+        }
+        for(const c of [...bigSet].sort((a,b)=>a-b)){
+          if(usedBig.has(c))continue;
+          for(const run of colRuns(c))bins.push({col:c,run});
+        }
         // ③ 全走道 best-fit: 每 bin 用 0/1 knapsack(容量=run長度) 取「填滿層數最大→總未到量最大」的整組子集
         for(const bin of bins){
           if(!ovGroups.length)break;
