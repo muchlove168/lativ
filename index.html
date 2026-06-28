@@ -2655,7 +2655,7 @@ const PLN_PRIM = (function(){
 
 // ── 規格段落索引 + 落差/同步清單（機器可讀；給人與後續 session 快速定位）──
 const PLN_SPEC = {
-  doc: '排入引擎_基準規格.md', version: 'v0.9',
+  doc: '排入引擎_基準規格.md', version: 'v1.1',
   sections: [
     {id:'1.1',  status:'locked',  impl:'PLN_PRIM.sortBySizeCode',              desc:'尺碼碼即小→大排序依據'},
     {id:'1.2',  status:'locked',  impl:'PLN_PRIM.splitGroups/positionToLayer', flag:'useGroupSplit(階段1已切true)', desc:'每4碼切組＋位置→層（新品鐵則路徑已落地）'},
@@ -2678,6 +2678,7 @@ const PLN_SPEC = {
     {id:'1.2b-resid', status:'locked', desc:'(v0.8 階段7落地)殘run起點層2→best-fit打包以連續層配對，P06/C05 pairLayerViolations=0；6碼對落層12/34'},
     {id:'7-density', status:'locked', impl:'runAgEngine PHASE A density(唯一路徑)', desc:'(v0.8 階段7)最小架數逐架填滿：AA彈性配置(溢出先吃A、剩餘放整色降A)、純4碼孤立G、降A色XXL非相鄰；降A選色=色未到量最低'},
     {id:'1.5-cleanup', status:'locked', impl:'runAgEngine 密度路徑唯一化', desc:'(v0.9 階段8)清舊：移除 useRoundRobin 關閉分支(legacy 逐架 fill)、poolCol/hanging3/queueIdx 等舊機制；PHASE D 與主路徑一律切組定層(entry.groups)，不再呼叫 plnGetTargetLayer；plnGetTargetLayer/PLN_SIZE_TO_LAYER 收斂為高/低庫存引擎 + §1.2 useGroupSplit-off 安全網專用'},
+    {id:'1.4-proximity', status:'locked', impl:'runAgEngine PHASE A isCBaisle=false 分支：buildAgRacks + 逐架 carry', desc:'(v1.1 階段11)新品 AG 走道 XXL 溢出「就近 + 嚴格非相鄰」：擺法基準架模型(AA起架/最多4G、缺AA的GGGG=4格短架)；降A色分散(一正常架一降A、取鄰G之A欄、保留非鄰G之A欄給溢出)；本架保留A欄→最近鄰架A欄→短架G欄備援；§1.3a 嚴格(連自己主碼↔自己溢出也不相鄰)。CB走道(CBCCCC,如C05)維持架首C路徑零回歸。P06 最遠距離12→5、0違規'},
   ],
   // 落差清單：模式現行偏離規格之處 + 對齊方式（翻旗標 / 待重寫）。
   gaps: [
@@ -4499,6 +4500,26 @@ function plnRunNewEngine(config,initialCells){
       // §3.5b CB 型偵測 + 架首 C 留位 → 委派單一來源 PLN_PRIM
       const _smallCols=sortedCols.filter(c=>isSmallLayout(getColLayout(aisle,c)));
       const firstCset=PLN_PRIM.computeFirstCset(_smallCols,(c)=>getColLayout(aisle,c));
+      const isCBaisle=PLN_PRIM.detectCBType(_smallCols); // CB(CBCCCC,如C05)→架首C路徑；AG(AAGGGG,如P06)→就近溢出路徑
+
+      // ★ 擺法基準的「架」模型（取代寫死的 col 號 ÷6）：AG 走道 = 連續A欄(AA) + 之後最多4個G欄為一架；
+      //   夾在正常架之間、缺AA的G段 = 被柱子吃掉2格的「短架」(isShort, 無自有A欄)。
+      //   §0/§B：短架的G色溢出沒有同架A欄，需溢到最近鄰架A欄；A欄不足時短架G欄可作溢出備援。
+      function buildAgRacks(){
+        const sorted=[...allCols].sort((a,b)=>a-b);
+        const rk=[]; let i=0;
+        while(i<sorted.length){
+          const c0=sorted[i];
+          if(!isSmallLayout(getColLayout(aisle,c0))&&!isBigLayout(getColLayout(aisle,c0))){ i++; continue; }
+          const rack={cols:[],aCols:[],gCols:[],isShort:false};
+          while(i<sorted.length&&isSmallLayout(getColLayout(aisle,sorted[i]))){ rack.aCols.push(sorted[i]); rack.cols.push(sorted[i]); i++; }
+          let g=0;
+          while(i<sorted.length&&isBigLayout(getColLayout(aisle,sorted[i]))&&g<4){ rack.gCols.push(sorted[i]); rack.cols.push(sorted[i]); i++; g++; }
+          rack.isShort=rack.aCols.length<2;
+          rk.push(rack);
+        }
+        return rk;
+      }
 
 
       // ★ A材積降級 (Gordon 確認): G(大材積)欄不足以容納所有色時,
@@ -4604,20 +4625,82 @@ function plnRunNewEngine(config,initialCells){
             putGroup(e,e.groups[k],col);
           }
         }
-        // ── 降 A 色：整色主碼放小材積欄（位置→層，footprint 升冪，§1.3c 非相鄰）──
-        for(const e of remaining){
-          if(!e._forceA||e.placed||!e.groups.length)continue;
-          for(let k=0;k<e.groups.length;k++){
-            const sc=nextCol(smallColPool,e.color7);
-            if(sc==null)break;
-            putGroup(e,e.groups[k],sc);
+        if(isCBaisle){
+          // ── 降 A 色：整色主碼放小材積欄（位置→層，footprint 升冪，§1.3c 非相鄰）──
+          for(const e of remaining){
+            if(!e._forceA||e.placed||!e.groups.length)continue;
+            for(let k=0;k<e.groups.length;k++){
+              const sc=nextCol(smallColPool,e.color7);
+              if(sc==null)break;
+              putGroup(e,e.groups[k],sc);
+            }
           }
-        }
-        // 溢出碼收集 → allOverflow（GLOBAL OVERFLOW 統一打包；溢出先吃剩餘 A 容量）
-        //   含純溢出色(n≤3，§3.7 暫當溢出)；有主碼色僅在已排入時收集。
-        for(const e of colorEntries){
-          if(e.groups.length>0){ if(e.placed)for(const x of e.size5Skus)allOverflow.push({donor:e,sku:x}); }
-          else { for(const x of e.size5Skus)allOverflow.push({donor:e,sku:x}); }
+          // 溢出碼收集 → allOverflow（GLOBAL OVERFLOW 統一打包；溢出先吃剩餘 A 容量）
+          //   含純溢出色(n≤3，§3.7 暫當溢出)；有主碼色僅在已排入時收集。
+          for(const e of colorEntries){
+            if(e.groups.length>0){ if(e.placed)for(const x of e.size5Skus)allOverflow.push({donor:e,sku:x}); }
+            else { for(const x of e.size5Skus)allOverflow.push({donor:e,sku:x}); }
+          }
+        } else {
+          // ═══ AG 走道（AAGGGG）：降A分散 + XXL溢出就近且嚴格非相鄰（Gordon 2026-06-28）═══
+          //   ① 降A色分散：一個正常架放一個降A色；降A取「鄰G的A欄」，把「非鄰G的A欄」留給該架溢出。
+          //   ② XXL就近：rack-by-rack 帶 carry——本架溢出先填本架保留A欄，滿/相鄰擋→carry 到最近鄰架。
+          //   ③ 嚴格非相鄰(§1.3a)：placeOneSku 前以 adjConflict(col±1 同 color7) 把關，連自己主碼也不相鄰。
+          //   ④ A欄不足→短架G欄備援(仍守非相鄰)→placeOverflowSafe 最後手段。
+          const racks=buildAgRacks();
+          const demoteColors=remaining.filter(e=>e._forceA&&!e.placed&&e.groups.length>0);
+          const demoteByRack=new Map(); let di=0;
+          const normalRis=racks.map((rk,ri)=>({rk,ri})).filter(x=>x.rk.aCols.filter(c=>colFullyFree(c)).length>=2).map(x=>x.ri);
+          for(const ri of normalRis){ if(di>=demoteColors.length)break; demoteByRack.set(ri,demoteColors[di++]); }
+          for(let ri=0;ri<racks.length&&di<demoteColors.length;ri++){ // demoteN>正常架數：補放任何有空A欄的架
+            if(demoteByRack.has(ri))continue;
+            if(racks[ri].aCols.some(c=>colFullyFree(c)))demoteByRack.set(ri,demoteColors[di++]);
+          }
+          const tryPlaceOverflowAt=(col,it)=>{
+            for(const L of emptyLayers(col).sort((a,b)=>a-b)){
+              if(adjConflict(col,L,it.donor.color7))continue;
+              if(placeOneSku(it.sku,aisle,col,L,it.donor.ku.cat))return true;
+            }
+            return false;
+          };
+          const shortGcols=[];
+          racks.forEach(rk=>{ if(rk.aCols.filter(c=>colFullyFree(c)).length<2)rk.gCols.forEach(c=>{ if(colFullyFree(c))shortGcols.push(c); }); });
+          // 放降A主碼 + 決定每架保留(溢出)A欄
+          racks.forEach((rk,ri)=>{
+            const aFree=rk.aCols.filter(c=>colFullyFree(c)).sort((a,b)=>a-b);
+            const demote=demoteByRack.get(ri);
+            if(demote){
+              const adjToG=c=>rk.gCols.some(g=>Math.abs(g-c)===1);
+              let demoteCol=aFree.find(c=>adjToG(c)); if(demoteCol==null)demoteCol=aFree[aFree.length-1];
+              const used=[demoteCol];
+              for(let k=0;k<demote.groups.length;k++){
+                const col=k===0?demoteCol:nextCol(smallColPool,demote.color7);
+                if(col==null)break; putGroup(demote,demote.groups[k],col); if(k>0)used.push(col);
+              }
+              rk._reserved=aFree.filter(c=>!used.includes(c)); rk._demoteEntry=demote;
+            } else { rk._reserved=aFree; }
+          });
+          // 溢出：逐架帶 carry
+          let carry=[];
+          racks.forEach(rk=>{
+            const reserved=rk._reserved||[];
+            const ownItems=[];
+            for(const c of rk.gCols){ const donor=colorEntries.find(e=>e.placed&&e.mainCol===c&&e.size5Skus.length>0); if(donor)donor.size5Skus.forEach(sku=>ownItems.push({sku,donor})); }
+            if(rk._demoteEntry&&rk._demoteEntry.size5Skus.length)rk._demoteEntry.size5Skus.forEach(sku=>ownItems.push({sku,donor:rk._demoteEntry}));
+            const queue=[...carry,...ownItems]; carry=[];
+            for(const it of queue){ let ok=false; for(const col of reserved){ if(tryPlaceOverflowAt(col,it)){ok=true;break;} } if(!ok)carry.push(it); }
+          });
+          // 純溢出色（n≤3，無主碼組）也需排
+          for(const e of colorEntries){ if(e.groups.length===0&&e.size5Skus.length){ for(const x of e.size5Skus)carry.push({sku:x,donor:e}); } }
+          // 殘餘 carry → 全走道最近非相鄰A欄 → 短架G欄備援 → placeOverflowSafe
+          for(const it of carry){
+            let ok=false;
+            const aAll=[...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))).sort((a,b)=>Math.abs(a-(it.donor.mainCol||a))-Math.abs(b-(it.donor.mainCol||b))||a-b);
+            for(const col of aAll){ if(tryPlaceOverflowAt(col,it)){ok=true;break;} }
+            if(!ok)for(const col of shortGcols){ if(tryPlaceOverflowAt(col,it)){ok=true;break;} }
+            if(!ok)ok=placeOverflowSafe(it);
+            if(!ok)failed.push({kc:it.donor.kc,n:it.donor.ku.n,reason:'NO_XXL_SLOT',cat:it.donor.ku.cat});
+          }
         }
       }
 
