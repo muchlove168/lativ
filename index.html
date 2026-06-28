@@ -2347,8 +2347,11 @@ async function handlePlannerMasterUpload(event){
 }
 
 // ═══ 溢位區 (XX/TX) ERP 報表上傳 ═══
-// 把 XX-/TX- 儲位注入 STORAGE_MASTER（專用 sheet key）+ 走道報表（標記 _ovfUpload 便於清除），
-// plnGetOverflowAisles() 即可自 master 偵測 XX/TX → 自動填入引擎入口 config.overflow。
+// ★ 與「儲位釋放」tab 的 XX/TX EPR 報表為同一份、同欄位（商品編號/商品名稱/顏色/尺寸/儲位/
+//   未抓貨/銷售庫存/架上數量/商品材積，filter XX-/TX-；保留空儲位＝儲位有值但商品編號空白）。
+//   注入：①STORAGE_MASTER 專用 sheet key＝全部 XX/TX 儲位（含空格＝承接容量），擺法若 儲位總表
+//   已有則沿用、否則留空（空儲位排序退為欄號）；②走道報表＝有商品編號的占用列（標記 _ovfUpload）。
+//   plnGetOverflowAisles() 即自 master 偵測 XX/TX → 自動填入引擎入口 config.overflow。
 const PLN_OVERFLOW_SHEET_KEY='溢位區(XX/TX)';
 async function handlePlannerOverflowUpload(event){
   const file=event.target.files[0];if(!file)return;
@@ -2357,26 +2360,39 @@ async function handlePlannerOverflowUpload(event){
     try{
       const data=new Uint8Array(e.target.result);
       const wb=XLSX.read(data,{type:'array'});
-      const slots=[];const invRows=[];const seenSlot=new Set();
+      const raw=[];
       wb.SheetNames.forEach(sn=>{
-        const ws=wb.Sheets[sn];
-        const arr=XLSX.utils.sheet_to_json(ws,{defval:''});
-        arr.forEach(r=>{
-          const slot=String(r['儲位']||'').trim();
-          if(!slot||!(slot.startsWith('XX-')||slot.startsWith('TX-')))return;
-          const layout=String(r['擺法']||r['儲位擺法']||r['擺放方式']||'').trim();
-          if(!seenSlot.has(slot)){slots.push({slot,layout});seenSlot.add(slot);}
-          if(String(r['商品編號']||'').trim())invRows.push(Object.assign({},r,{_ovfUpload:true}));
-        });
+        XLSX.utils.sheet_to_json(wb.Sheets[sn],{defval:''}).forEach(r=>raw.push(r));
       });
-      if(!slots.length){alert('溢位區報表未偵測到 XX-/TX- 儲位（請確認含「儲位」「擺法」欄）');event.target.value='';return;}
+      // 格式驗證（比照儲位釋放 XX/TX EPR 報表）
+      if(typeof validateReportFormat==='function'){
+        const v=validateReportFormat(raw,['商品編號','商品名稱','儲位','銷售庫存','架上數量'],'溢位區 XX/TX EPR 報表');
+        if(!v.ok){alert(v.msg);event.target.value='';return;}
+      }
+      // 既有 master 的 擺法 查表（若 儲位總表 已含 XX/TX 擺法則沿用）
+      const existingLayout={};
+      Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(s=>{if(s&&s.slot&&s.layout)existingLayout[s.slot]=s.layout;}));
+      const slots=[];const invRows=[];const seenSlot=new Set();
+      raw.forEach(r=>{
+        const slot=String(r['儲位']||'').trim();
+        if(!slot||!(slot.startsWith('XX-')||slot.startsWith('TX-')))return;
+        if(!seenSlot.has(slot)){slots.push({slot,layout:existingLayout[slot]||''});seenSlot.add(slot);}
+        const sku=String(r['商品編號']||'').trim();
+        if(sku)invRows.push({  // 占用列 → 走道報表（欄位逐欄比照儲位釋放 handleXXUpload）
+          '商品編號':sku,'商品名稱':r['商品名稱']||'','顏色':r['顏色']||'','尺寸':r['尺寸']||'',
+          '儲位':slot,'未抓貨':+r['未抓貨']||0,'銷售庫存':+r['銷售庫存']||0,'架上數量':+r['架上數量']||0,
+          '未到量':0,'商品材積':+r['商品材積']||0,_ovfUpload:true});  // 未到量：XX/TX 報表無此欄→0（§1.7 候選取自目的走道列，非此 XX/TX 占用列，不受影響）
+      });
+      if(!slots.length){alert('溢位區報表未偵測到 XX-/TX- 儲位（請確認為儲位釋放 tab 的同一份 XX/TX 報表）');event.target.value='';return;}
       STORAGE_MASTER[PLN_OVERFLOW_SHEET_KEY]=slots;
       AISLE_REPORT_DATA=AISLE_REPORT_DATA.filter(r=>!r._ovfUpload).concat(invRows);
       try{await idbPut('storage_master_sheets',STORAGE_MASTER);}catch(err){}
       try{await idbPut('aisle_report_rows',AISLE_REPORT_DATA);}catch(err){}
       const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
       try{localStorage.setItem('planner_overflow_upload_date',today);localStorage.setItem('planner_overflow_count',String(slots.length));}catch(err){}
+      const occ=invRows.length,empty=slots.length-occ;
       renderPlanner();
+      console.log(`[溢位區] 載入 ${slots.length} 個 XX/TX 儲位（占用 ${occ} / 空 ${empty}）`);
     }catch(err){alert('解析失敗：'+err.message);}
     event.target.value='';
   };
@@ -8714,7 +8730,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
         <button class="upload-btn" id="planner-master-clear-btn" onclick="clearPlannerMaster()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-        <button class="upload-btn" onclick="document.getElementById('planner-overflow-input').click()" style="background:#784c96;color:#fff" title="XX/TX 溢位區 ERP 報表：儲位+擺法+商品編號/銷售庫存/未到量。注入 STORAGE_MASTER 與走道報表，自動填入 config.overflow">⬆ 溢位區 XX/TX</button>
+        <button class="upload-btn" onclick="document.getElementById('planner-overflow-input').click()" style="background:#784c96;color:#fff" title="XX/TX 溢位區 ERP 報表：與「儲位釋放」tab 的 XX/TX 報表為同一份、同欄位（商品編號/商品名稱/顏色/尺寸/儲位/未抓貨/銷售庫存/架上數量/商品材積）。注入 STORAGE_MASTER 與走道報表，自動填入 config.overflow">⬆ 溢位區 XX/TX</button>
         <input type="file" id="planner-overflow-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerOverflowUpload(event)">
         <span id="planner-overflow-status" style="font-size:11px;color:var(--text3)">未上傳</span>
         <button class="upload-btn" id="planner-overflow-clear-btn" onclick="clearPlannerOverflow()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
