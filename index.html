@@ -2446,6 +2446,10 @@ function renderPlanner(){
 }
 
 // ═══ 引擎常數 ═══
+// §1.5（階段8 定案）：PLN_SIZE_TO_LAYER / plnGetTargetLayer 為「尺碼碼→固定層」映射，
+//   保留作【高/低庫存引擎】定層原語 + 新品 §1.2 useGroupSplit=OFF 零回歸安全網專用。
+//   ★ 新品「切組(useGroupSplit on)＋密度(§7)」主路徑已全面改用 entry.groups 的「位置→層」，
+//     不再呼叫本映射（含 PHASE D fallback 亦已改切組定層）。
 const PLN_SIZE_TO_LAYER={'10':1,'20':2,'30':3,'40':4,'50':1,'60':2};
 const PLN_SIZE_NAME_TO_LAYER={'S':1,'M':2,'L':3,'XL':4,'XXL':1,'100':1,'110':1,'120':2,'130':3,'140':4,'150':1};
 // ★ 擺法 → 材積 (m³) 查表; 用於低庫存散戶配對「小材積優先」排序
@@ -2610,14 +2614,13 @@ const PLN_PRIM = (function(){
       (x.layer - y.layer));
   }
 
-  // ═══ §3.4a  A 材積降級：款(5碼)未到量總和最低者優先降 A ═══
+  // ═══ §3.4a  A 材積降級：以「色」未到量總和最低者優先降 A ═══
+  //   ★ Gordon 2026-06-28 改判：覆寫舊「款(5碼)總和」主鍵，改為「色(color7)」層級。
+  //   高未到量(快銷)色留 G；色未到量低者優先整色降 A，不再因同款其他色拉高款總和而被保護。
   // entries: [{kc, color7, totalPending, overflowLen}] → 回傳「降級優先序」陣列(最該降在前)。
   function demoteOrder(entries){
-    const kuanPending={};
-    entries.forEach(e=>{ kuanPending[e.kc]=(kuanPending[e.kc]||0)+(e.totalPending||0); });
     return [...entries].sort((a,b)=>
-      ((kuanPending[a.kc]||0)-(kuanPending[b.kc]||0)) ||   // 款總和升冪（主鍵）
-      ((a.totalPending||0)-(b.totalPending||0)) ||          // 同款內色未到量低者
+      ((a.totalPending||0)-(b.totalPending||0)) ||          // 色未到量總和升冪（主鍵）
       ((a.overflowLen||0)-(b.overflowLen||0)) ||            // 溢出碼少者（塞 A 較乾淨）
       String(a.kc).localeCompare(String(b.kc)) ||
       String(a.color7).localeCompare(String(b.color7)));
@@ -2652,33 +2655,35 @@ const PLN_PRIM = (function(){
 
 // ── 規格段落索引 + 落差/同步清單（機器可讀；給人與後續 session 快速定位）──
 const PLN_SPEC = {
-  doc: '排入引擎_基準規格.md', version: 'v0.7',
+  doc: '排入引擎_基準規格.md', version: 'v0.9',
   sections: [
     {id:'1.1',  status:'locked',  impl:'PLN_PRIM.sortBySizeCode',              desc:'尺碼碼即小→大排序依據'},
     {id:'1.2',  status:'locked',  impl:'PLN_PRIM.splitGroups/positionToLayer', flag:'useGroupSplit(階段1已切true)', desc:'每4碼切組＋位置→層（新品鐵則路徑已落地）'},
-    {id:'1.3',  status:'locked',  impl:'runAgEngine round-robin(useRoundRobin)', flag:'useRoundRobin(階段1已切true)', desc:'主碼組序 k 全走道廣度優先＋§1.3c空一欄（已落地）'},
+    {id:'1.3',  status:'locked',  impl:'runAgEngine 密度切組(唯一新品路徑)', flag:'useRoundRobin(階段8已退役為 no-op)', desc:'主碼組序 k 全走道廣度優先＋§1.3c空一欄（已落地）；階段8 起為唯一路徑'},
     {id:'1.3a', status:'locked',  impl:'PLN_PRIM.adjConflict',                 desc:'相鄰=col±1 整欄任一層同色7衝突'},
     {id:'1.3b', status:'locked',  impl:'PLN_PRIM.queueOrder',                  desc:'佇列 kc→color7 升冪'},
     {id:'1.4',  status:'locked',  impl:'PLN_PRIM.groupSeqByDonor',             desc:'溢出碼 best-fit 補洞'},
     {id:'1.4a', status:'locked',  impl:'PLN_PRIM.overflowSafeSort',            desc:'先非相鄰→最近；同色連續次要'},
     {id:'1.5',  status:'locked',  impl:'PLN_PRIM.isBig/isSmallLayout',         desc:'童成分流；A/B小材積 G/C大材積'},
-    {id:'3.4a', status:'locked',  impl:'PLN_PRIM.demoteOrder/demoteN',         desc:'A材積降級：款總和最低降A'},
+    {id:'3.4a', status:'locked',  impl:'PLN_PRIM.demoteOrder/demoteN',         desc:'A材積降級：色未到量最低降A(Gordon 2026-06-28 改判，覆寫舊款總和)'},
     {id:'3.5a', status:'locked',  impl:'PLN_PRIM.queueOrder',                  desc:'溢出階段沿用主碼佇列色序'},
     {id:'3.5b', status:'locked',  impl:'PLN_PRIM.detectCBType/computeFirstCset', desc:'架首C留位＋全走道打包'},
     {id:'5a',   status:'locked',  impl:'plnDispatchComplexity/plnFindHoleFill/plnComplexityConcentrate/plnComplexityConsolidate', flag:"config.complexity('sort'|'match'|'color'|'kuan'|'consolidate')", desc:'(階段3)五級齊全：最低=找洞塞_排序/次低=找洞塞_匹配/中等=以色集中/次高=以款集中/最高=集中連續空位'},
-    {id:'1.2b-adj', status:'locked', impl:'plnFindHoleFill(opts.match)/plnAssignColorToColumn', desc:'(階段3)儲位調整碼對層彈性：_匹配碼對層soft tiebreak、≥3碼同欄碼序對層(條件充裕對、不足彈性)'},
+    {id:'1.2b-adj', status:'locked', impl:'plnFindHoleFill(opts.match)/plnAssignColorToColumn', desc:'(階段3；Gordon 2026-06-28 確認鎖定)儲位調整碼對層彈性：_匹配碼對層soft tiebreak、≥3碼同欄碼序對層(條件充裕對、不足彈性)、中等/次高其餘零散SKU一律走找洞塞_匹配'},
     {id:'1.6',  status:'locked',  impl:'plnComplexityConsolidate→plnRunInternalEngine/plnApplyOverflowZone', desc:'(階段4)最低/次低/中等/次高不主動位移；最高=借內部整理騰位；目的走道位置不夠→挑既有SKU移溢位區(§1.7)已落地；新品永不被位移、locked防連鎖'},
     {id:'1.7',  status:'locked',  impl:'plnApplyOverflowZone/plnIdentifyOverflowCandidates/plnOverflowAisleFor/plnOverflowEmpties', flag:'config.overflow=[\'TX\',\'XX\']', desc:'(階段4)溢位區TX+XX自動承接：未到≤10且銷售≤6/銷售少優先移出；TX供L區/XX其他；空儲位材積最大優先排入；套用於每一複雜度等級'},
     {id:'1.8',  status:'todo',    desc:'包材→走道對應表（待補）'},
     {id:'3.5c', status:'pending', desc:'溢出碼高未到量→大材積C精修（待Gordon定）'},
-    {id:'3.7',  status:'locked',  desc:'(v0.7鎖定)pending不影響順序；1~3碼色可主可溢(條件足當主、剩餘層匹配同批5碼款、大材積不足降溢出層123)—新品引擎落地待重寫期'},
-    {id:'1.2b-resid', status:'locked', desc:'(v0.7鎖定)殘run起點層2→先用同批5碼款碼5消化奇數起點再排6碼款，硬保證6碼對層12/34—新品溢出指派落地待重寫期'},
+    {id:'3.7',  status:'locked',  desc:'(v0.8 階段7落地)pending不影響順序；1~3碼色當溢出由全走道best-fit打包；GLOBAL OVERFLOW 已實作'},
+    {id:'1.2b-resid', status:'locked', desc:'(v0.8 階段7落地)殘run起點層2→best-fit打包以連續層配對，P06/C05 pairLayerViolations=0；6碼對落層12/34'},
+    {id:'7-density', status:'locked', impl:'runAgEngine PHASE A density(唯一路徑)', desc:'(v0.8 階段7)最小架數逐架填滿：AA彈性配置(溢出先吃A、剩餘放整色降A)、純4碼孤立G、降A色XXL非相鄰；降A選色=色未到量最低'},
+    {id:'1.5-cleanup', status:'locked', impl:'runAgEngine 密度路徑唯一化', desc:'(v0.9 階段8)清舊：移除 useRoundRobin 關閉分支(legacy 逐架 fill)、poolCol/hanging3/queueIdx 等舊機制；PHASE D 與主路徑一律切組定層(entry.groups)，不再呼叫 plnGetTargetLayer；plnGetTargetLayer/PLN_SIZE_TO_LAYER 收斂為高/低庫存引擎 + §1.2 useGroupSplit-off 安全網專用'},
   ],
   // 落差清單：模式現行偏離規格之處 + 對齊方式（翻旗標 / 待重寫）。
   gaps: [
     {mode:'新品 runAgEngine', section:'1.2', gap:'(階段1已修)切組路徑落地，useGroupSplit 預設 true；翻 false 回退舊映射', fix:'已完成；保留旗標作回歸安全網'},
-    {mode:'新品 runAgEngine', section:'1.3', gap:'(階段1已修)全走道round-robin+§1.3c落地，useRoundRobin 預設 true', fix:'已完成；保留旗標作回歸安全網'},
-    {mode:'新品 runAgEngine', section:'1.5', gap:'切組路徑下 hanging3 不再產生(為空)；poolCol 僅舊路徑(flags off)使用。(階段5評估)暫不移除：PLN_SIZE_TO_LAYER/plnGetTargetLayer 仍為高/低庫存引擎載重(plnPlaceGroup位移、plnPackByFamily)，且 flags-off 為 snap_off 回歸安全網', fix:'新品引擎重寫期：切到切組路徑後再刪 poolCol/hanging3，並把 plnGetTargetLayer 收斂進 PLN_PRIM'},
+    {mode:'新品 runAgEngine', section:'1.3', gap:'(階段8 已收尾)密度切組為唯一新品路徑；useRoundRobin 關閉分支已移除、旗標退役為 no-op', fix:'已完成（階段8）'},
+    {mode:'新品 runAgEngine', section:'1.5', gap:'(階段8 已落地)poolCol/hanging3/legacy 逐架 fill 已刪除；溢出走 GLOBAL OVERFLOW 正規通道；plnGetTargetLayer 不再供新品主路徑/PHASE D 使用', fix:'已完成（階段8 清舊）'},
     {mode:'儲位調整/高低庫存 plnAdjConflict*', section:'1.3a', gap:'相鄰判定=同層，規格鎖定為整欄任一層', fix:'PLN_SPEC_FLAGS.adjAllLayerForAdjust=true'},
     {mode:'架邊界 slice(i,i+6)', section:'0/B', gap:'假設每架6col，實際少數4col', fix:'待全儲區貨架表(§B)'},
   ],
@@ -3646,10 +3651,10 @@ function plnFindHoleFill(config, ctx, opts){
  *   中等('color')：挑零散 SKU + 同色且碼數 ≥3（可不齊全，如碼123/234/125）。
  *     ‧ 同色 ≥3 碼者「必須進同一儲位的不同層」（硬保證：一色佔一欄、碼分散到不同層）。
  *     ‧ 同款不同色「不強迫相鄰」（以色為單位，各色獨立挑欄）。
- *     ‧ 其餘零散 SKU（同色 <3 碼）走找洞塞_匹配。
+ *     ‧ 其餘零散 SKU（同色 <3 碼）走找洞塞_匹配（Gordon 2026-06-28 確認鎖定）。
  *   次高('kuan')：同中等，唯一差別＝以款為單位「相鄰排入」（同款各色集中到連續欄）。
  *   ‧ §1.6：中等/次高不主動位移（只用空洞，不動既有 SKU；displacement 留給最高）。
- *   ‧ §1.2b 暫定：≥3 碼同欄碼盡量碼序對層（條件充裕對、不足彈性）。
+ *   ‧ §1.2b（Gordon 2026-06-28 確認鎖定）：≥3 碼同欄碼序對層（條件充裕對、不足彈性）。
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 // 把一個色的 SKU 配到「單一欄」的不同層：先碼序對層(碼→plnGetTargetLayer)，剩餘填最小空層。
@@ -4467,14 +4472,11 @@ function plnRunNewEngine(config,initialCells){
     smallColsAvail.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
 
     // ════════════════════════════════════════════════════════════
-    // PHASE A (NEW): 以「架」為單位 packing (Gordon 手排邏輯)
-    //   每架 6 col, 角色分配:
-    //     A col #1 = XXL 集中區 (poolCol)
-    //     A col #2 = 主碼 fallback (整 col 放 1 個 mainSkus.length===4 的 entry)
-    //     G col    = 主碼區 (3/4/5 碼任意)
-    //   3 碼款 layer-4 由同架/相鄰架 5 碼 XXL 借用 (hanging3 機制)
-    //   queue 按 (kc, color7) ASC → 同款不同色自然相鄰
-    //   ★ 本版暫不考慮未到量 (Gordon 確認先拿掉, 純結構處理)
+    // PHASE A：密度切組排入（階段7 密度 + 階段8 清舊後之唯一新品路徑）
+    //   每架 6 col；主碼放大材積(G/C)、溢出碼走下方 GLOBAL OVERFLOW 吃小材積(A/B)/架首C。
+    //   降 A 色整色主碼放小材積欄(位置→層)。主碼層一律由切組 entry.groups[k][i].layer 決定。
+    //   queue 按 (kc, color7) ASC → 同款不同色自然相鄰。
+    //   （階段8：已移除 poolCol 集中區、hanging3 借層、useRoundRobin 關閉分支等舊機制。）
     // ════════════════════════════════════════════════════════════
     {
       // 偵測架結構: cols 升冪每 6 個 1 架
@@ -4505,151 +4507,119 @@ function plnRunNewEngine(config,initialCells){
       //   ★ Gordon 確認 (v0.3): 降級以「款總和」為主鍵, 避免高款總和的多色款被誤降 A
       //     (例: 某款全尺碼總和最高, 但拆成多色後每色看似偏低, 不應被降級)。
       //   tie-break: 款總和→同款內色未到量低者→溢出碼少者(越接近純4碼,塞A越乾淨)→kc/color7。
-      // §3.4a 款總和降級 → 委派單一來源 PLN_PRIM.demoteOrder / demoteN
-      const gCapTotal=racks.reduce((s,rk)=>s+rk.gCols.filter(c=>colFullyFree(c)).length,0);
-      const demoteCount=PLN_PRIM.demoteN(queue.length,gCapTotal);
-      if(demoteCount>0){
-        queue.forEach(e=>{e.overflowLen=e.size5Skus.length;});
-        const byPending=PLN_PRIM.demoteOrder(queue);
-        for(let i=0;i<demoteCount&&i<byPending.length;i++)byPending[i]._forceA=true;
-      }
-
-      let queueIdx=0;
-      const spillXxl=[];   // 跨架待入集中區: [{donor,sku}]
-      const hanging3=[];   // 待填 layer-4 的 3 碼款: [{col,rackIdx,entry}]
-      const deferredOverflow=[];   // (保留宣告; 全走道打包後多未使用)
+      // §3.4a 降 A 數量由下方密度路徑「最小架數」自算（見 PHASE A）；此處不再預先標記。
       const allOverflow=[];   // ★ 全走道溢出碼收集池: [{donor,sku}] (迴圈後統一打包)
 
-      function takeNextFromQueue(){
-        while(queueIdx<queue.length&&(queue[queueIdx].placed||queue[queueIdx]._takenByFallback||queue[queueIdx]._forceA))queueIdx++;
-        return queueIdx<queue.length?queue[queueIdx++]:null;
-      }
-      function findNextFullColInQueue(startIdx){
-        for(let i=startIdx;i<queue.length;i++){
-          const e=queue[i];
-          if(e.placed||e._takenByFallback)continue;
-          if(e.mainSkus.length===4)return i;
-        }
-        return -1;
-      }
-
-      // ★ 溢出碼填入 poolCol 時避免把同色(color7)的多碼溢出拆散到不同 col：
-      //   依 donor(同色)分組；poolCol 剩餘格數不足以整組放入時，改挑後面「能整組塞入剩餘格」的
-      //   最大組(best-fit，remain=1 即優先單碼色)，把大組延後到下一 col 保持完整。
-      // §1.4 同色溢出 best-fit 分組 → 委派單一來源 PLN_PRIM
-      function groupSeqByDonor(seq){ return PLN_PRIM.groupSeqByDonor(seq, it=>it.donor); }
-
-      if(PLN_SPEC_FLAGS.useRoundRobin){
+      // §1.5（階段8 清舊）：密度切組為唯一新品排入路徑。
+      //   已移除 useRoundRobin 關閉分支(legacy 逐架 fill) 及其專屬機制：
+      //   poolCol（集中區）、hanging3（3碼款 layer-4 借用）、queueIdx/takeNextFromQueue
+      //   /findNextFullColInQueue/groupSeqByDonor 包裝/spillXxl/deferredOverflow 等舊宣告。
+      //   溢出碼一律走下方 GLOBAL OVERFLOW 正規通道（§1.4/§1.5）。
+      {
         // ════════════════════════════════════════════════════════════
-        // §1.3 新品鐵則路徑：主碼組「廣度優先 round-robin」全走道展開
-        //   先排所有色第1主碼組，再排所有色第2主碼組…(k 輪)；佇列序沿用 §1.3b。
-        //   §1.3c 同色主碼組不相鄰：同色第k組找「非相鄰(col±1 任一層)」主碼 col，
-        //         相鄰者跳過(空一欄)；欄不足極端情況才允許相鄰以免漏排。
-        //   §3.4a 降級色(_forceA) 先以位置→層放小材積 col。
+        // §7 密度路徑（Gordon 2026-06-28 拍板）：最小架數逐架填滿
+        //   把舊「廣度優先 round-robin（每色一 G 欄、往走道後段攤）」改成「最高密度逐架填滿」：
+        //   ① 最小架數優先：footprint 壓到最少欄；即使後段還有空 G 欄，也優先用本架 A 欄
+        //      (＝把低未到量色降 A 塞進前面幾架的 A 欄，而非開新架的 G 欄)。
+        //   ② A 欄彈性配置：溢出碼先吃 A 容量（GLOBAL OVERFLOW），剩餘 A 容量放整色降 A。
+        //   ③ 降 A 選色＝「色」未到量總和最低者優先（§3.4a 改判，PLN_PRIM.demoteOrder）。
+        //   ④ 純 4 碼（無溢出）色 → 優先塞「無 A 可配的孤立 G 欄／架尾」(rule 4)。
+        //   ⑤ 降 A 色的溢出(XXL)放非相鄰箱（§1.3a；由 GLOBAL OVERFLOW 的 adjOKcol 保證）。
+        //   §1.3c 同色主碼組不相鄰：同色第 2 主碼組找非相鄰 col（空一欄）。
         //   主碼層由切組「位置→層」決定(entry.groups[k][i].layer)，非尺碼碼映射。
         // ════════════════════════════════════════════════════════════
-        // 主碼 col 池：大材積、全空、CB走道避開架首C(留給溢出)，rack→欄號序(bigColsAvail 已排序)
-        const mainColPool=bigColsAvail.filter(c=>!firstCset.has(c));
         const usedColSet=new Set();
-        const colColor=new Map(); // col → 已放主碼組之 color7（§1.3a 相鄰判定）
+        const colColor=new Map(); // col → 已放主碼組之 color7（§1.3a/§1.3c 相鄰判定）
         const adjSameColor=(col,c7)=>colColor.get(col-1)===c7||colColor.get(col+1)===c7;
-        function nextMainCol(c7){
-          for(const c of mainColPool){ if(usedColSet.has(c))continue; if(adjSameColor(c,c7))continue; return c; } // §1.3c 跳過相鄰→空一欄
-          for(const c of mainColPool){ if(!usedColSet.has(c))return c; }  // 欄不足極端 fallback
-          return null;
-        }
         function putGroup(entry,group,col){
           for(const g of group)placeOneSku(g.sku,aisle,col,g.layer,entry.ku.cat);
           usedColSet.add(col); colColor.set(col,entry.color7);
           if(entry.mainCol==null)entry.mainCol=col;
           entry.mainRackIdx=rackIdx(col); entry.placed=true;
         }
-        // §3.4a 降級色：主碼放小材積 col（位置→層）
-        for(const e of queue){
-          if(!e._forceA||e.placed||!e.groups.length)continue;
-          const sc=smallColsAvail.find(c=>!usedColSet.has(c)&&colFullyFree(c));
-          if(sc!=null)putGroup(e,e.groups[0],sc);
+
+        // ── rule 4：孤立/架尾 G 欄偵測 ──
+        //   孤立 G 欄 = 全空大材積欄 c，其左鄰(c-1)非可用(占用/缺號)、右鄰(c+1)為全空小材積欄
+        //   ＝某已滿架尾端殘留的單一 G 欄（無同架空 A 可配對放溢出）→ 留給純 4 碼色。
+        const isolatedSet=new Set();
+        bigColsAvail.forEach(c=>{
+          const left=cells[plnCellId(aisle,c-1,1)];
+          const leftFree=left&&!left.sku&&!left.locked&&colFullyFree(c-1);
+          const rightSmallFree=isSmallLayout(getColLayout(aisle,c+1))&&colFullyFree(c+1);
+          if(!leftFree&&rightSmallFree)isolatedSet.add(c);
+        });
+
+        // ── 主碼候選欄（大材積、全空、非架首C、非孤立），小材積候選欄（全空）──
+        const mainColPool=bigColsAvail.filter(c=>!firstCset.has(c)&&!isolatedSet.has(c));
+        const smallColPool=smallColsAvail.slice(); // 已排序
+
+        // ── rule 4：純 4 碼（無溢出）色 → 孤立 G 欄 ──
+        const isolatedCols=[...isolatedSet].sort((a,b)=>a-b);
+        const pure4=queue.filter(e=>!e.placed&&e.groups.length===1&&e.mainSkus.length===4&&e.size5Skus.length===0);
+        let isoIdx=0;
+        for(const e of pure4){
+          if(isoIdx>=isolatedCols.length)break;
+          putGroup(e,e.groups[0],isolatedCols[isoIdx++]);
         }
-        // §1.3 廣度優先 round-robin
-        const maxGroups=queue.reduce((m,e)=>Math.max(m,e.groups.length),0);
+
+        // ── §3.4a 降 A 數量：最小架數自算 ──
+        //   remaining = 尚未排入(未進孤立欄)的主碼色；totalCells = 主碼格 + 溢出格。
+        //   minRacks = ceil(totalCells / 每架24格) = 最小架數；footprint 前 minRacks 架(每架6欄)
+        //   中的大材積欄數 = gCap。demoteN = 主碼組數 − gCap（超出 G 容量者需降 A）。
+        //   以「架(6欄)」為粒度計 gCap，幾何無關：AAGGGG(每架4G)、CBCCCC(每架5C) 皆正確。
+        const remaining=queue.filter(e=>!e.placed&&e.groups.length>0);
+        const mainGroupsTotal=remaining.reduce((s,e)=>s+e.groups.length,0);
+        const overflowCells=remaining.reduce((s,e)=>s+e.size5Skus.length,0);
+        const totalCells=mainGroupsTotal*4+overflowCells;
+        const footprintCols=[...allCols]
+          .filter(c=>colFullyFree(c)&&!isolatedSet.has(c)&&!firstCset.has(c))
+          .sort((a,b)=>a-b);
+        const RACK_CELLS=RACK*4; // 6 欄 × 4 層
+        const minRacks=Math.max(1,Math.ceil(totalCells/RACK_CELLS));
+        const minFootprint=footprintCols.slice(0,minRacks*RACK);
+        const gCap=minFootprint.filter(c=>isBigLayout(getColLayout(aisle,c))).length;
+        const demoteN=Math.max(0,mainGroupsTotal-gCap);
+        if(demoteN>0){
+          remaining.forEach(e=>{e.overflowLen=e.size5Skus.length;});
+          const byPending=PLN_PRIM.demoteOrder(remaining);
+          let dm=0;
+          for(const e of byPending){ if(dm>=demoteN)break; e._forceA=true; dm++; }
+        }
+
+        // ── 主碼放置：非降級色 → 大材積欄（footprint 升冪逐架填滿，§1.3c 非相鄰）──
+        //   §1.3 切組多主碼組仍逐組取下一個非相鄰 col（同色第2組空一欄）。
+        function nextCol(pool,c7){
+          for(const c of pool){ if(usedColSet.has(c)||!colFullyFree(c))continue; if(adjSameColor(c,c7))continue; return c; }
+          for(const c of pool){ if(!usedColSet.has(c)&&colFullyFree(c))return c; } // 欄不足極端 fallback
+          return null;
+        }
+        //   注意：putGroup 會把 entry.placed 設 true，故此處迴圈條件不檢查 e.placed
+        //   (否則多主碼組色的第 2 組會被誤跳)；改以 k>=e.groups.length 判定該色組是否排完。
+        const maxGroups=remaining.reduce((m,e)=>Math.max(m,e.groups.length),0);
         for(let k=0;k<maxGroups;k++){
-          for(const e of queue){
+          for(const e of remaining){
             if(e._forceA||k>=e.groups.length)continue;
-            const col=nextMainCol(e.color7);
+            const col=nextCol(mainColPool,e.color7);
             if(col==null)break;
             putGroup(e,e.groups[k],col);
           }
         }
-        // 溢出碼收集 → allOverflow（GLOBAL OVERFLOW 統一打包；切組後不產生 hanging3）
-        //   含純溢出色(n≤3，§3.7-② 暫當溢出)；有主碼色僅在已排入時收集。
+        // ── 降 A 色：整色主碼放小材積欄（位置→層，footprint 升冪，§1.3c 非相鄰）──
+        for(const e of remaining){
+          if(!e._forceA||e.placed||!e.groups.length)continue;
+          for(let k=0;k<e.groups.length;k++){
+            const sc=nextCol(smallColPool,e.color7);
+            if(sc==null)break;
+            putGroup(e,e.groups[k],sc);
+          }
+        }
+        // 溢出碼收集 → allOverflow（GLOBAL OVERFLOW 統一打包；溢出先吃剩餘 A 容量）
+        //   含純溢出色(n≤3，§3.7 暫當溢出)；有主碼色僅在已排入時收集。
         for(const e of colorEntries){
           if(e.groups.length>0){ if(e.placed)for(const x of e.size5Skus)allOverflow.push({donor:e,sku:x}); }
           else { for(const x of e.size5Skus)allOverflow.push({donor:e,sku:x}); }
         }
-      } else {
-      for(const rack of racks){
-        // A col 分類: partial = 已部分占用但仍有空 layer; fullEmpty = 全空
-        const partialAs=rack.aCols.filter(c=>!colFullyFree(c)&&emptyLayers(c).length>0);
-        const fullEmptyAs=rack.aCols.filter(c=>colFullyFree(c));
-        const fullEmptyGs=rack.gCols.filter(c=>colFullyFree(c));
-        if(partialAs.length===0&&fullEmptyAs.length===0&&fullEmptyGs.length===0)continue;
-
-        // 集中區: partial A col 優先 (回收散空) > fullEmpty A col
-        // fallback: 必須整 col 空 (要放整 4 層主碼)
-        let poolCol=null,fallbackCol=null;
-        if(partialAs.length>0){
-          poolCol=partialAs[0];
-          fallbackCol=fullEmptyAs[0]||null;
-        } else if(fullEmptyAs.length>=2){
-          poolCol=fullEmptyAs[0];
-          fallbackCol=fullEmptyAs[1];
-        } else if(fullEmptyAs.length===1){
-          poolCol=fullEmptyAs[0];
-        }
-        // ★ CB 走道: 主碼避開架首 C(留給溢出對); 內側 C 不足時才由 PHASE D 用架首 C 補
-        const mainCols=fullEmptyGs.filter(c=>!firstCset.has(c));
-        const gAssignments=[];
-
-        // G col 分主碼 entries
-        for(const gc of mainCols){
-          const e=takeNextFromQueue();
-          if(!e)break;
-          e.mainCol=gc;e.mainRackIdx=rack.idx;
-          gAssignments.push({col:gc,entry:e,isFallback:false});
-        }
-
-        // fallback A col: 只放「被降級(forceA)」的色 (未到量最低者), 不再proactively抓佇列下一個
-        //   未降級時不使用 fallbackCol 放主碼 → 避免把高未到量色誤塞 A 材積
-        if(fallbackCol){
-          const f=queue.find(e=>e._forceA&&!e.placed&&!e._takenByFallback&&e.mainSkus.length>=1);
-          if(f){
-            f._takenByFallback=true;
-            f.mainCol=fallbackCol;f.mainRackIdx=rack.idx;
-            gAssignments.push({col:fallbackCol,entry:f,isFallback:true});
-          }
-        }
-
-        // 放主碼
-        for(const {col,entry} of gAssignments){
-          for(const s of entry.mainSkus){
-            const L=plnGetTargetLayer(s.code,s.size);
-            if(L>=1&&L<=4)placeOneSku(s,aisle,col,L,entry.ku.cat);
-          }
-          entry.placed=true;
-        }
-
-        // ── 收集本架溢出碼 + 3碼款 hanging slot (全走道統一打包, 見迴圈後 GLOBAL OVERFLOW) ──
-        for(const {entry} of gAssignments){
-          for(const x of entry.size5Skus)allOverflow.push({donor:entry,sku:x});
-        }
-        for(const {col,entry,isFallback} of gAssignments){
-          if(entry.mainSkus.length===3&&!isFallback){
-            const cs=cells[plnCellId(aisle,col,4)];
-            if(cs&&!cs.sku&&!cs.locked)hanging3.push({col,rackIdx:rack.idx,entry});
-          }
-        }
       }
-      } // end else (legacy 逐架 fill)
 
       // ════════════════════════════════════════════════════════════
       // GLOBAL OVERFLOW: 全走道一次打包 (Gordon 密度邏輯)
@@ -4669,16 +4639,7 @@ function plnRunNewEngine(config,initialCells){
           }
         }
         const adjOKcol=(c7,col)=>{ for(const dc of[-1,1])for(let L=1;L<=4;L++){const nb=cells[plnCellId(aisle,col+dc,L)];if(nb&&nb.sku&&String(nb.sku).substring(0,7)===c7)return false;} return true; };
-        // ① 3碼款 hanging(layer4): 優先用單碼組(n==1)填, 不拆成對
-        for(const h of hanging3){
-          const cs=cells[plnCellId(aisle,h.col,4)];
-          if(!cs||cs.sku||cs.locked)continue;
-          let pick=-1;
-          for(let i=0;i<ovGroups.length;i++){ if(ovGroups[i].items.length===1&&adjOKcol(ovGroups[i].c7,h.col)){pick=i;break;} }
-          if(pick<0)continue;
-          const g=ovGroups.splice(pick,1)[0];
-          placeOneSku(g.items[0].sku,aisle,h.col,4,g.donor.ku.cat);
-        }
+        // §1.5（階段8）：原「① 3碼款 hanging(layer4)」步驟隨 hanging3 機制移除（切組後不再產生半套 3 碼空層4）。
         // ② 可用 bin: 「小材積 B + 架首 C(firstCset)」連續空層 run, 欄號升冪混合 → 低欄先填(最緊湊)。
         //   (Gordon 確認: 架首 C 留給溢出, 對(含50/60)優先放架首 C 大材積、單碼優先放 B; 整批跨度最小、剩餘集中在後)
         //   其餘大材積 C 欄(非架首C) append 末端作最終 fallback。
@@ -4736,8 +4697,11 @@ function plnRunNewEngine(config,initialCells){
     const stillUnplaced=colorEntries.filter(e=>!e.placed&&e.mainSkus.length>0);
     stillUnplaced.sort((a,b)=>a.avgPending-b.avgPending);
     for(const e of stillUnplaced){
-      const layers=e.mainSkus.map(s=>plnGetTargetLayer(s.code,s.size));
-      if(layers.some(l=>l===null)||new Set(layers).size!==layers.length)continue;
+      // §1.5（階段8）：新品定層一律用切組(位置→層) entry.groups，不再呼叫 plnGetTargetLayer。
+      //   PHASE D＝「整色放單一欄」fallback，僅處理單一主碼組(層 1-4 不重複)的色。
+      const flat=e.groups.reduce((a,g)=>a.concat(g),[]); // [{sku,layer}]
+      const layers=flat.map(x=>x.layer);
+      if(!flat.length||layers.some(l=>l==null)||new Set(layers).size!==layers.length)continue;
       let target=null;
       // ★ PHASE D 材積偏好 (v0.3): 降級色(_forceA)偏小材積 A/B; 未降級色偏大材積 G/C, 避免高款色漏入 A
       const sortedCols=[...allCols].sort((a,b)=>{
@@ -4750,9 +4714,8 @@ function plnRunNewEngine(config,initialCells){
         if(layers.every(l=>av.has(l))&&layers.every(l=>!adjConflict(c,l,e.color7))){target=c;break;}
       }
       if(target===null)continue;
-      for(const s of e.mainSkus){
-        const L=plnGetTargetLayer(s.code,s.size);
-        placeOneSku(s,aisle,target,L,e.ku.cat);
+      for(const {sku,layer} of flat){
+        placeOneSku(sku,aisle,target,layer,e.ku.cat);
       }
       e.placed=true;e.mainCol=target;e.mainRackIdx=rackIdx(target);
       // 此款溢出碼就近排
