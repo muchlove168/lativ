@@ -2655,7 +2655,7 @@ const PLN_PRIM = (function(){
 
 // ── 規格段落索引 + 落差/同步清單（機器可讀；給人與後續 session 快速定位）──
 const PLN_SPEC = {
-  doc: '排入引擎_基準規格.md', version: 'v1.2',
+  doc: '排入引擎_基準規格.md', version: 'v1.3',
   sections: [
     {id:'1.1',  status:'locked',  impl:'PLN_PRIM.sortBySizeCode',              desc:'尺碼碼即小→大排序依據'},
     {id:'1.2',  status:'locked',  impl:'PLN_PRIM.splitGroups/positionToLayer', flag:'useGroupSplit(階段1已切true)', desc:'每4碼切組＋位置→層（新品鐵則路徑已落地）'},
@@ -2678,7 +2678,7 @@ const PLN_SPEC = {
     {id:'1.2b-resid', status:'locked', desc:'(v0.8 階段7落地)殘run起點層2→best-fit打包以連續層配對，P06/C05 pairLayerViolations=0；6碼對落層12/34'},
     {id:'7-density', status:'locked', impl:'runAgEngine PHASE A density(唯一路徑)', desc:'(v0.8 階段7)最小架數逐架填滿：AA彈性配置(溢出先吃A、剩餘放整色降A)、純4碼孤立G、降A色XXL非相鄰；降A選色=色未到量最低'},
     {id:'1.5-cleanup', status:'locked', impl:'runAgEngine 密度路徑唯一化', desc:'(v0.9 階段8)清舊：移除 useRoundRobin 關閉分支(legacy 逐架 fill)、poolCol/hanging3/queueIdx 等舊機制；PHASE D 與主路徑一律切組定層(entry.groups)，不再呼叫 plnGetTargetLayer；plnGetTargetLayer/PLN_SIZE_TO_LAYER 收斂為高/低庫存引擎 + §1.2 useGroupSplit-off 安全網專用'},
-    {id:'1.4-proximity', status:'locked', impl:'runAgEngine PHASE A 統一 buildRacks + 以色就近溢出 + physAdjConflict', desc:'(v1.2 階段12)新品 AG/CB 走道 XXL 溢出「就近 + 分段感知非相鄰」：擺法基準統一架模型 buildRacks(AAGGGG / CBCCCC + 短架)；每架 ovfCols=溢出保留欄(AG的AA / CB的架首C+B)，mainCols=主碼欄；以「色」為組放離主碼最近、非相鄰、有空層的 ovfCol(成對留同欄、雙向就近外擴，對既有占用穩健)；§1.3a 分段感知 physAdjConflict：只擋同架同段相鄰位置同color7，跨架、跨儲位箱(CB之CB|CCCC)col±1 允許。AG 仍降A分散。實測：C05(真實249色,空)最遠130→2；P06 最遠5；全情境物理相鄰違規 0'},
+    {id:'1.4-proximity', status:'locked', impl:'runAgEngine PHASE A 統一 buildRacks + 以色就近溢出(密度) + physAdjConflict + 孤立G回收', desc:'(v1.3 階段13)新品 AG/CB XXL 溢出「密度+就近+分段非相鄰」：擺法統一架模型 buildRacks(AAGGGG/CBCCCC+短架)，ovfCols/mainCols；以「色」為組整組放(CB 架首C↔B 相鄰不可拆兩欄)，候選欄排序＝架距最近→能容整組者優先→密度(剩餘層少先填,湊滿不留半欄)→欄距；§1.3a 分段感知 physAdjConflict(跨架/跨儲位箱 col±1 允許)。★密度修正：沒有純4碼色認領的孤立G欄回收進主碼池(不再空整欄,如P06-122);溢出整組同欄(湊滿)。AG 仍降A分散。實測：C05(249色,空)最遠5;P06(真實占用)半滿欄27→3格;全情境物理相鄰違規 0'},
   ],
   // 落差清單：模式現行偏離規格之處 + 對齊方式（翻旗標 / 待重寫）。
   gaps: [
@@ -4608,6 +4608,10 @@ function plnRunNewEngine(config,initialCells){
           if(isoIdx>=isolatedCols.length)break;
           putGroup(e,e.groups[0],isolatedCols[isoIdx++]);
         }
+        // ★ 密度修正（Gordon 2026-06-30）：沒有純4碼色認領的孤立 G 欄不浪費 →
+        //   加回主碼候選池供一般色使用（其溢出由雙向就近放到鄰架 A 欄）。
+        for(const c of isolatedCols.slice(isoIdx)){ if(colFullyFree(c)&&!mainColPool.includes(c))mainColPool.push(c); }
+        mainColPool.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
 
         // ── §3.4a 降 A 數量：最小架數自算 ──
         //   remaining = 尚未排入(未進孤立欄)的主碼色；totalCells = 主碼格 + 溢出格。
@@ -4681,27 +4685,30 @@ function plnRunNewEngine(config,initialCells){
             // CB 降A（罕見，CCCC 容量通常足）：smallColPool
             for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const sc=nextCol(smallColPool,e.color7); if(sc==null)break; putGroup(e,e.groups[k],sc); } }
           }
-          // 溢出：以「色」為組，放到離主碼最近、非相鄰、有空層的溢出欄（成對同色留同欄；雙向就近外擴，
-          //   對既有占用穩健——某架溢出欄被既有庫存占走時，自動找最近的鄰架溢出欄，而非一路往後 cascade）。
+          // 溢出（密度 + 就近 + 非相鄰，Gordon 2026-06-30）：以「色」為組整組放（同色溢出留同欄，因 CB 的
+          //   架首C↔B 相鄰、不可拆兩欄）。每組候選欄排序：① 架距離最近（守不離主碼超過一架）→ ② 能容下整組者優先
+          //   （free≥剩餘數，保持同色不拆）→ ③ 密度：剩餘層少的欄優先（湊滿不留半欄）→ ④ 欄距。對既有占用穩健。
           const allOvf=racks.flatMap(rk=>rk.ovfCols);
           const shortBackup=[]; racks.forEach(rk=>{ if(rk.isShort)rk.cols.forEach(c=>shortBackup.push(c)); });
+          const rackOf=col=>{ const s=_segOf.get(col); return s?s.ri:-99; };
           const ovGroups=[];
           for(const e of colorEntries){
             if(!e.size5Skus.length)continue;
-            if(e.groups.length>0&&!e.placed)continue; // 有主碼但未排入→不收
+            if(e.groups.length>0&&!e.placed)continue;
             ovGroups.push({donor:e,items:e.size5Skus.slice(),mc:(e.mainCol!=null?e.mainCol:0)});
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
           for(const g of ovGroups){
-            let remain=g.items.slice();
-            const cands=[...allOvf,...shortBackup].sort((a,b)=>Math.abs(a-g.mc)-Math.abs(b-g.mc)||a-b);
-            for(const col of cands){
-              if(!remain.length)break;
-              if(physAdjConflict(col,g.donor.color7))continue;
-              for(const L of emptyLayers(col).sort((a,b)=>a-b)){
-                if(!remain.length)break;
-                if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift();
-              }
+            let remain=g.items.slice(); const mr=rackOf(g.mc);
+            while(remain.length){
+              const cands=[...allOvf,...shortBackup].filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7))
+                .sort((a,b)=> (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
+                  || ((emptyLayers(b).length>=remain.length?1:0)-(emptyLayers(a).length>=remain.length?1:0))
+                  || (emptyLayers(a).length-emptyLayers(b).length)
+                  || (Math.abs(a-g.mc)-Math.abs(b-g.mc)) || (a-b));
+              if(!cands.length)break;
+              const col=cands[0];
+              for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
             }
             for(const sku of remain){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
           }
