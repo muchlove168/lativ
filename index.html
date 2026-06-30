@@ -4188,12 +4188,20 @@ function plnRunNewEngine(config,initialCells){
   const moves=[];
   const failed=[];
   const placed=[];
+  const _placedCodes=new Set(); // 全程已排入的商品編號，防同一 SKU 被排到第二個儲位
 
   // Step 1: 取新品 SKU 清單
   const queue=window.NEW_PRODUCT_QUEUE||[];
   const wanted=new Set((config.source||[]).filter(v=>String(v).startsWith('新品-')));
   const skus=[];
   queue.forEach(e=>{if(wanted.has(e.label))skus.push(...e.skus.map(s=>({...s,_cat:e.category})));});
+  // ★ 去重（Gordon 2026-06-30）：同一商品編號可能因兩個貨櫃同時帶同款 SKU 而重複出現 →
+  //   依「商品編號」去重，只保留第一筆，避免同一 SKU 被重複排入兩個儲位。
+  {
+    const seen=new Set(); const dedup=[]; let dropped=0;
+    for(const s of skus){ const code=String(s.code||''); if(code&&seen.has(code)){dropped++;continue;} if(code)seen.add(code); dedup.push(s); }
+    if(dropped>0){ skus.length=0; skus.push(...dedup); if(typeof console!=='undefined')console.log(`[新品排入] 去重：移除 ${dropped} 筆重複商品編號（兩貨櫃同款 SKU），每個 SKU 只排入一次`); }
+  }
   if(!skus.length){
     return {selected:[],capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells};
   }
@@ -4238,7 +4246,11 @@ function plnRunNewEngine(config,initialCells){
     return true;
   }
   // ★ 核心: 排入單一 SKU 到指定儲位 (返回 bool)
+  //   ★ 防重複（Gordon 2026-06-30）：同一商品編號全程只排一次——擋掉「兩貨櫃同款 SKU 重複輸入」
+  //     與「多輪 AG 把純溢出色(n<4)重排」兩種重複來源。已排過的 code 直接拒絕，不會佔第二個儲位。
   function placeOneSku(s,aisle,col,layer,kuCat){
+    const code=String(s.code||'');
+    if(code&&_placedCodes.has(code))return false;
     const cell=plnCellId(aisle,col,layer);
     const cs=cells[cell];
     if(!cs||cs.sku||cs.locked)return false;
@@ -4246,6 +4258,7 @@ function plnRunNewEngine(config,initialCells){
       '銷售庫存':0,'架上數量':0,'未到量':s.pending||0,'未抓貨':0,'保留數量':0,
       '商品包材':s.packaging||'','類別':kuCat,'儲位':cell,'_isNewProduct':true};
     cs.sku=s.code;cs.info=info;cs.locked=true;
+    if(code)_placedCodes.add(code);
     moves.push({phase:'NEW_PRODUCT',sku:s.code,src:'',dst:cell,dstLayout:cs.layout||''});
     placed.push(info);
     return true;
@@ -4695,7 +4708,10 @@ function plnRunNewEngine(config,initialCells){
           for(const e of colorEntries){
             if(!e.size5Skus.length)continue;
             if(e.groups.length>0&&!e.placed)continue;
-            ovGroups.push({donor:e,items:e.size5Skus.slice(),mc:(e.mainCol!=null?e.mainCol:0)});
+            // 排除已排過的商品編號（防多輪重排 / 兩貨櫃同款重複）
+            const items=e.size5Skus.filter(s=>!_placedCodes.has(String(s.code||'')));
+            if(!items.length)continue;
+            ovGroups.push({donor:e,items,mc:(e.mainCol!=null?e.mainCol:0)});
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
           for(const g of ovGroups){
@@ -4707,8 +4723,9 @@ function plnRunNewEngine(config,initialCells){
                   || (emptyLayers(a).length-emptyLayers(b).length)
                   || (Math.abs(a-g.mc)-Math.abs(b-g.mc)) || (a-b));
               if(!cands.length)break;
-              const col=cands[0];
+              const col=cands[0]; const before=remain.length;
               for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
+              if(remain.length===before)break; // 本欄無法再放（防無限迴圈）
             }
             for(const sku of remain){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
           }
@@ -4832,6 +4849,9 @@ function plnRunNewEngine(config,initialCells){
       }
     }
 
+    // ★ 純溢出色(n<4,無主碼組)的 e.placed 不由 putGroup 設；若其所有碼皆已排入，補標 placed，
+    //   否則多輪 AG 會誤判它「未排入」而重跑（已由 _placedCodes 擋掉重排，但會空轉並可能進 nonAG fallback）。
+    colorEntries.forEach(e=>{ const all=[...(e.mainSkus||[]),...(e.size5Skus||[])]; if(all.length&&all.every(s=>_placedCodes.has(String(s.code||''))))e.placed=true; });
     const placedKcs=new Set(colorEntries.filter(e=>e.placed).map(e=>e.kc));
     return kuansToPlace.filter(ku=>!placedKcs.has(ku.kc));
   }
