@@ -8949,38 +8949,33 @@ function rmSpan(bay){ // 佔用儲位數（含缺號）
   if(bay.t==='架'||bay.t==='待確認')sp=Math.max(sp,bay.s.length||1);
   return sp;
 }
-function rmFaceTyp(bays){ // 該面典型格數
-  var cnt={},best=6,bn=0;
-  bays.forEach(function(b){if(b.t==='架'&&b.s.length){var n=b.s.length;cnt[n]=(cnt[n]||0)+n;if(cnt[n]>bn){bn=cnt[n];best=n;}}});
-  return best;
+function rmUnitN(a){ // 每標準架的號碼數（號碼格線密度）：AB/C/D=6、E=5（E08/E09=6）、F=5
+  if(a==='E08'||a==='E09')return 6;
+  return ({A:6,B:6,C:6,D:6,E:5,F:5})[a.charAt(0)]||6;
 }
-function rmAisleTyp(a){ // 整條走道典型格數（儲位數加權）
-  var all=[];['出','回'].forEach(function(sd){all=all.concat((RM.aisles[a]&&RM.aisles[a][sd])||[]);});
-  return rmFaceTyp(all);
+function rmAisleL(a){ // 走道設計長（號碼數）
+  var L=(RM.design&&RM.design[a])||0;
+  if(!L){['出','回'].forEach(function(sd){((RM.aisles[a]&&RM.aisles[a][sd])||[]).forEach(function(b){var m=/^(\d+)-(\d+)$/.exec(b.r||'');if(m)L=Math.max(L,parseInt(m[2],10));});});}
+  return L||108;
 }
-function rmBayCM(bay,typ){ // 實體寬(cm)
-  if(bay.t==='架'||bay.t==='待確認'){
-    var L=bay.L||175,n=bay.s.length;
-    if(L!==175)return L;
-    var est=0;bay.s.forEach(function(sl){est+=rmWidth(rmSlotPlace(sl)||'A');});
-    if(est>=145||n>=typ)return 175;                 // 材積近滿架 → 完整架
-    return Math.round(n*(175/typ));                  // 柱旁短架 = 格數×單儲位寬
-  }
-  var wcm=Math.round(rmSpan(bay)*(175/typ)); // 柱/截短 = 缺號數×單儲位寬（比例原則）
-  if(bay.t==='截短')wcm=Math.min(wcm,175);     // 截短僅示意（斜向由實架末端呈現），上限一架寬
-  return wcm;
-}
-function rmFaceGeom(a,side,withGap){ // [{i,b,x,w}], total
+function rmFaceGeom(a,side,withGap){ // 號碼格線定位：x=(號碼-1)×單位寬；架寬=號碼跨距×單位寬
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
-  var typ=rmAisleTyp(a),items=[],x=0,cum=0,gapDone=false,gapAt=9*typ,gapX=null;
+  var N=rmUnitN(a),unit=175/N,L=rmAisleL(a),gapCM=9*175; // 後走道=第9架後(9×175cm)，跨走道同一直線
+  var items=[],prevEnd=0,total=0,gapX=null;
   bays.forEach(function(b,i){
-    if(withGap&&!gapDone&&cum>=gapAt){gapX=x;x+=RM_GAP_CM;gapDone=true;}
-    var w=rmBayCM(b,typ);
+    var m=/^(\d+)-(\d+)$/.exec(b.r||''),lo=null,hi=null;
+    if(m){lo=parseInt(m[1],10);hi=parseInt(m[2],10);}
+    else if(/^\d+$/.test(b.r||'')){lo=hi=parseInt(b.r,10);}
+    var w=(lo!=null)?(hi-lo+1)*unit:Math.max(b.s.length,1)*unit;
+    if(b.t==='截短')w=Math.min(w,175); // 截短僅示意，斜向由實架末端呈現
+    var start=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):prevEnd;
+    var x=start;
+    if(withGap&&start>=gapCM-0.5){x+=RM_GAP_CM;if(gapX===null)gapX=gapCM;}
     items.push({i:i,b:b,x:x,w:w});
-    x+=w+RM_BAYGAP_CM;
-    cum+=rmSpan(b);
+    prevEnd=start+w;
+    total=Math.max(total,x+w);
   });
-  return {typ:typ,items:items,total:x,gapX:gapX};
+  return {unit:unit,items:items,total:total,gapX:gapX};
 }
 // ---------- 渲染 ----------
 function rmVisibleAisles(){
@@ -9021,6 +9016,7 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
         var cwpx=w/n;
         if(cwpx<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
       }else g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="#eeeeee" stroke="#cccccc"/>';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"/>';
       if(bay.t==='待確認')g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#e6a817" stroke-width="1.5" stroke-dasharray="3,2"/>';
       g+='<title>'+tip+'｜'+n+'格｜架長'+bay.L+'cm</title>';
     }
