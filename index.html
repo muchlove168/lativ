@@ -3693,7 +3693,6 @@ function plnComplexityConcentrate(config, ctx, opt){
   const dests=config.destination||[];
   const failed=[];
 
-  // 來源 SKU 正規化（帶來源位置，供移動距離計分）
   const rows=selected.map(r=>{
     const sku=String(r['商品編號']||'');
     const srcCell=plnFindSkuCell(cells,sku,config.source);
@@ -3702,77 +3701,103 @@ function plnComplexityConcentrate(config, ctx, opt){
   }).filter(r=>r.sku);
 
   const emptyLayersOf=(a,col)=>plnColState(cells,a,col).empty;
-  const distSum=(grp,a,col)=>grp.reduce((s,r)=>{
-    if(r.srcAisle!==a)return s+999;
-    return s+(geo[a]?plnAisleDistance(r.srcCol,col,geo[a].min,geo[a].max):Math.abs(r.srcCol-col));
-  },0);
-
-  function placeAt(a,col,L,r){
+  function placeAt(a,col,L,sku){
     const dstCell=plnCellId(a,col,L);
-    const srcCell=plnFindSkuCell(cells,r.sku,config.source);
-    let srcInfo=null;
-    if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
-    cells[dstCell].sku=r.sku; cells[dstCell].info=srcInfo; cells[dstCell].locked=true;
-    moves.push({phase:'SOURCE_TO_DEST',sku:r.sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
+    const srcCell=plnFindSkuCell(cells,sku,config.source);
+    let srcInfo=null; if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
+    cells[dstCell].sku=sku; cells[dstCell].info=srcInfo; cells[dstCell].locked=true;
+    moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
   }
-
-  // 一個「主組」(≤4 同色尺碼) 放入單欄：碼序對層(S/M/L/XL→層1/2/3/4)。
   function placeGroupInColumn(a,col,grp){
     const empty=emptyLayersOf(a,col);
     const asg=plnAssignColorToColumn(empty, grp.map(r=>({sku:r.sku,size:r.size})));
     if(!asg)return false;
-    const byS={}; grp.forEach(r=>byS[r.sku]=r);
-    Object.entries(asg.assign).forEach(([sku,L])=>placeAt(a,col,L,byS[sku]));
+    Object.entries(asg.assign).forEach(([sku,L])=>placeAt(a,col,L,sku));
     return true;
   }
-  // 為一個主組挑最佳整欄(需 ≥grp.length 空層)：碼對層多→浪費少→大材積→移動少→欄號。
-  function bestColForGroup(grp){
-    const k=grp.length; let best=null,bs=null;
-    for(const a of dests) for(const col of plnValidCols(cells,a)){
-      const empty=emptyLayersOf(a,col); if(empty.length<k)continue;
-      const asg=plnAssignColorToColumn(empty, grp.map(r=>({sku:r.sku,size:r.size}))); if(!asg)continue;
-      const layout=(cells[plnCellId(a,col,empty[0])]||{}).layout||'';
-      const score=[k-asg.matched, empty.length-k, -plnLayoutVol(layout), distSum(grp,a,col), col];
-      if(bs===null||plnCmpScoreArr(score,bs)<0){ bs=score; best={a,col}; }
-    }
-    return best;
-  }
 
-  // ── §1.2 依色切「主組(每4尺碼)＋溢出碼」：主組→整欄(碼對層)；溢出碼/小色→pool 密集打包 ──
-  //   ★ 修正舊版「整個色(含第5碼起)須塞進單欄」的過嚴條件——5 尺碼色永遠失敗→落到散排。
+  // ── §1.2 依色切「主組(每4尺碼)＋溢出碼」；<4 尺碼色＝小色，另行處理 ──
   const colorMap=new Map();
   rows.forEach(r=>{ const c=plnSkuKuanSe(r.sku); if(!colorMap.has(c))colorMap.set(c,[]); colorMap.get(c).push(r); });
-  const mainGroups=[]; const pool=[];
+  const mainGroups=[]; const overflowRows=[]; const smallRows=[];
   for(const [c7, crows] of colorMap){
     const sorted=[...crows].sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
+    if(sorted.length<4){ smallRows.push(...sorted); continue; }
     const full=Math.floor(sorted.length/4);
     for(let g=0; g<full; g++) mainGroups.push({c7, kc:plnSkuKuan(c7), rows:sorted.slice(g*4,g*4+4)});
-    for(let i=full*4;i<sorted.length;i++) pool.push(sorted[i]);
+    for(let i=full*4;i<sorted.length;i++) overflowRows.push(sorted[i]);
   }
+  mainGroups.sort((a,b)=> byKuan?(a.kc.localeCompare(b.kc)||a.c7.localeCompare(b.c7)):a.c7.localeCompare(b.c7));
 
-  // 主組排序：以款集中→同款相鄰(kc→c7)；以色集中→c7。逐一挑整欄（欄號小者優先→同款自然相鄰）。
-  mainGroups.sort((a,b)=> byKuan
-    ? (a.kc.localeCompare(b.kc) || a.c7.localeCompare(b.c7))
-    : (a.c7.localeCompare(b.c7)));
-  for(const mg of mainGroups){
-    const best=bestColForGroup(mg.rows);
-    if(best){ placeGroupInColumn(best.a,best.col,mg.rows); }
-    else { mg.rows.forEach(r=>pool.push(r)); }   // 無整欄可用→併入 pool 密集打包
+  // ── 蒐集目的走道的「整空欄」與「畸零空格」──
+  const fullColList=[]; const partialCells=[];
+  dests.forEach(a=>plnValidCols(cells,a).forEach(col=>{
+    const e=emptyLayersOf(a,col);
+    if(e.length===4) fullColList.push({a,col});
+    else if(e.length>0) e.forEach(L=>partialCells.push({a,col,layer:L}));
+  }));
+  fullColList.sort((x,y)=> x.a<y.a?-1:x.a>y.a?1:x.col-y.col);
+
+  // ── 選「保留整空欄」給溢出碼：讓溢出碼盡量靠近其主組欄（同時維持主組欄乾淨遞增）──
+  const M=mainGroups.length, F=fullColList.length, R=Math.max(0,F-M);
+  function overflowCostFor(reservedIdxSet){
+    const mainCols=fullColList.filter((_,i)=>!reservedIdxSet.has(i));
+    const mcByC7={};
+    for(let i=0;i<mainGroups.length;i++){ if(!mainCols[i])return Infinity; mcByC7[mainGroups[i].c7]={a:mainCols[i].a,col:mainCols[i].col}; }
+    let slots=[]; reservedIdxSet.forEach(i=>{const fc=fullColList[i];[1,2,3,4].forEach(L=>slots.push({a:fc.a,col:fc.col,layer:L}));});
+    slots=slots.concat(partialCells);
+    const free=slots.slice(); let cost=0;
+    const ov=overflowRows.slice().sort((x,y)=>{const rx=mcByC7[plnSkuKuanSe(x.sku)],ry=mcByC7[plnSkuKuanSe(y.sku)];return (rx?rx.col:0)-(ry?ry.col:0);});
+    ov.forEach(o=>{ const r=mcByC7[plnSkuKuanSe(o.sku)]; if(!r)return; let bi=-1,bd=Infinity;
+      for(let i=0;i<free.length;i++){const s=free[i];const d=(s.a===r.a)?Math.abs(s.col-r.col):999;if(d<bd){bd=d;bi=i;}}
+      if(bi>=0){cost+=bd;free.splice(bi,1);} });
+    let disp=0; for(let i=0;i<mainGroups.length;i++){const base=fullColList[i],got=mainCols[i];if(base&&got&&base.a===got.a)disp+=Math.abs(base.col-got.col);else if(base&&got)disp+=50;}
+    return cost+disp;   // W=1：溢出距離 + 主組位移
   }
-
-  // ── pool 密集打包：同色相鄰、色內尺碼序；欄以「空層多者優先」consolidate，逐層填入 ──
-  pool.sort((a,b)=> a.sku.substring(0,7).localeCompare(b.sku.substring(0,7)) || PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku));
-  if(pool.length){
-    const colList=[];
-    dests.forEach(a=>plnValidCols(cells,a).forEach(col=>{ const e=emptyLayersOf(a,col); if(e.length)colList.push({a,col,e:e.length}); }));
-    colList.sort((x,y)=> (y.e-x.e) || (x.col-y.col));
-    let idx=0;
-    for(const c of colList){
-      if(idx>=pool.length)break;
-      const empty=emptyLayersOf(c.a,c.col).sort((x,y)=>x-y);
-      for(const L of empty){ if(idx>=pool.length)break; placeAt(c.a,c.col,L,pool[idx++]); }
+  let reservedIdx=new Set();
+  if(R>0 && overflowRows.length){
+    if(R<=8){
+      for(let k=0;k<R;k++){ let best=-1,bc=Infinity; for(let i=0;i<F;i++){ if(reservedIdx.has(i))continue; const t=new Set(reservedIdx); t.add(i); const c=overflowCostFor(t); if(c<bc){bc=c;best=i;} } if(best>=0)reservedIdx.add(best); }
+    }else{
+      for(let k=0;k<R;k++) reservedIdx.add(Math.min(F-1, Math.round((k+0.5)*F/R)));
     }
-    while(idx<pool.length){ failed.push({kc:plnSkuKuan(pool[idx].sku),n:1}); idx++; }
+  }
+  const reservedKeys=new Set([...reservedIdx].map(i=>fullColList[i].a+'|'+fullColList[i].col));
+
+  // ── 主組排入「非保留」整空欄（遞增；以款集中→同款相鄰）──
+  const availMainCols=fullColList.filter(fc=>!reservedKeys.has(fc.a+'|'+fc.col));
+  const mainColByC7={};
+  let mi=0;
+  for(const mg of mainGroups){
+    let placed=false;
+    while(mi<availMainCols.length){
+      const fc=availMainCols[mi++];
+      if(emptyLayersOf(fc.a,fc.col).length>=4){ placeGroupInColumn(fc.a,fc.col,mg.rows); mainColByC7[mg.c7]={a:fc.a,col:fc.col}; placed=true; break; }
+    }
+    if(!placed) mg.rows.forEach(r=>overflowRows.push(r));
+  }
+
+  const collectEmpty=()=>{ const out=[]; dests.forEach(a=>plnValidCols(cells,a).forEach(col=>emptyLayersOf(a,col).forEach(L=>out.push({a,col,layer:L})))); return out; };
+
+  // ── 溢出碼：就近排入其主組欄（貪婪最近；同款主組欄近者優先）──
+  let freeCells=collectEmpty();
+  const ovSorted=overflowRows.slice().sort((x,y)=>{const rx=mainColByC7[plnSkuKuanSe(x.sku)],ry=mainColByC7[plnSkuKuanSe(y.sku)];return (rx?rx.col:1e9)-(ry?ry.col:1e9);});
+  ovSorted.forEach(o=>{
+    const r=mainColByC7[plnSkuKuanSe(o.sku)];
+    let bi=-1,bd=Infinity;
+    for(let i=0;i<freeCells.length;i++){const s=freeCells[i];const d=(r&&s.a===r.a)?Math.abs(s.col-r.col):(r?999:s.col);if(d<bd){bd=d;bi=i;}}
+    if(bi>=0){const s=freeCells[bi];placeAt(s.a,s.col,s.layer,o.sku);freeCells.splice(bi,1);}
+    else failed.push({kc:plnSkuKuan(o.sku),n:1});
+  });
+
+  // ── 小色（<4 尺碼）：同色一起，填入剩餘最靠前空格 ──
+  freeCells=collectEmpty();
+  const smallByColor=new Map(); smallRows.forEach(r=>{const c=plnSkuKuanSe(r.sku);if(!smallByColor.has(c))smallByColor.set(c,[]);smallByColor.get(c).push(r);});
+  for(const [,srows] of [...smallByColor].sort((a,b)=>a[0].localeCompare(b[0]))){
+    srows.sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku));
+    srows.forEach(r=>{ if(!freeCells.length){failed.push({kc:plnSkuKuan(r.sku),n:1});return;}
+      let bi=0; for(let i=1;i<freeCells.length;i++){if(freeCells[i].col<freeCells[bi].col)bi=i;}
+      const s=freeCells[bi]; placeAt(s.a,s.col,s.layer,r.sku); freeCells.splice(bi,1); });
   }
 
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells,
