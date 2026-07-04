@@ -966,6 +966,8 @@ function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.ope
 function idbPut(key,value){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbGet(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readonly');const req=tx.objectStore(IDB_STORE).get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>{db.close();reject(req.error);};}));}
 function idbClear(){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).clear();tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
+function idbDumpAll(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly'),os=tx.objectStore(IDB_STORE),out={};var kr=os.getAllKeys();kr.onsuccess=function(){var keys=kr.result||[];var vr=os.getAll();vr.onsuccess=function(){var vals=vr.result||[];for(var i=0;i<keys.length;i++)out[keys[i]]=vals[i];db.close();resolve(out);};vr.onerror=function(){db.close();reject(vr.error);};};kr.onerror=function(){db.close();reject(kr.error);};});});}
+function idbRestoreAll(obj){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readwrite'),os=tx.objectStore(IDB_STORE);Object.keys(obj||{}).forEach(function(k){os.put(obj[k],k);});tx.oncomplete=function(){db.close();resolve();};tx.onerror=function(){db.close();reject(tx.error);};});});}
 async function saveEPRData(dateLabel){try{await idbPut('epr_rows',DB);await idbPut('epr_date',dateLabel);}catch(e){console.warn('EPR IDB save failed:',e);}}
 async function loadEPRData(){
   try{
@@ -8346,11 +8348,15 @@ async function exportAllData(){
       try{history[k.replace(HIST_PREFIX,'')]=JSON.parse(localStorage.getItem(k));}catch(e){}
     });
 
-    // 4. 組裝完整資料包
+    // 4. 組裝完整資料包（v2：完整鏡射整台裝置，含儲架平面圖/拖曳/儲位數等所有 tab 設定）
+    let idbAll={};try{idbAll=await idbDumpAll();}catch(e){}
+    const localAll={};try{for(let li=0;li<localStorage.length;li++){const lk=localStorage.key(li);localAll[lk]=localStorage.getItem(lk);}}catch(e){}
     const dataPackage={
-      __version:'lativ_backup_v1',
+      __version:'lativ_backup_v2',
       __exportedAt:new Date().toISOString(),
       __exportedFrom:navigator.userAgent.substring(0,100),
+      idbAll:idbAll,
+      localAll:localAll,
       eprData:{rows:eprRows,date:eprDate,count:eprRows.length},
       fw26Data:{rows:fw26Rows,count:fw26Rows.length},
       arrangeData:{rows:arrangeRows,count:arrangeRows.length},
@@ -8396,6 +8402,21 @@ async function importAllData(file){
       }
 
       let imported={epr:0,fw26:0,arrange:0,forecast:0,settings:0,history:0};
+
+      // v2：完整鏡射還原（涵蓋儲架平面圖、拖曳位置、儲位數與所有 tab 設定/格式）
+      if(pkg.idbAll||pkg.localAll){
+        if(pkg.idbAll){await idbRestoreAll(pkg.idbAll);
+          imported.epr=((pkg.idbAll.epr_rows)||[]).length;
+          imported.fw26=((pkg.idbAll.fw26_rows)||[]).length;
+          imported.arrange=((pkg.idbAll.arrange_rows)||[]).length;
+          imported.forecast=((pkg.idbAll.forecast_rows)||[]).length;}
+        if(pkg.localAll){Object.keys(pkg.localAll).forEach(function(k){try{localStorage.setItem(k,pkg.localAll[k]);imported.settings++;}catch(e){}});}
+        hideLoading();
+        const exportTime2=pkg.__exportedAt?new Date(pkg.__exportedAt).toLocaleString('zh-TW'):'未知';
+        alert('✓ 匯入成功（完整鏡射）！\n\n備份時間：'+exportTime2+'\n\n已完整同步來源裝置：\n• EPR：'+imported.epr.toLocaleString()+' 筆\n• FW26：'+imported.fw26.toLocaleString()+' 筆\n• 設定/格式項目：'+imported.settings+'\n• 含儲架平面圖、拖曳位置、儲位數等所有調整\n\n頁面將自動重新整理...');
+        setTimeout(function(){location.reload();},600);
+        return;
+      }
 
       // 1. 還原 IndexedDB
       if(pkg.eprData&&pkg.eprData.rows){
@@ -8994,9 +9015,9 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
   var geom=rmFaceGeom(a,side,withGap);
   geom.items.forEach(function(it){
     var bay=it.b,i=it.i;
-    var xcm=mirror?(blockW-(it.x+it.w)):it.x;
+    var lx=it.x+(bay.dx||0);
+    var xcm=mirror?(blockW-(lx+it.w)):lx;
     var x=px+xcm*S,w=it.w*S;
-    if(bay.dx)x+=bay.dx*S;
     RM_HIT.push({a:a,side:side,i:i,x:x,w:w,py:py,h:stripH});
     var sel=RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_SEL.i===i;
     var tip=a+' '+side+'面 第'+(i+1)+'架｜'+bay.t+'｜'+(bay.r||'—')+(bay.ba?'｜背面 '+bay.ba+' '+bay.br:'')+(bay.nt?'｜'+bay.nt:'');
@@ -9011,21 +9032,33 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
       g+='<title>'+tip+'（斜向截短，點擊可改為架）</title>';
     }else{
       var n=bay.s.length;
+      var _m=/^(\d+)-(\d+)$/.exec(bay.r||''),_s1=/^(\d+)$/.exec(bay.r||''),_lo=null,_hi=null;
+      if(_m){_lo=parseInt(_m[1],10);_hi=parseInt(_m[2],10);}else if(_s1){_lo=_hi=parseInt(_s1[1],10);}
+      var span=(_lo!=null)?(_hi-_lo+1):n; if(span<n)span=n;
       if(n){
-        var sorted=bay.s.slice().sort(function(u,v){return u.q-v.q;});
-        var cw=w/n;
-        for(var k=0;k<n;k++){
-          // 出面：小→大 遠離走道；回面：大→小（資料座標走道端在左）
-          var sl=(side==='出')?sorted[k]:sorted[n-1-k];
-          var kk=mirror?(n-1-k):k;
-          var cx=x+kk*cw;
-          var p=rmSlotPlace(sl),col=p?(RM_COLORS[p]||RM_UNK_COLOR):'#dddddd';
-          g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
-          if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl.q)+'</text>';
-          if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
+        var cw=w/span;
+        var _sorted=bay.s.slice().sort(function(u,v){return u.q-v.q;});
+        var byIdx={};
+        bay.s.forEach(function(sl){
+          var base;
+          if(_lo!=null){var off=sl.q-_lo;base=(side==='出')?off:((span-1)-off);}
+          else{var ki=_sorted.indexOf(sl);base=(side==='出')?ki:((span-1)-ki);}
+          var li=mirror?((span-1)-base):base; byIdx[li]=sl;
+        });
+        for(var li2=0;li2<span;li2++){
+          var cx=x+li2*cw, sl2=byIdx[li2];
+          if(sl2){
+            var p=rmSlotPlace(sl2),col=p?(RM_COLORS[p]||RM_UNK_COLOR):'#dddddd';
+            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
+            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl2.q)+'</text>';
+            if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
+          }else{
+            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="#f0f0f0" stroke="#fff" stroke-width="0.5"/>';
+            g+='<rect x="'+(cx+0.7).toFixed(1)+'" y="'+(py+0.7)+'" width="'+Math.max(0,cw-1.4).toFixed(1)+'" height="'+(stripH-1.4)+'" fill="none" stroke="#c9c9c9" stroke-width="0.6" stroke-dasharray="2,2"/>';
+            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(6,cw/2.9).toFixed(1)+'" fill="#c0c0c0" text-anchor="middle" style="pointer-events:none">空</text>';
+          }
         }
-        var cwpx=w/n;
-        if(cwpx<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
+        if(cw<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
       }else g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="#eeeeee" stroke="#cccccc"/>';
       g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="1.5" fill="none" stroke="#3a3a3a" stroke-width="1.4"/>';
       if(bay.t==='待確認')g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#e6a817" stroke-width="1.5" stroke-dasharray="3,2"/>';
@@ -9309,10 +9342,24 @@ function rmResetDx(){
   if(RM_SEL){var b=RM.aisles[RM_SEL.a][RM_SEL.side][RM_SEL.i];if(b){b.dx=0;rmPersist();renderRackMap();}}
 }
 function rmFinishDrag(a,side,i,dxpx){
-  var S=RM_S||1;var bay=(RM.aisles[a]&&RM.aisles[a][side]&&RM.aisles[a][side][i]);
-  if(!bay){renderRackMap();return;}
-  bay.dx=(bay.dx||0)+dxpx/S;
-  if(RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_SEL.i===i&&RM_EDIT)RM_EDIT.dx=bay.dx;
+  var S=RM_S||1;var bays=(RM.aisles[a]&&RM.aisles[a][side]);
+  if(!bays||!bays[i]){renderRackMap();return;}
+  var blk=RM_BLOCKS.find(function(b){return b.aisles.indexOf(a)>=0;});
+  var mirror=blk?blk.mirror:false, withGap=blk?blk.back:false;
+  var geom=rmFaceGeom(a,side,withGap), unit=geom.unit||29;
+  var self=null; geom.items.forEach(function(it){if(it.i===i)self=it;});
+  if(!self){renderRackMap();return;}
+  var logical=(mirror?-1:1)*(dxpx/S);      // 螢幕→邏輯（鏡向面左右相反）
+  var slots=Math.round(logical/unit);      // 鎖定為整格
+  if(!slots){renderRackMap();return;}
+  var delta=slots*unit;
+  var selfStart=self.x+(bays[self.i].dx||0), left=null;
+  geom.items.forEach(function(it){if(it.x<self.x-0.01){if(!left||it.x>left.x)left=it;}});
+  if(left){var leftEnd=left.x+(bays[left.i].dx||0)+left.w;
+    if(selfStart+delta<leftEnd-0.01){delta=leftEnd-selfStart;slots=Math.round(delta/unit);delta=slots*unit;}}
+  if(Math.abs(delta)<0.01){renderRackMap();return;}
+  geom.items.forEach(function(it){if(it.x>=self.x-0.01){var b=bays[it.i];b.dx=(b.dx||0)+delta;}}); // 右側鄰架一起後移，不重疊
+  if(RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_EDIT)RM_EDIT.dx=bays[RM_SEL.i].dx;
   rmPersist();renderRackMap();
 }
 var _rmDrag=null;
@@ -9361,7 +9408,7 @@ function rmRenderCompare(){
     if(Math.abs(real-c.vol)<=0.005){eq++;return;}
     var dir=real>c.vol?'變大':'變小';
     if(dir==='變大')bigger++;else smaller++;
-    anomalies.push({slot:id,code:c.code,cfg:c.vol,real:real,rc:rmClosestCode(real),dir:dir});
+    anomalies.push({slot:id,sku:String(r['商品編號']||'').trim(),code:c.code,cfg:c.vol,real:real,rc:rmClosestCode(real),dir:dir});
   });
   anomalies.sort(function(u,v){if(u.dir!==v.dir)return u.dir==='變大'?-1:1;return Math.abs(v.real-v.cfg)-Math.abs(u.real-u.cfg);});
   RM_CMP_ANOM=anomalies;
@@ -9373,10 +9420,10 @@ function rmRenderCompare(){
     '<span style="color:#a67c00">↓ 真實變小（可能刻意調降）：<b>'+smaller+'</b></span></div>';
   var tbl;
   if(anomalies.length){
-    tbl='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555"><th style="padding:4px 6px;text-align:left">儲位</th><th style="padding:4px 6px">儲架設定碼</th><th style="padding:4px 6px">設定材積</th><th style="padding:4px 6px">真實材積</th><th style="padding:4px 6px">最接近碼</th><th style="padding:4px 6px">方向</th></tr></thead><tbody>';
+    tbl='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555"><th style="padding:4px 6px;text-align:left">儲位</th><th style="padding:4px 6px;text-align:left">商品編號</th><th style="padding:4px 6px">儲架設定碼</th><th style="padding:4px 6px">設定材積</th><th style="padding:4px 6px">真實材積</th><th style="padding:4px 6px">最接近碼</th><th style="padding:4px 6px">方向</th></tr></thead><tbody>';
     anomalies.forEach(function(x){
       var col=x.dir==='變大'?'#c0392b':'#a67c00';
-      tbl+='<tr style="border-top:1px solid #eee"><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.slot)+'</td><td style="padding:3px 6px;text-align:center">'+x.code+'</td><td style="padding:3px 6px;text-align:right">'+x.cfg+'</td><td style="padding:3px 6px;text-align:right;font-weight:600">'+x.real+'</td><td style="padding:3px 6px;text-align:center">'+x.rc+'</td><td style="padding:3px 6px;text-align:center;color:'+col+';font-weight:600">'+(x.dir==='變大'?'↑ 變大':'↓ 變小')+'</td></tr>';
+      tbl+='<tr style="border-top:1px solid #eee"><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.slot)+'</td><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.sku||'—')+'</td><td style="padding:3px 6px;text-align:center">'+x.code+'</td><td style="padding:3px 6px;text-align:right">'+x.cfg+'</td><td style="padding:3px 6px;text-align:right;font-weight:600">'+x.real+'</td><td style="padding:3px 6px;text-align:center">'+x.rc+'</td><td style="padding:3px 6px;text-align:center;color:'+col+';font-weight:600">'+(x.dir==='變大'?'↑ 變大':'↓ 變小')+'</td></tr>';
     });
     tbl+='</tbody></table></div>';
   }else{
@@ -9388,8 +9435,8 @@ var RM_CMP_ANOM=[];
 function rmExportCompare(){
   if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
   if(!RM_CMP_ANOM||!RM_CMP_ANOM.length){alert('目前無異常可匯出');return;}
-  var rows=[['儲位','儲架設定碼','設定材積','真實材積','最接近碼','方向']];
-  RM_CMP_ANOM.forEach(function(x){rows.push([x.slot,x.code,x.cfg,x.real,x.rc,x.dir]);});
+  var rows=[['儲位','商品編號','儲架設定碼','設定材積','真實材積','最接近碼','方向']];
+  RM_CMP_ANOM.forEach(function(x){rows.push([x.slot,x.sku||'',x.code,x.cfg,x.real,x.rc,x.dir]);});
   var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'材積比對異常');
   XLSX.writeFile(wb,'儲架材積比對_異常清單.xlsx');
