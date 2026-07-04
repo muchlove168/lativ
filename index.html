@@ -248,7 +248,7 @@
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
   <div class="tab" onclick="switchTab('compare')">銷售比對</div>
   <div class="tab" onclick="switchTab('plnarr')">儲位調整/新品安排</div>
-  <div class="tab" onclick="switchTab('rackmap')">儲架平面圖</div>
+  <div class="tab" onclick="switchTab('rackmap')">儲架平面編輯</div>
 </div>
 
 <div class="content">
@@ -872,7 +872,7 @@ function switchTab(name){
   }
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='slotdata'){renderSlotData();return;}
-  if(name==='rackmap'){rmBoot();return;}
+  if(name==='rackmap'){renderRackMap();return;}
   if(name==='compare'){renderSalesCompare();return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
@@ -966,8 +966,6 @@ function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.ope
 function idbPut(key,value){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbGet(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readonly');const req=tx.objectStore(IDB_STORE).get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>{db.close();reject(req.error);};}));}
 function idbClear(){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).clear();tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
-function idbDumpAll(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly'),os=tx.objectStore(IDB_STORE),out={};var kr=os.getAllKeys();kr.onsuccess=function(){var keys=kr.result||[];var vr=os.getAll();vr.onsuccess=function(){var vals=vr.result||[];for(var i=0;i<keys.length;i++)out[keys[i]]=vals[i];db.close();resolve(out);};vr.onerror=function(){db.close();reject(vr.error);};};kr.onerror=function(){db.close();reject(kr.error);};});});}
-function idbRestoreAll(obj){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readwrite'),os=tx.objectStore(IDB_STORE);Object.keys(obj||{}).forEach(function(k){os.put(obj[k],k);});tx.oncomplete=function(){db.close();resolve();};tx.onerror=function(){db.close();reject(tx.error);};});});}
 async function saveEPRData(dateLabel){try{await idbPut('epr_rows',DB);await idbPut('epr_date',dateLabel);}catch(e){console.warn('EPR IDB save failed:',e);}}
 async function loadEPRData(){
   try{
@@ -2674,6 +2672,8 @@ const PLN_SPEC = {
     {id:'3.5b', status:'locked',  impl:'PLN_PRIM.detectCBType/computeFirstCset', desc:'架首C留位＋全走道打包'},
     {id:'5a',   status:'locked',  impl:'plnDispatchComplexity/plnFindHoleFill/plnComplexityConcentrate/plnComplexityConsolidate', flag:"config.complexity('sort'|'match'|'color'|'kuan'|'consolidate')", desc:'(階段3)五級齊全：最低=找洞塞_排序/次低=找洞塞_匹配/中等=以色集中/次高=以款集中/最高=集中連續空位'},
     {id:'1.2b-adj', status:'locked', impl:'plnFindHoleFill(opts.match)/plnAssignColorToColumn', desc:'(階段3；Gordon 2026-06-28 確認鎖定)儲位調整碼對層彈性：_匹配碼對層soft tiebreak、≥3碼同欄碼序對層(條件充裕對、不足彈性)、中等/次高其餘零散SKU一律走找洞塞_匹配'},
+    {id:'3.6-sel', status:'locked', impl:'plnSelectSourceSKUs v6', desc:'(Gordon 2026-07-04)高庫存挑選以「色組」為單位：整款優先→整色→DP精確湊數→回溯；同款同色永不拆散到不同走道；唯一例外=整色組湊不出N時優先拆「未到≤10、銷售低」SKU並附_selWarnings警告(UI顯示)。廢除v5散戶補餘/兜底逐SKU補滿(會拆色，見F02→A03/E06案例7239402+7264701被拆)'},
+    {id:'5a-split', status:'locked', impl:'plnComplexityConcentrate 色組切塊', desc:'(2026-07-04)以色/以款集中：>4碼色組依§1.2切「4碼主組+溢出碼」，主組集中一欄、溢出碼走找洞塞_匹配(=Gordon手排4+1模式)；找不到可容整組的欄→降級找洞塞_匹配，不再整組failed(舊版會誤觸§1.7溢位區位移把15個SKU踢到XX)'},
     {id:'1.6',  status:'locked',  impl:'plnComplexityConsolidate→plnRunInternalEngine/plnApplyOverflowZone', desc:'(階段4)最低/次低/中等/次高不主動位移；最高=借內部整理騰位；目的走道位置不夠→挑既有SKU移溢位區(§1.7)已落地；新品永不被位移、locked防連鎖'},
     {id:'1.7',  status:'locked',  impl:'plnApplyOverflowZone/plnIdentifyOverflowCandidates/plnOverflowAisleFor/plnOverflowEmpties', flag:'config.overflow=[\'TX\',\'XX\']', desc:'(階段4)溢位區TX+XX自動承接：未到≤10且銷售≤6/銷售少優先移出；TX供L區/XX其他；空儲位材積最大優先排入；套用於每一複雜度等級'},
     {id:'1.8',  status:'todo',    desc:'包材→走道對應表（待補）'},
@@ -2818,18 +2818,20 @@ function plnValidCols(cells,aisle){
   return [...cols].sort((a,b)=>a-b);
 }
 
-// ═══ Phase 1: 來源 SKU 挑選 (★ 演算法 v5: 過半擴展 + 平均競爭 + 拆色填餘) ═══
+// ═══ Phase 1: 來源 SKU 挑選 (★ 演算法 v6: 整色組挑選 + DP 精確湊數; Gordon 2026-07-04) ═══
 // 邏輯:
 //   1. 每 SKU 計算 _total = 銷售庫存 + 未到量 (=「庫存件數」)
 //   2. 按款(5碼)分組. 對每款 K:
 //      - K_high = K 內 _total ≥ 100 的 SKU
 //      - 若 K_high 比例 ≥ 50% (該款過半 SKU 庫存達標)
 //      - 形成候選款, 平均 = K_high 平均 _total
-//   3. 候選款按 平均 DESC 排序
-//   4. 依序挑款:
-//      - 整款 K_high 塞得下 → 整款挑
-//      - 塞不下 → 拆款色(7碼), 款色內按色平均 DESC 排序, 能塞的色就挑, 不能塞跳過, 繼續下個款
-//   5. 還有餘額 → 散戶補 (Tier1 優先, 然後 _total DESC)
+//   3. 高庫存模式一律以「色組(7碼)」為單位進出 — 同款同色永不拆散到不同走道:
+//      - 優先序: 候選款(款平均 DESC → 款內色平均 DESC) → 非候選款(色平均 DESC)
+//      - 貪婪整組挑; 缺口以「整色組」DP 精確湊數; 湊不出 → 回溯已挑色組換組合
+//   4. 唯一拆色例外(Gordon 認可): 整色組無法湊出 N 時, 優先拆「未到量≤10、銷售低」的 SKU,
+//      並在回傳陣列附 _selWarnings 供 UI 顯示警告
+//   (v5 舊行為「散戶補餘/兜底逐 SKU 補滿」會把同色拆到不同走道 → 2026-07-04 案例
+//    7239402/7264701 各被拆走 1 個 SKU, 已廢除)
 function plnSelectSourceSKUs(config,cells){
   // ★ 多步驟: 從 cells 取目前在 source 走道內的 SKU; cells 缺時 (測試/單步) fallback 到 AISLE_REPORT_DATA
   let rows;
@@ -2882,71 +2884,102 @@ function plnSelectSourceSKUs(config,cells){
     return out;
   }
 
-  // ═══ 庫存高模式 (預設, 原邏輯 + 兜底 fallback) ═══
+  // ═══ 庫存高模式 (★ v6: 以「色組」為單位挑選 — 同款同色永不拆散; Gordon 2026-07-04) ═══
   // 按款分組
   const byKuan={};
   rows.forEach(r=>{
     if(!byKuan[r._kuan])byKuan[r._kuan]=[];
     byKuan[r._kuan].push(r);
   });
-  // 候選款判定 (≥100 件 SKU 過半 + 平均庫存)
-  const candidates=[];
+  // 候選款判定 (≥100 件 SKU 過半 → K_high 平均; 沿用 v5)
+  const kuanRank=new Map();
   Object.entries(byKuan).forEach(([k,group])=>{
     const highSkus=group.filter(r=>r._total>=100);
     if(highSkus.length===0)return;
     if(highSkus.length/group.length>=0.5){
-      const avg=highSkus.reduce((s,r)=>s+r._total,0)/highSkus.length;
-      candidates.push({kuan:k,skus:highSkus,count:highSkus.length,avg});
+      kuanRank.set(k,highSkus.reduce((s,r)=>s+r._total,0)/highSkus.length);
     }
   });
-  candidates.sort((a,b)=>b.avg-a.avg);
-  // 競爭挑選: 整款 fit 整批挑, 不 fit 拆色挑
-  const selected=[];
-  const selSet=new Set();
-  for(const K of candidates){
-    const remaining=n-selected.length;
-    if(remaining<=0)break;
-    if(K.count<=remaining){
-      K.skus.forEach(r=>{selected.push(r);selSet.add(r['商品編號']);});
-    } else {
-      // 拆款色
-      const byColor={};
-      K.skus.forEach(r=>{if(!byColor[r._kc])byColor[r._kc]=[];byColor[r._kc].push(r);});
-      const colorGroups=Object.entries(byColor).map(([kc,sks])=>({
-        kc,skus:sks,count:sks.length,
-        avg:sks.reduce((s,r)=>s+r._total,0)/sks.length
-      }));
-      colorGroups.sort((a,b)=>b.avg-a.avg);
-      for(const cg of colorGroups){
-        const rem=n-selected.length;
-        if(rem<=0)break;
-        if(cg.count<=rem){
-          cg.skus.forEach(r=>{selected.push(r);selSet.add(r['商品編號']);});
-        }
+  // 色組池: 全來源依色(7碼)分組 — 整色進出, 同色不會被拆到不同走道
+  //   (含款內 _total<100 的同色 SKU: 寧可跟著整色一起搬, 也不留下來被拆散)
+  const cgMap=new Map();
+  rows.forEach(r=>{ if(!cgMap.has(r._kc))cgMap.set(r._kc,[]); cgMap.get(r._kc).push(r); });
+  const colorGroups=[...cgMap.entries()].map(([kc,skus])=>({
+    kc, kuan:kc.substring(0,5), skus, count:skus.length,
+    sum:skus.reduce((s,r)=>s+r._total,0),
+    avg:skus.reduce((s,r)=>s+r._total,0)/skus.length,
+  }));
+  // 優先序: 候選款(款平均 DESC → 同款內色平均 DESC) → 非候選款(色平均 DESC)
+  //   同款各色相鄰排列 → 貪婪挑選時整款自然一起被挑 (=v5「整款優先」精神)
+  colorGroups.sort((a,b)=>{
+    const ta=kuanRank.has(a.kuan)?0:1, tb=kuanRank.has(b.kuan)?0:1;
+    if(ta!==tb)return ta-tb;
+    if(ta===0 && a.kuan!==b.kuan)
+      return (kuanRank.get(b.kuan)-kuanRank.get(a.kuan))||a.kuan.localeCompare(b.kuan);
+    return (b.avg-a.avg)||a.kc.localeCompare(b.kc);
+  });
+  // DP 精確湊數: 從 pool 挑「整色組」子集合使 SKU 總數恰為 target (最大化庫存件數總和)
+  function exactFill(pool,target){
+    if(target<=0)return target===0?[]:null;
+    const dp=new Array(target+1).fill(null);
+    dp[0]={w:0,g:null,from:null};
+    for(const g of pool){
+      if(g.count>target)continue;
+      for(let t=target;t>=g.count;t--){
+        const base=dp[t-g.count];
+        if(!base)continue;
+        const w=base.w+g.sum;
+        if(!dp[t]||w>dp[t].w)dp[t]={w,g,from:base};
       }
     }
+    if(!dp[target])return null;
+    const picked=[];
+    for(let node=dp[target];node&&node.g;node=node.from)picked.push(node.g);
+    return picked;
   }
-  // 散戶補餘: 只挑 _total>=150 (避免誤挑 sub-100 邏輯 V SKU)
-  const rem2=n-selected.length;
-  if(rem2>0){
-    const others=rows.filter(r=>!selSet.has(r['商品編號'])&&r._total>=150);
-    others.sort((a,b)=>{
-      if(a._tier1!==b._tier1)return b._tier1-a._tier1;
-      return b._total-a._total;
+  // 貪婪整組挑 → 缺口 DP 精確湊數 → 湊不出則回溯已挑色組換組合
+  let taken=[],pool=[...colorGroups],rem=n;
+  for(let i=0;i<pool.length&&rem>0;i++){
+    if(pool[i].count<=rem){rem-=pool[i].count;taken.push(pool[i]);pool.splice(i,1);i--;}
+  }
+  while(rem>0){
+    const fill=exactFill(pool,rem);
+    if(fill){taken.push(...fill);rem=0;break;}
+    if(!taken.length)break;                                  // 整色組怎麼組合都湊不出 N → 拆色 fallback
+    const back=taken.pop();pool.push(back);rem+=back.count;  // 回溯: 退掉最後挑的色組, 連同缺口重湊
+  }
+  const selected=[];
+  taken.forEach(g=>selected.push(...g.skus));
+  if(rem>0){
+    // ── 拆色 fallback (唯一例外路徑): 重新貪婪整組挑, 缺口以單 SKU 補 ──
+    //    Gordon 例外規則: 優先拆「未到量≤10」且銷售庫存低的 SKU; 其餘照 _total DESC (原 v5 序)
+    taken=[];pool=[...colorGroups];rem=n;selected.length=0;
+    for(let i=0;i<pool.length&&rem>0;i++){
+      if(pool[i].count<=rem){rem-=pool[i].count;taken.push(pool[i]);pool.splice(i,1);i--;}
+    }
+    taken.forEach(g=>selected.push(...g.skus));
+    const rest=pool.flatMap(g=>g.skus);
+    rest.sort((a,b)=>{
+      const ea=(a._arr<=10)?0:1, eb=(b._arr<=10)?0:1;
+      if(ea!==eb)return ea-eb;
+      return ea===0?(a._sales-b._sales):(b._total-a._total);
     });
-    others.slice(0,rem2).forEach(r=>{selected.push(r);selSet.add(r['商品編號']);});
+    rest.slice(0,rem).forEach(r=>selected.push(r));
+    rem=0;
   }
-  // ★ 兜底 fallback: N 還沒滿 → 把剩餘所有 SKU 按 (_tier1 desc, _total desc) 排序補滿
-  // 這樣使用者填 N=來源總SKU數時, 一定能精確命中
-  const rem3=n-selected.length;
-  if(rem3>0){
-    const remainder=rows.filter(r=>!selSet.has(r['商品編號']));
-    remainder.sort((a,b)=>{
-      if(a._tier1!==b._tier1)return b._tier1-a._tier1;
-      return b._total-a._total;
-    });
-    remainder.slice(0,rem3).forEach(r=>selected.push(r));
-  }
+  // ── 拆色安全網檢查: 任一色組被部分挑選 → 記警告 (未到≤10 者標記可接受) ──
+  const selSet=new Set(selected.map(r=>String(r['商品編號'])));
+  const warns=[];
+  cgMap.forEach((skus,kc)=>{
+    const inSel=skus.filter(r=>selSet.has(String(r['商品編號'])));
+    if(inSel.length>0&&inSel.length<skus.length){
+      const minority=(inSel.length*2<=skus.length)?inSel:skus.filter(r=>!selSet.has(String(r['商品編號'])));
+      warns.push({kc,picked:inSel.length,total:skus.length,
+        acceptable:minority.every(r=>r._arr<=10),
+        skus:minority.map(r=>`${r['商品編號']}(未到${r._arr}/銷${r._sales})`)});
+    }
+  });
+  if(warns.length)selected._selWarnings=warns;
   return selected;
 }
 
@@ -3693,111 +3726,125 @@ function plnComplexityConcentrate(config, ctx, opt){
   const dests=config.destination||[];
   const failed=[];
 
+  // ── 來源 SKU 正規化（帶來源位置，供移動距離計分）──
   const rows=selected.map(r=>{
     const sku=String(r['商品編號']||'');
     const srcCell=plnFindSkuCell(cells,sku,config.source);
     const src=srcCell?cells[srcCell]:null;
-    return {sku, size:r['尺寸'], raw:r, srcAisle:src?src.aisle:null, srcCol:src?src.col:null};
+    return {sku, size:r['尺寸'], raw:r,
+      srcAisle:src?src.aisle:null, srcCol:src?src.col:null};
   }).filter(r=>r.sku);
 
-  const emptyLayersOf=(a,col)=>plnColState(cells,a,col).empty;
-  function placeAt(a,col,L,sku){
-    const dstCell=plnCellId(a,col,L);
-    const srcCell=plnFindSkuCell(cells,sku,config.source);
-    let srcInfo=null; if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
-    cells[dstCell].sku=sku; cells[dstCell].info=srcInfo; cells[dstCell].locked=true;
-    moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
-  }
-  function placeGroupInColumn(a,col,grp){
-    const empty=emptyLayersOf(a,col);
-    const asg=plnAssignColorToColumn(empty, grp.map(r=>({sku:r.sku,size:r.size})));
-    if(!asg)return false;
-    Object.entries(asg.assign).forEach(([sku,L])=>placeAt(a,col,L,sku));
-    return true;
-  }
-
-  // ── §1.2 依色切「主組(每4尺碼)＋溢出碼」；<4 尺碼色＝小色，另行處理 ──
+  // ── 依色(color7)分組；≥3 碼 = 集中色，<3 碼 = 零散 ──
+  // ★ 2026-07-04 修正: 一欄最多 4 層, >4 碼的色組舊版直接 bestColumnForColor 失敗 → 整色進 failed
+  //   (甚至觸發 §1.7 溢位區位移). 改依 §1.2 精神切「4 碼主組 + 溢出碼」:
+  //   主組集中一欄; 溢出碼(1~2 個)與 <3 碼零散一樣走找洞塞_匹配 (= Gordon 手排 4+1 模式).
   const colorMap=new Map();
   rows.forEach(r=>{ const c=plnSkuKuanSe(r.sku); if(!colorMap.has(c))colorMap.set(c,[]); colorMap.get(c).push(r); });
-  const mainGroups=[]; const overflowRows=[]; const smallRows=[];
+  const groupedColors=[]; const scattered=[];
   for(const [c7, crows] of colorMap){
-    const sorted=[...crows].sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
-    if(sorted.length<4){ smallRows.push(...sorted); continue; }
-    const full=Math.floor(sorted.length/4);
-    for(let g=0; g<full; g++) mainGroups.push({c7, kc:plnSkuKuan(c7), rows:sorted.slice(g*4,g*4+4)});
-    for(let i=full*4;i<sorted.length;i++) overflowRows.push(sorted[i]);
-  }
-  mainGroups.sort((a,b)=> byKuan?(a.kc.localeCompare(b.kc)||a.c7.localeCompare(b.c7)):a.c7.localeCompare(b.c7));
-
-  // ── 蒐集目的走道的「整空欄」與「畸零空格」──
-  const fullColList=[]; const partialCells=[];
-  dests.forEach(a=>plnValidCols(cells,a).forEach(col=>{
-    const e=emptyLayersOf(a,col);
-    if(e.length===4) fullColList.push({a,col});
-    else if(e.length>0) e.forEach(L=>partialCells.push({a,col,layer:L}));
-  }));
-  fullColList.sort((x,y)=> x.a<y.a?-1:x.a>y.a?1:x.col-y.col);
-
-  // ── 選「保留整空欄」給溢出碼：讓溢出碼盡量靠近其主組欄（同時維持主組欄乾淨遞增）──
-  const M=mainGroups.length, F=fullColList.length, R=Math.max(0,F-M);
-  function overflowCostFor(reservedIdxSet){
-    const mainCols=fullColList.filter((_,i)=>!reservedIdxSet.has(i));
-    const mcByC7={};
-    for(let i=0;i<mainGroups.length;i++){ if(!mainCols[i])return Infinity; mcByC7[mainGroups[i].c7]={a:mainCols[i].a,col:mainCols[i].col}; }
-    let slots=[]; reservedIdxSet.forEach(i=>{const fc=fullColList[i];[1,2,3,4].forEach(L=>slots.push({a:fc.a,col:fc.col,layer:L}));});
-    slots=slots.concat(partialCells);
-    const free=slots.slice(); let cost=0;
-    const ov=overflowRows.slice().sort((x,y)=>{const rx=mcByC7[plnSkuKuanSe(x.sku)],ry=mcByC7[plnSkuKuanSe(y.sku)];return (rx?rx.col:0)-(ry?ry.col:0);});
-    ov.forEach(o=>{ const r=mcByC7[plnSkuKuanSe(o.sku)]; if(!r)return; let bi=-1,bd=Infinity;
-      for(let i=0;i<free.length;i++){const s=free[i];const d=(s.a===r.a)?Math.abs(s.col-r.col):999;if(d<bd){bd=d;bi=i;}}
-      if(bi>=0){cost+=bd;free.splice(bi,1);} });
-    let disp=0; for(let i=0;i<mainGroups.length;i++){const base=fullColList[i],got=mainCols[i];if(base&&got&&base.a===got.a)disp+=Math.abs(base.col-got.col);else if(base&&got)disp+=50;}
-    return cost+disp;   // W=1：溢出距離 + 主組位移
-  }
-  let reservedIdx=new Set();
-  if(R>0 && overflowRows.length){
-    if(R<=8){
-      for(let k=0;k<R;k++){ let best=-1,bc=Infinity; for(let i=0;i<F;i++){ if(reservedIdx.has(i))continue; const t=new Set(reservedIdx); t.add(i); const c=overflowCostFor(t); if(c<bc){bc=c;best=i;} } if(best>=0)reservedIdx.add(best); }
-    }else{
-      for(let k=0;k<R;k++) reservedIdx.add(Math.min(F-1, Math.round((k+0.5)*F/R)));
+    if(crows.length<3){ scattered.push(...crows); continue; }
+    const sorted=[...crows].sort((a,b)=>
+      PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku) || a.sku.localeCompare(b.sku));
+    for(let i=0;i<sorted.length;i+=4){
+      const chunk=sorted.slice(i,i+4);
+      if(chunk.length>=3) groupedColors.push({color7:c7, kc:plnSkuKuan(c7), rows:chunk});
+      else scattered.push(...chunk);
     }
   }
-  const reservedKeys=new Set([...reservedIdx].map(i=>fullColList[i].a+'|'+fullColList[i].col));
 
-  // ── 主組排入「非保留」整空欄（遞增；以款集中→同款相鄰）──
-  const availMainCols=fullColList.filter(fc=>!reservedKeys.has(fc.a+'|'+fc.col));
-  const mainColByC7={};
-  let mi=0;
-  for(const mg of mainGroups){
-    let placed=false;
-    while(mi<availMainCols.length){
-      const fc=availMainCols[mi++];
-      if(emptyLayersOf(fc.a,fc.col).length>=4){ placeGroupInColumn(fc.a,fc.col,mg.rows); mainColByC7[mg.c7]={a:fc.a,col:fc.col}; placed=true; break; }
+  const freeLayersOf=(a,col)=>plnColState(cells,a,col).empty;  // §1.6 只用空層、不位移
+  const distSum=(crows,a,col)=>crows.reduce((s,r)=>{
+    if(r.srcAisle!==a)return s+999;
+    return s+(geo[a]?plnAisleDistance(r.srcCol,col,geo[a].min,geo[a].max):Math.abs(r.srcCol-col));
+  },0);
+
+  // 為一個色挑最佳單欄：碼對層多 → 大材積 → 移動少 → 欄號 → 浪費少
+  function bestColumnForColor(crows){
+    const N=crows.length; let best=null,bestScore=null;
+    for(const a of dests){
+      for(const col of plnValidCols(cells,a)){
+        const empty=freeLayersOf(a,col);
+        if(empty.length<N)continue;
+        const asg=plnAssignColorToColumn(empty,crows);
+        if(!asg)continue;
+        const layout=(cells[plnCellId(a,col,empty[0])]||{}).layout||'';
+        const score=[N-asg.matched, -plnLayoutVol(layout), distSum(crows,a,col), col, empty.length-N];
+        if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){ bestScore=score; best={aisle:a,col,assign:asg.assign}; }
+      }
     }
-    if(!placed) mg.rows.forEach(r=>overflowRows.push(r));
+    return best;
   }
 
-  const collectEmpty=()=>{ const out=[]; dests.forEach(a=>plnValidCols(cells,a).forEach(col=>emptyLayersOf(a,col).forEach(L=>out.push({a,col,layer:L})))); return out; };
+  function placeColorInColumn(aisle,col,assign){
+    Object.entries(assign).forEach(([sku,L])=>{
+      const dstCell=plnCellId(aisle,col,L);
+      const srcCell=plnFindSkuCell(cells,sku,config.source);
+      let srcInfo=null;
+      if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
+      cells[dstCell].sku=sku; cells[dstCell].info=srcInfo; cells[dstCell].locked=true;
+      moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
+    });
+  }
 
-  // ── 溢出碼：就近排入其主組欄（貪婪最近；同款主組欄近者優先）──
-  let freeCells=collectEmpty();
-  const ovSorted=overflowRows.slice().sort((x,y)=>{const rx=mainColByC7[plnSkuKuanSe(x.sku)],ry=mainColByC7[plnSkuKuanSe(y.sku)];return (rx?rx.col:1e9)-(ry?ry.col:1e9);});
-  ovSorted.forEach(o=>{
-    const r=mainColByC7[plnSkuKuanSe(o.sku)];
-    let bi=-1,bd=Infinity;
-    for(let i=0;i<freeCells.length;i++){const s=freeCells[i];const d=(r&&s.a===r.a)?Math.abs(s.col-r.col):(r?999:s.col);if(d<bd){bd=d;bi=i;}}
-    if(bi>=0){const s=freeCells[bi];placeAt(s.a,s.col,s.layer,o.sku);freeCells.splice(bi,1);}
-    else failed.push({kc:plnSkuKuan(o.sku),n:1});
-  });
+  // 次高：為同款多色找「相鄰連續欄窗格」(col 號連續)，各色一欄、依色序排入。
+  function findAdjacentWindow(gcs){
+    const C=gcs.length; let best=null,bestScore=null;
+    for(const a of dests){
+      const cols=plnValidCols(cells,a);
+      for(let i=0;i+C<=cols.length;i++){
+        let consec=true;
+        for(let j=1;j<C;j++){ if(cols[i+j]!==cols[i+j-1]+1){consec=false;break;} }
+        if(!consec)continue;
+        const win=[]; let ok=true, pen=0, dist=0;
+        for(let k=0;k<C;k++){
+          const col=cols[i+k]; const empty=freeLayersOf(a,col);
+          if(empty.length<gcs[k].rows.length){ok=false;break;}
+          const asg=plnAssignColorToColumn(empty,gcs[k].rows);
+          if(!asg){ok=false;break;}
+          pen+=gcs[k].rows.length-asg.matched; dist+=distSum(gcs[k].rows,a,col);
+          win.push({aisle:a,col,assign:asg.assign});
+        }
+        if(!ok)continue;
+        const score=[pen,dist,cols[i]];
+        if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){ bestScore=score; best=win; }
+      }
+    }
+    return best;
+  }
 
-  // ── 小色（<4 尺碼）：同色一起，填入剩餘最靠前空格 ──
-  freeCells=collectEmpty();
-  const smallByColor=new Map(); smallRows.forEach(r=>{const c=plnSkuKuanSe(r.sku);if(!smallByColor.has(c))smallByColor.set(c,[]);smallByColor.get(c).push(r);});
-  for(const [,srows] of [...smallByColor].sort((a,b)=>a[0].localeCompare(b[0]))){
-    srows.sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku));
-    srows.forEach(r=>{ if(!freeCells.length){failed.push({kc:plnSkuKuan(r.sku),n:1});return;}
-      let bi=0; for(let i=1;i<freeCells.length;i++){if(freeCells[i].col<freeCells[bi].col)bi=i;}
-      const s=freeCells[bi]; placeAt(s.a,s.col,s.layer,r.sku); freeCells.splice(bi,1); });
+  // ── 排入集中色 ──
+  groupedColors.sort((a,b)=>a.color7.localeCompare(b.color7));
+  if(!byKuan){
+    for(const gc of groupedColors){
+      const best=bestColumnForColor(gc.rows);
+      // ★ 2026-07-04: 找不到可容整組的欄 → 降級為零散走找洞塞_匹配 (舊版整組 failed → 觸發溢位區位移)
+      if(!best){ scattered.push(...gc.rows); continue; }
+      placeColorInColumn(best.aisle,best.col,best.assign);
+    }
+  } else {
+    const kuanMap=new Map();
+    groupedColors.forEach(gc=>{ if(!kuanMap.has(gc.kc))kuanMap.set(gc.kc,[]); kuanMap.get(gc.kc).push(gc); });
+    for(const [,gcs] of [...kuanMap].sort((a,b)=>a[0].localeCompare(b[0]))){
+      gcs.sort((a,b)=>a.color7.localeCompare(b.color7));
+      const win=(gcs.length>1)?findAdjacentWindow(gcs):null;
+      if(win){ win.forEach(w=>placeColorInColumn(w.aisle,w.col,w.assign)); }
+      else {
+        // 單色款，或找不到相鄰窗格 → 退回各色獨立挑欄（仍保證同色同欄不同層）
+        for(const gc of gcs){
+          const best=bestColumnForColor(gc.rows);
+          // ★ 2026-07-04: 同上, 降級找洞塞_匹配, 不再整組 failed
+          if(!best){ scattered.push(...gc.rows); continue; }
+          placeColorInColumn(best.aisle,best.col,best.assign);
+        }
+      }
+    }
+  }
+
+  // ── 零散 SKU → 找洞塞_匹配（在集中色排完後的剩餘空洞）──
+  if(scattered.length){
+    const hf=plnFindHoleFill(config, {cells, selected:scattered.map(r=>r.raw), capacity, deficit, xxSalesMax, moves}, {match:true});
+    (hf.failed||[]).forEach(f=>failed.push(f));
   }
 
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells,
@@ -3844,51 +3891,17 @@ function plnComplexityConsolidate(config, ctx){
   const moves=[...baseMoves, ...bestInt.moves];                    // 內部整理 moves + 後續排入
   const range=bestInt._internalTargetRange.map(cid=>work[cid]);   // 連續空位（run 序）
 
-  // 排入（§1.2 家族切組定層，與「以色/以款集中」一致）：
-  //   同色(前7碼)每 4 個尺碼一組 → 整欄（組內位置→層：S/M/L/XL = 層1/2/3/4）；
-  //   第 5 碼起（XXL…）＝溢出碼 → 另集中打包成獨立欄（位置→層）。
-  //   ★ 修正舊「全域尺碼升冪 flat 填入」造成同尺碼跨色填滿一欄、尺碼未配對到層的錯誤。
-  const famMap=new Map();
-  selected.forEach(r=>{
-    const sku=String(r['商品編號']||''); if(!sku)return;
-    const f=sku.substring(0,7);
-    if(!famMap.has(f))famMap.set(f,[]);
-    famMap.get(f).push({sku,raw:r});
-  });
-  // 1) 產生「欄區塊」(每塊 ≤4 筆，帶層號)：主組滿 4→整欄；溢出碼收集後再切 4 成獨立欄。
-  //    ★ 與中等/次高一致：<4 尺碼的小色另置，不與真正溢出碼混欄。
-  const blocks=[]; const ovPool=[]; const smallPool=[];
-  [...famMap.keys()].sort().forEach(f=>{
-    const rs=famMap.get(f).sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
-    if(rs.length<4){ smallPool.push(...rs); return; }
-    const full=Math.floor(rs.length/4);
-    for(let g=0;g<full;g++) blocks.push(rs.slice(g*4,g*4+4).map((r,i)=>({sku:r.sku,layer:i+1})));
-    for(let i=full*4;i<rs.length;i++) ovPool.push(rs[i]);
-  });
-  for(let i=0;i<ovPool.length;i+=4) blocks.push(ovPool.slice(i,i+4).map((r,j)=>({sku:r.sku,layer:j+1})));
-  for(let i=0;i<smallPool.length;i+=4) blocks.push(smallPool.slice(i,i+4).map((r,j)=>({sku:r.sku,layer:j+1})));
-  // 2) 連續空位 range（col-major：每欄 layer1→4）→ 依欄分組保序。
-  const runCols=[]; let _curc=null;
-  range.forEach(c=>{ if(!c)return; if(!_curc||_curc.col!==c.col||_curc.aisle!==c.aisle){_curc={aisle:c.aisle,col:c.col,byL:{}};runCols.push(_curc);} _curc.byL[c.layer]=c; });
-  // 3) 每個欄區塊放入一欄（位置對層；該層不存在時退用該欄最小未用層）。
-  let _ci=0;
-  blocks.forEach(block=>{
-    const rc=runCols[_ci++];
-    if(!rc){ block.forEach(it=>failed.push({kc:plnSkuKuan(it.sku),n:1})); return; }
-    const usedL=new Set();
-    block.forEach(it=>{
-      let dst=rc.byL[it.layer];
-      if(!dst||usedL.has(it.layer)){
-        const freeL=Object.keys(rc.byL).map(Number).sort((a,b)=>a-b).find(L=>!usedL.has(L));
-        dst=(freeL!=null)?rc.byL[freeL]:null; if(dst)usedL.add(freeL);
-      } else usedL.add(it.layer);
-      if(!dst){ failed.push({kc:plnSkuKuan(it.sku),n:1}); return; }
-      const srcCell=plnFindSkuCell(work,it.sku,config.source);
-      let srcInfo=null;
-      if(srcCell){ srcInfo=work[srcCell].info; work[srcCell].sku=null; work[srcCell].info=null; }
-      work[dst.cell].sku=it.sku; work[dst.cell].info=srcInfo; work[dst.cell].locked=true;
-      moves.push({phase:'SOURCE_TO_DEST',sku:it.sku,src:srcCell,dst:dst.cell,dstLayout:dst.layout||''});
-    });
+  // 排入：挑選 SKU 依尺碼碼升冪填入連續空位（碼1→run 首層…，碼序對層自然落地）
+  const rows=selected.map(r=>({sku:String(r['商品編號']||''), raw:r})).filter(r=>r.sku)
+    .sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
+  rows.forEach((r,i)=>{
+    const dst=range[i];
+    if(!dst){ failed.push({kc:plnSkuKuan(r.sku),n:1}); return; }
+    const srcCell=plnFindSkuCell(work,r.sku,config.source);
+    let srcInfo=null;
+    if(srcCell){ srcInfo=work[srcCell].info; work[srcCell].sku=null; work[srcCell].info=null; }
+    work[dst.cell].sku=r.sku; work[dst.cell].info=srcInfo; work[dst.cell].locked=true;
+    moves.push({phase:'SOURCE_TO_DEST',sku:r.sku,src:srcCell,dst:dst.cell,dstLayout:dst.layout||''});
   });
 
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:work,
@@ -5514,8 +5527,11 @@ function plannerRunAllSteps(){
     if(statusEl){
       const byA=Object.entries(r.capacity.byAisle).map(([a,n])=>`${a}:${n}`).join(' ');
       const ozCnt=r.moves.filter(m=>m.phase==='OVERFLOW_ZONE').length;
-      statusEl.textContent=`✓ 挑${r.selected.length} 移${r.moves.length} (XX${r.moves.filter(m=>m.phase==='XX_OVERFLOW').length}/溢位區${ozCnt}/內${r.moves.filter(m=>m.phase==='INTERNAL_DISPLACEMENT').length}/主${r.moves.filter(m=>m.phase==='SOURCE_TO_DEST').length}) | 容量 ${r.capacity.total} [${byA}]`;
-      statusEl.style.color='var(--accent)';
+      // ★ 2026-07-04: 拆色警告 (plnSelectSourceSKUs v6 安全網 — 正常不應出現)
+      const selWarns=(r.selected&&r.selected._selWarnings)||[];
+      const warnTxt=selWarns.length?` | ⚠拆色${selWarns.length}色組`:'';
+      statusEl.textContent=`✓ 挑${r.selected.length} 移${r.moves.length} (XX${r.moves.filter(m=>m.phase==='XX_OVERFLOW').length}/溢位區${ozCnt}/內${r.moves.filter(m=>m.phase==='INTERNAL_DISPLACEMENT').length}/主${r.moves.filter(m=>m.phase==='SOURCE_TO_DEST').length}) | 容量 ${r.capacity.total} [${byA}]${warnTxt}`;
+      statusEl.style.color=selWarns.some(w=>!w.acceptable)?'#d4a017':'var(--accent)';
     }
   }
   
@@ -5533,6 +5549,8 @@ function plannerRunAllSteps(){
     config:allResults[allResults.length-1].config,
     xxSalesMax:Math.max(...allResults.map(r=>r.xxSalesMax)),
     stepResults:allResults,
+    // ★ 2026-07-04: 各 step 拆色警告合併 (v6 挑選安全網)
+    selWarnings:allResults.flatMap(r=>((r.selected&&r.selected._selWarnings)||[]).map(w=>Object.assign({step:r.stepIdx},w))),
   };
   plannerRenderResult(PLN_LAST_RESULT);
 }
@@ -5559,6 +5577,10 @@ function plannerRenderResult(r){
     <span style="color:var(--text3)">新品佇列共 ${(r.queueTotal||r.selected.length+skippedSkuTotal)} 個 SKU，實際安排 ${r.selected.length} 個，未排入 ${skippedSkuTotal} 個</span><br>
     ${skippedNew.slice(0,8).map(f=>`<span style="font-family:monospace">${f.kc}</span>(${f.n})`).join('、')}${skippedNew.length>8?` …+${skippedNew.length-8}`:''}</div>`:'';
   const failedHtml=otherFailed.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 未放置: ${otherFailed.length} 群組 (${otherFailed.slice(0,3).map(f=>f.kc).join(', ')}${otherFailed.length>3?'...':''})</div>`:'';
+  // ★ 2026-07-04: 拆色警告 (v6 挑選 — 同色組被部分挑選時顯示; 未到≤10 標可接受)
+  const selWarnHtml=(r.selWarnings&&r.selWarnings.length)?`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.6">
+    ⚠ 拆色警告: ${r.selWarnings.length} 個色組被拆到不同走道<br>
+    ${r.selWarnings.map(w=>`<span style="font-family:monospace">${w.kc}</span> (挑${w.picked}/${w.total}${w.step!=null?`, Step ${w.step}`:''}) ${w.acceptable?'<span style="color:var(--text3)">— 未到≤10 可接受</span>':'<span style="color:var(--red)">— 不符「低庫存且未到≤10」例外!</span>'}: ${w.skus.join('、')}`).join('<br>')}</div>`:'';
   const xxNote=r.xxSalesMax!==5?`<span style="color:#d4a017;font-weight:600">（已放寬為 銷售≤${r.xxSalesMax}）</span>`:'';
   // 顯示新品列僅在有 newN > 0 時 (★ 統一咖啡色, 取消個別色相)
   const newCard=newN>0?`<div style="padding:6px 10px;background:var(--accent-light);border-radius:4px"><div style="color:var(--text2)">新品安排</div><div style="font-size:18px;font-weight:700;color:var(--accent)">${newN}</div></div>`:'';
@@ -5579,6 +5601,7 @@ function plannerRenderResult(r){
       ${dupHtml}
       ${newSkipHtml}
       ${failedHtml}
+      ${selWarnHtml}
       <div style="display:flex;justify-content:center;gap:8px;margin-top:8px">
         <button onclick="plannerExportResult()" class="upload-btn" style="background:var(--accent);color:#fff;font-size:12px;padding:5px 14px">📥 匯出 Excel</button>
       </div>
@@ -8379,15 +8402,11 @@ async function exportAllData(){
       try{history[k.replace(HIST_PREFIX,'')]=JSON.parse(localStorage.getItem(k));}catch(e){}
     });
 
-    // 4. 組裝完整資料包（v2：完整鏡射整台裝置，含儲架平面圖/拖曳/儲位數等所有 tab 設定）
-    let idbAll={};try{idbAll=await idbDumpAll();}catch(e){}
-    const localAll={};try{for(let li=0;li<localStorage.length;li++){const lk=localStorage.key(li);localAll[lk]=localStorage.getItem(lk);}}catch(e){}
+    // 4. 組裝完整資料包
     const dataPackage={
-      __version:'lativ_backup_v2',
+      __version:'lativ_backup_v1',
       __exportedAt:new Date().toISOString(),
       __exportedFrom:navigator.userAgent.substring(0,100),
-      idbAll:idbAll,
-      localAll:localAll,
       eprData:{rows:eprRows,date:eprDate,count:eprRows.length},
       fw26Data:{rows:fw26Rows,count:fw26Rows.length},
       arrangeData:{rows:arrangeRows,count:arrangeRows.length},
@@ -8433,21 +8452,6 @@ async function importAllData(file){
       }
 
       let imported={epr:0,fw26:0,arrange:0,forecast:0,settings:0,history:0};
-
-      // v2：完整鏡射還原（涵蓋儲架平面圖、拖曳位置、儲位數與所有 tab 設定/格式）
-      if(pkg.idbAll||pkg.localAll){
-        if(pkg.idbAll){await idbRestoreAll(pkg.idbAll);
-          imported.epr=((pkg.idbAll.epr_rows)||[]).length;
-          imported.fw26=((pkg.idbAll.fw26_rows)||[]).length;
-          imported.arrange=((pkg.idbAll.arrange_rows)||[]).length;
-          imported.forecast=((pkg.idbAll.forecast_rows)||[]).length;}
-        if(pkg.localAll){Object.keys(pkg.localAll).forEach(function(k){try{localStorage.setItem(k,pkg.localAll[k]);imported.settings++;}catch(e){}});}
-        hideLoading();
-        const exportTime2=pkg.__exportedAt?new Date(pkg.__exportedAt).toLocaleString('zh-TW'):'未知';
-        alert('✓ 匯入成功（完整鏡射）！\n\n備份時間：'+exportTime2+'\n\n已完整同步來源裝置：\n• EPR：'+imported.epr.toLocaleString()+' 筆\n• FW26：'+imported.fw26.toLocaleString()+' 筆\n• 設定/格式項目：'+imported.settings+'\n• 含儲架平面圖、拖曳位置、儲位數等所有調整\n\n頁面將自動重新整理...');
-        setTimeout(function(){location.reload();},600);
-        return;
-      }
 
       // 1. 還原 IndexedDB
       if(pkg.eprData&&pkg.eprData.rows){
@@ -8903,17 +8907,15 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 <div class="tab-panel" id="tab-rackmap">
   <div style="padding:12px 16px">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px">
-      <span style="font-weight:700;font-size:15px;color:var(--accent)">1F 儲架平面圖</span>
+      <span style="font-weight:700;font-size:15px;color:var(--accent)">1F 儲架平面編輯</span>
       <span id="rm-viewbar" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></span>
       <span id="rm-legend" style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;align-items:center;color:#555"></span>
       <button onclick="rmExport()" style="font-size:12px;cursor:pointer;border:1px solid var(--border,#ccc);border-radius:5px;padding:4px 10px;background:var(--surface,#f7f7f7)">匯出 Excel</button>
-      <button onclick="rmSyncFromMaster()" style="font-size:12px;cursor:pointer;border:1px solid #2c6e49;color:#2c6e49;border-radius:5px;padding:4px 10px;background:#fff" title="以最新上傳的儲位總表更新各儲位擺法，架長會自動重算">↻ 依儲位總表更新擺法</button>
-      <span style="font-size:11px;color:#2c6e49">💡 可直接拖曳「架/柱」微調位置；所有編輯自動儲存。</span>
+      <span style="font-size:11px;color:#a67c00">⚠ O／R 等擺法尚無官方材積寬度，暫以 36cm 呈現並標「?」</span>
     </div>
-    <div style="display:flex;flex-direction:column;gap:10px;align-items:stretch">
-      <div id="rm-canvas" style="width:100%;overflow:auto;max-height:70vh;border:1px solid var(--border,#ddd);border-radius:8px;background:#fff"></div>
-      <div id="rm-editor" style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;max-height:40vh;overflow:auto;background:var(--surface,#fafafa)"></div>
-      <div id="rm-compare" style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;background:var(--surface,#fafafa)"></div>
+    <div style="display:flex;gap:12px;align-items:flex-start">
+      <div id="rm-canvas" style="flex:1;overflow:auto;max-height:76vh;border:1px solid var(--border,#ddd);border-radius:8px;background:#fff"></div>
+      <div id="rm-editor" style="width:340px;flex:none;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;max-height:76vh;overflow:auto;background:var(--surface,#fafafa)"></div>
     </div>
   </div>
 </div>
@@ -8935,14 +8937,11 @@ const RM_DATA={"design":{"A02":123,"A03":108,"A04":108,"A05":108,"A06":108,"A07"
 // 每走道一帶：上條=大號面(回)、下條=小號面(出)；標示=走道名×2，貼走道側
 // 幾何單位=公分：架=實體架長(格數不足面典型者按比例縮短)；柱/截短=缺號數×單儲位寬 → 跨走道自然對位
 // ============================================================
-const RM_MATERIALS={A:{len:27,w:35,vol:1.334},B:{len:23,w:28,vol:0.909},C:{len:46,w:28,vol:1.819},D:{len:49,w:32,vol:2.214},E:{len:41,w:40,vol:2.316},F:{len:41,w:40,vol:2.316},G:{len:54,w:35,vol:2.669},H:{len:27,w:35,vol:1.334},I:{len:55,w:40,vol:4.66},J:{len:41,w:40,vol:2.316},K:{len:55,w:74,vol:5.747},L:{len:52,w:35,vol:2.57},M:{len:40,w:60,vol:7.625},N:{len:40,w:60,vol:10.166},O:{len:60,w:40,vol:20.333},P:{len:54,w:35,vol:2.002},Q:{len:40,w:40,vol:3.389},R:{len:52,w:35,vol:2.57},S:{len:20,w:20,vol:0.141},T:{len:60,w:40,vol:3.389},U:{len:1,w:1,vol:0.0001},V:{len:200,w:195,vol:172.088},W:{len:50,w:40,vol:3.53},X:{len:60,w:40,vol:4.236},Y:{len:60,w:40,vol:63.54},Z:{len:10,w:10,vol:0.035}};
-const RM_WIDTHS={A:27,B:23,C:28,D:35,E:35,F:40,G:35,H:27,I:70,J:40,K:70,L:35,M:40,N:40,O:40,P:35,Q:40,R:40,S:35,T:40,U:27,V:40,W:40,X:40,Y:40,Z:27};
-const RM_STD_SLOT=35;                         // 缺號/柱 之單一號碼標準寬(cm)
-const RM_RACK_CATS=[80,115,120,146,175,210];  // 架長分類(cm)：特短/短/短鐵力士/鐵力士/大/特大
-const RM_COLORS={A:'#4E79A7',G:'#59A14F',C:'#F28E2B',B:'#E15759',D:'#B07AA1',H:'#76B7B2',L:'#9C755F','柱':'#d9d9d9'};
+const RM_WIDTHS={A:28,B:24,C:31,D:34,G:36,H:27,L:36};
+const RM_COLORS={A:'#4E79A7',G:'#59A14F',C:'#F28E2B',B:'#E15759',D:'#B07AA1',H:'#76B7B2',L:'#9C755F','柱':'#3B3B3B'};
 const RM_UNK_COLOR='#9AA5B1';
 const RM_DEFAULT_W=36;
-const RM_PLACES=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','配'];
+const RM_PLACES=['A','G','C','B','D','H','L','O','R','Q','N','W','E','F','J','配'];
 const RM_GAP_CM=160;          // 後走道留空寬
 const RM_BAYGAP_CM=4;         // 架與架間隙
 const RM_BLOCKS=[
@@ -8953,30 +8952,13 @@ const RM_BLOCKS=[
 const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B10','B09','B08','B07','B06','B05','B04','B03','B02','B01'],
  C:['C11','C10','C09','C08','C07','C06','C05','C04','C03','C02','C01'],D:['D11','D10','D09'],
  E:['E10','E09','E08','E07','E06','E05','E04','E03','E02','E01'],F:['F02','F01']};
-let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false;
+let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'};
 
 function rmWidth(p){return RM_WIDTHS[p]||RM_DEFAULT_W;}
 function rmKnown(p){return Object.prototype.hasOwnProperty.call(RM_WIDTHS,p);}
 function rmPad(q){return String(q).padStart(3,'0');}
 function rmClone(o){return JSON.parse(JSON.stringify(o));}
-function rmEsc(x){return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function rmCodeVol(p){return (RM_MATERIALS[p]&&RM_MATERIALS[p].vol)||0;}
-function rmClosestCode(vol){var best='',bd=Infinity;for(var c in RM_MATERIALS){var d=Math.abs(RM_MATERIALS[c].vol-vol);if(d<bd){bd=d;best=c;}}return best;}
 
-// 架長改為「依擺法內容自動計算」：架寬=各號碼擺法寬度總和（缺號/柱=標準寬）。
-// 內容總長 → 對應到最接近的分類，讓同號碼範圍走道(如 B04/B05)長度一致、且柱走道不再溢出。
-function rmContentLen(bay){
-  var m=/^(\d+)-(\d+)$/.exec(bay.r||''),lo=null,hi=null;
-  if(m){lo=parseInt(m[1],10);hi=parseInt(m[2],10);}
-  var byN={}; (bay.s||[]).forEach(function(sl){byN[sl.q]=rmSlotPlace(sl);});
-  var sum=0;
-  if(lo!=null){ for(var n=lo;n<=hi;n++){ var p=byN[n]; sum+=(p?rmWidth(p):RM_STD_SLOT); } }
-  else { (bay.s||[]).forEach(function(sl){ var p=rmSlotPlace(sl); sum+=(p?rmWidth(p):RM_STD_SLOT); }); }
-  return sum||RM_STD_SLOT;
-}
-function rmSnapCat(cm){ for(var i=0;i<RM_RACK_CATS.length;i++){ if(cm<=RM_RACK_CATS[i]+6)return RM_RACK_CATS[i]; } return Math.round(cm/5)*5; }
-// 架長(cm)：手動鎖定(Lfix)優先，否則依內容自動計算並吸附分類。
-function rmRackLen(bay){ if(bay.Lfix&&bay.L)return bay.L; return rmSnapCat(rmContentLen(bay)); }
 function rmInit(){
   RM={design:RM_DATA.design,aisles:{}};
   for(const a in RM_DATA.aisles){
@@ -9018,7 +9000,6 @@ function rmCapSig(bay){return (bay.L||175)+'|'+bay.s.map(function(s){return rmSl
 
 // ---------- 幾何 ----------
 function rmSpan(bay){ // 佔用儲位數（含缺號）
-  if(bay.t==='柱'&&bay.pw)return bay.pw;
   var m=/^(\d+)-(\d+)$/.exec(bay.r||'');
   var sp=m?Math.abs(parseInt(m[2],10)-parseInt(m[1],10))+1:(/^\d+$/.test(bay.r||'')?1:1);
   if(bay.t==='架'||bay.t==='待確認')sp=Math.max(sp,bay.s.length||1);
@@ -9033,25 +9014,22 @@ function rmAisleL(a){ // 走道設計長（號碼數）
   if(!L){['出','回'].forEach(function(sd){((RM.aisles[a]&&RM.aisles[a][sd])||[]).forEach(function(b){var m=/^(\d+)-(\d+)$/.exec(b.r||'');if(m)L=Math.max(L,parseInt(m[2],10));});});}
   return L||108;
 }
-function rmFaceGeom(a,side,withGap){ // 累積實體排列：架寬=實體架長(cm)；柱/截短=缺號數×標準格寬；跨越後走道插入空隙
+function rmFaceGeom(a,side,withGap){ // 號碼格線定位：x=(號碼-1)×單位寬；架寬=號碼跨距×單位寬
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
   var N=rmUnitN(a),unit=175/N,L=rmAisleL(a),gapCM=9*175; // 後走道=第9架後(9×175cm)，跨走道同一直線
-  var items=[],cum=0,total=0,gapX=null,gapDone=false;
+  var items=[],prevEnd=0,total=0,gapX=null;
   bays.forEach(function(b,i){
     var m=/^(\d+)-(\d+)$/.exec(b.r||''),lo=null,hi=null;
     if(m){lo=parseInt(m[1],10);hi=parseInt(m[2],10);}
     else if(/^\d+$/.test(b.r||'')){lo=hi=parseInt(b.r,10);}
-    var span=(lo!=null)?(hi-lo+1):Math.max(b.s.length,1);
-    var w;
-    if(b.t==='柱'){ w=(b.pw?b.pw:span)*RM_STD_SLOT; }        // 柱：缺號數×標準格寬
-    else if(b.t==='截短'){ w=Math.min(span*RM_STD_SLOT,175); } // 截短：示意，上限 175
-    else { w=rmRackLen(b); }                                // 架/待確認：依擺法內容自動算架長
-    // 後走道空隙：以「設計號碼位置」判定插入點（維持與跨走道同一直線），插入到累積實體座標
-    var ds=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):cum;
-    if(withGap&&!gapDone&&ds>=gapCM-0.5){ cum+=RM_GAP_CM; gapX=cum-RM_GAP_CM/2; gapDone=true; }
-    items.push({i:i,b:b,x:cum,w:w});
-    cum+=w;
-    total=cum;
+    var w=(lo!=null)?(hi-lo+1)*unit:Math.max(b.s.length,1)*unit;
+    if(b.t==='截短')w=Math.min(w,175); // 截短僅示意，斜向由實架末端呈現
+    var start=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):prevEnd;
+    var x=start;
+    if(withGap&&start>=gapCM-0.5){x+=RM_GAP_CM;if(gapX===null)gapX=gapCM;}
+    items.push({i:i,b:b,x:x,w:w});
+    prevEnd=start+w;
+    total=Math.max(total,x+w);
   });
   return {unit:unit,items:items,total:total,gapX:gapX};
 }
@@ -9065,52 +9043,36 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
   var geom=rmFaceGeom(a,side,withGap);
   geom.items.forEach(function(it){
     var bay=it.b,i=it.i;
-    var lx=it.x+(bay.dx||0);
-    var xcm=mirror?(blockW-(lx+it.w)):lx;
+    var xcm=mirror?(blockW-(it.x+it.w)):it.x;
     var x=px+xcm*S,w=it.w*S;
-    RM_HIT.push({a:a,side:side,i:i,x:x,w:w,py:py,h:stripH});
     var sel=RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_SEL.i===i;
     var tip=a+' '+side+'面 第'+(i+1)+'架｜'+bay.t+'｜'+(bay.r||'—')+(bay.ba?'｜背面 '+bay.ba+' '+bay.br:'')+(bay.nt?'｜'+bay.nt:'');
     var g='<g class="rm-bay" data-a="'+a+'" data-s="'+side+'" data-i="'+i+'" style="cursor:pointer">';
     if(bay.t==='柱'){
-      var ptxt=bay.pt||'柱';
-      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="2" fill="'+RM_COLORS['柱']+'" stroke="#8a8a8a" stroke-width="1"/>';
-      if(w>=9)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.4).toFixed(1)+'" font-size="'+Math.min(8,Math.max(5,w/(ptxt.length*1.15))).toFixed(1)+'" fill="#333" text-anchor="middle" style="pointer-events:none">'+rmEsc(ptxt)+'</text>';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="2" fill="'+RM_COLORS['柱']+'"/>';
       g+='<title>'+tip+'（柱寬='+rmSpan(bay)+'儲位）</title>';
     }else if(bay.t==='截短'){
       g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#c8c8c8" stroke-dasharray="3,3"/>';
       g+='<title>'+tip+'（斜向截短，點擊可改為架）</title>';
     }else{
       var n=bay.s.length;
-      var _m=/^(\d+)-(\d+)$/.exec(bay.r||''),_s1=/^(\d+)$/.exec(bay.r||''),_lo=null,_hi=null;
-      if(_m){_lo=parseInt(_m[1],10);_hi=parseInt(_m[2],10);}else if(_s1){_lo=_hi=parseInt(_s1[1],10);}
-      var span=(_lo!=null)?(_hi-_lo+1):n; if(span<n)span=n;
       if(n){
-        var cw=w/span;
-        var _sorted=bay.s.slice().sort(function(u,v){return u.q-v.q;});
-        var byIdx={};
-        bay.s.forEach(function(sl){
-          var base;
-          if(_lo!=null){var off=sl.q-_lo;base=(side==='出')?off:((span-1)-off);}
-          else{var ki=_sorted.indexOf(sl);base=(side==='出')?ki:((span-1)-ki);}
-          var li=mirror?((span-1)-base):base; byIdx[li]=sl;
-        });
-        for(var li2=0;li2<span;li2++){
-          var cx=x+li2*cw, sl2=byIdx[li2];
-          if(sl2){
-            var p=rmSlotPlace(sl2),col=p?(RM_COLORS[p]||RM_UNK_COLOR):'#dddddd';
-            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
-            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl2.q)+'</text>';
-            if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
-          }else{
-            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="#f0f0f0" stroke="#fff" stroke-width="0.5"/>';
-            g+='<rect x="'+(cx+0.7).toFixed(1)+'" y="'+(py+0.7)+'" width="'+Math.max(0,cw-1.4).toFixed(1)+'" height="'+(stripH-1.4)+'" fill="none" stroke="#c9c9c9" stroke-width="0.6" stroke-dasharray="2,2"/>';
-            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(6,cw/2.9).toFixed(1)+'" fill="#c0c0c0" text-anchor="middle" style="pointer-events:none">空</text>';
-          }
+        var sorted=bay.s.slice().sort(function(u,v){return u.q-v.q;});
+        var cw=w/n;
+        for(var k=0;k<n;k++){
+          // 出面：小→大 遠離走道；回面：大→小（資料座標走道端在左）
+          var sl=(side==='出')?sorted[k]:sorted[n-1-k];
+          var kk=mirror?(n-1-k):k;
+          var cx=x+kk*cw;
+          var p=rmSlotPlace(sl),col=p?(RM_COLORS[p]||RM_UNK_COLOR):'#dddddd';
+          g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
+          if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl.q)+'</text>';
+          if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
         }
-        if(cw<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
+        var cwpx=w/n;
+        if(cwpx<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
       }else g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="#eeeeee" stroke="#cccccc"/>';
-      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="1.5" fill="none" stroke="#3a3a3a" stroke-width="1.4"/>';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"/>';
       if(bay.t==='待確認')g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#e6a817" stroke-width="1.5" stroke-dasharray="3,2"/>';
       g+='<title>'+tip+'｜'+n+'格｜架長'+bay.L+'cm</title>';
     }
@@ -9144,13 +9106,13 @@ function rmBandSVG(a,px,py,S,mirror,blockW,stripH,withGap,labelSide,parts){
 function renderRackMap(){
   if(!RM)rmInit();
   var wrap=document.getElementById('rm-canvas');if(!wrap)return;
-  var parts=[],W,H;RM_HIT=[];
+  var parts=[],W,H;
   var vis=rmVisibleAisles();
   if(!vis){ // ═ 全區一覽：AB(左，鏡向) | 走道 | CDE(右) ；F 在 AB 下方
     var abW=rmBlockW(RM_BLOCKS[0].aisles,false),cdeW=rmBlockW(RM_BLOCKS[1].aisles,true),fW=rmBlockW(RM_BLOCKS[2].aisles,false);
     var stripH=12,margin=8,lblW=38,corrW=46;
-    var designW=1800;
-    var S=(designW-2*margin-2*lblW-corrW)/(abW+cdeW);RM_S=S;
+    var designW=1500;
+    var S=(designW-2*margin-2*lblW-corrW)/(abW+cdeW);
     var abPx=margin, corrX=margin+abW*S+lblW, cdePx=corrX+corrW+lblW;
     W=designW;
     var y1=26,y2=26;
@@ -9175,8 +9137,8 @@ function renderRackMap(){
     var mirror=blk.mirror,withGap=blk.back;
     var bw=rmBlockW(vis,withGap);
     var stripH2=RM_VIEW.mode==='aisle'?24:17,margin2=8,lblW2=38;
-    var designW2=1800;
-    var S2=Math.max((designW2-2*margin2-lblW2)/bw,RM_VIEW.mode==='aisle'?0.42:0.18);RM_S=S2;
+    var designW2=1500;
+    var S2=Math.max((designW2-2*margin2-lblW2)/bw,RM_VIEW.mode==='aisle'?0.42:0.18);
     W=Math.max(designW2,margin2*2+lblW2+bw*S2);
     var px=mirror?margin2:margin2+lblW2, y=30;
     parts.push('<text x="'+(margin2+4)+'" y="18" font-size="13" font-weight="bold" fill="#333">'+(RM_VIEW.mode==='aisle'?('走道 '+vis[0]):(RM_VIEW.zone+' 區'))+'　<tspan font-size="10" fill="#888" font-weight="normal">上=大號面／下=小號面'+(mirror?'（001 在右、往左遞增）':'（001 在左、往右遞增）')+'</tspan></text>');
@@ -9188,7 +9150,6 @@ function renderRackMap(){
   }
   wrap.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" font-family="Helvetica,Arial,sans-serif" style="display:block">'+parts.join('')+'</svg>';
   wrap.onclick=function(e){
-    if(rmSuppressClick){rmSuppressClick=false;return;}
     var g=e.target.closest?e.target.closest('.rm-bay'):null;
     if(g){rmSelect(g.getAttribute('data-a'),g.getAttribute('data-s'),parseInt(g.getAttribute('data-i'),10));return;}
     var ad=e.target.closest?e.target.closest('.rm-add'):null;
@@ -9214,9 +9175,7 @@ function renderRackMap(){
     items.push('<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:10px;height:10px;background:'+RM_COLORS['柱']+';display:inline-block;border-radius:2px"></span>柱</span>');
     lg.innerHTML=items.join('');
   }
-  rmSetView_installDrag(wrap);
   rmRenderEditor();
-  rmRenderCompare();
 }
 function rmSetView(v){RM_VIEW=v;renderRackMap();}
 function rmSelect(a,side,i){RM_SEL={a:a,side:side,i:i};RM_EDIT=rmClone(RM.aisles[a][side][i]);renderRackMap();}
@@ -9229,14 +9188,14 @@ function rmPlaceOpts(cur){
 }
 function rmRenderEditor(){
   var ed=document.getElementById('rm-editor');if(!ed)return;
-  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點上方平面圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>可直接<b>拖曳</b>架或柱微調位置。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」新增儲架。<br><br>格寬呈現原則：同架外框等長，格數由材積決定，架內平分（架長÷格數）；柱寬=缺號數×單儲位寬。</div>';return;}
+  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點左圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」新增儲架。<br><br>格寬呈現原則：同架外框等長，格數由材積決定，架內平分（架長÷格數）；柱寬=缺號數×單儲位寬。</div>';return;}
   var a=RM_SEL.a,side=RM_SEL.side,i=RM_SEL.i,bay=RM_EDIT;
   var h='<div style="font-weight:700;font-size:13.5px;margin-bottom:6px">'+a+'　'+(side==='出'?'小號面':'大號面')+'　第 '+(i+1)+' 架</div>';
   h+='<div style="font-size:12px;margin-bottom:6px">類型：<select id="rm-type" onchange="rmHarvest();rmRenderEditor()">'+
      ['架','柱','截短'].map(function(t){return '<option value="'+t+'"'+(t===bay.t||(bay.t==='待確認'&&t==='架')?' selected':'')+'>'+t+'</option>';}).join('')+'</select>'+
      (bay.t==='待確認'?' <span style="color:#e6a817">（原標記：待確認）</span>':'')+'</div>';
   if(bay.t!=='柱'&&bay.t!=='截短'){
-    h+='<div style="font-size:12px;margin-bottom:6px">架長：<input type="number" id="rm-len" value="'+(bay.Lfix?bay.L:rmRackLen(bay))+'" min="30" max="400" style="width:58px"> cm '+(bay.Lfix?'<span style="color:#c0392b">手動鎖定</span> <button onclick="rmLenAuto()" style="font-size:11px;cursor:pointer">自動</button>':'<span style="color:#2c8">自動('+rmContentLen(bay)+'cm)</span>')+'<br><span style="color:#888;font-size:11px">特大210／大175／鐵力士146／短鐵力士120／短115／特短80（改數字＝手動鎖定）</span></div>';
+    h+='<div style="font-size:12px;margin-bottom:6px">架長：<input type="number" id="rm-len" value="'+bay.L+'" min="30" max="400" style="width:58px"> cm　<span style="color:#888">長175／鐵力士146／短115</span></div>';
     h+='<table style="font-size:11.5px;border-collapse:collapse;width:100%"><tr style="color:#666"><th>號碼</th><th>層1</th><th>層2</th><th>層3</th><th>層4</th><th></th></tr>';
     for(var k=0;k<bay.s.length;k++){
       var sl=bay.s[k];
@@ -9245,14 +9204,9 @@ function rmRenderEditor(){
       h+='<td><button onclick="rmDelSlot('+k+')" title="刪除此儲位" style="color:#c0392b;border:none;background:none;cursor:pointer;font-size:13px">✕</button></td></tr>';
     }
     h+='</table><div style="margin:6px 0"><button onclick="rmAddSlot()" style="font-size:12px;cursor:pointer">＋ 新增儲位號碼</button></div>';
-  }else if(bay.t==='柱'){
-    h+='<div style="font-size:12px;margin:6px 0">柱文字：<input type="text" id="rm-ptext" value="'+rmEsc(bay.pt||'柱')+'" style="width:130px"></div>';
-    h+='<div style="font-size:12px;margin:6px 0">柱寬（儲位數）：<input type="number" id="rm-pw" value="'+(bay.pw||rmSpan(bay)||1)+'" min="1" max="30" step="1" style="width:58px"> 個</div>';
-    h+='<div style="font-size:12px;color:#888;margin:6px 0">柱＝blocked bay，不放貨。'+(bay.ba?'<br>共用柱背面：'+bay.ba+' '+bay.br:'')+'（切回「架」可編輯儲位）</div>';
   }else{
-    h+='<div style="font-size:12px;color:#888;margin:6px 0">截短＝斜向縮短區，無實體架。（切回「架」可編輯儲位）</div>';
+    h+='<div style="font-size:12px;color:#888;margin:6px 0">'+(bay.t==='柱'?'柱＝blocked bay，寬度=缺號數×單儲位寬、不縮短走道、不放貨。'+(bay.ba?'<br>共用柱背面：'+bay.ba+' '+bay.br:''):'截短＝斜向縮短區，無實體架。')+'（切回「架」可編輯儲位）</div>';
   }
-  h+='<div style="font-size:12px;margin:6px 0;border-top:1px dashed #ddd;padding-top:6px">位置微調（cm，或直接在圖上拖曳）：<input type="number" id="rm-dx" value="'+(Math.round((bay.dx||0)*10)/10)+'" step="1" style="width:66px"> <button onclick="rmResetDx()" style="font-size:11px;cursor:pointer">歸零</button></div>';
   h+='<div id="rm-msg" style="font-size:12px;min-height:18px;margin:4px 0"></div>';
   h+='<div style="display:flex;gap:6px;flex-wrap:wrap">'+
      '<button onclick="rmApply()" style="background:#2c6e49;color:#fff;border:none;border-radius:5px;padding:5px 14px;cursor:pointer;font-size:12.5px">套用</button>'+
@@ -9265,14 +9219,7 @@ function rmRenderEditor(){
 function rmHarvest(){
   if(!RM_EDIT)return;
   var t=document.getElementById('rm-type');if(t)RM_EDIT.t=t.value;
-  var len=document.getElementById('rm-len');
-  if(len&&RM_EDIT.t!=='柱'&&RM_EDIT.t!=='截短'){
-    var _v=parseInt(len.value,10)||0, _auto=rmSnapCat(rmContentLen(RM_EDIT));
-    if(_v&&_v!==_auto){RM_EDIT.L=_v;RM_EDIT.Lfix=true;}   // 改成非自動值＝手動鎖定
-    else {RM_EDIT.Lfix=false;RM_EDIT.L=_auto;}            // 等於自動值＝維持自動
-  }
-  var _dx=document.getElementById('rm-dx');if(_dx)RM_EDIT.dx=parseFloat(_dx.value)||0;
-  if(RM_EDIT.t==='柱'){var _pt=document.getElementById('rm-ptext');if(_pt)RM_EDIT.pt=_pt.value;var _pw=document.getElementById('rm-pw');if(_pw)RM_EDIT.pw=Math.max(1,parseInt(_pw.value,10)||1);}
+  var len=document.getElementById('rm-len');if(len&&RM_EDIT.t!=='柱'&&RM_EDIT.t!=='截短')RM_EDIT.L=parseInt(len.value,10)||175;
   if(RM_EDIT.t!=='柱'&&RM_EDIT.t!=='截短'){
     for(var k=0;k<RM_EDIT.s.length;k++){
       var q=document.getElementById('rm-q-'+k);if(!q)continue;
@@ -9317,9 +9264,8 @@ function rmApply(){
   if(eb.t==='柱'){eb.s=[];}
   if(eb.t==='截短'){eb.s=[];eb.r='';}
   RM.aisles[a][side][i]=rmClone(eb);
-  rmPersist();
   renderRackMap();
-  rmMsg('已套用（自動儲存）',true);
+  rmMsg('已套用，格寬已依「架長÷格數」重繪',true);
 }
 function rmInsertBay(a,side,at){
   var bays=RM.aisles[a][side];
@@ -9339,7 +9285,6 @@ function rmInsertBay(a,side,at){
   bays.splice(at,0,bay);
   bays.forEach(function(b,j){b.b=j+1;});
   RM_SEL={a:a,side:side,i:at};RM_EDIT=rmClone(bay);
-  rmPersist();
   renderRackMap();
   rmMsg('已新增一架（繼承架長 '+L+'cm、鄰架擺法 '+p+'、格數 '+nmax+'），號碼可在下方修改後套用',true);
 }
@@ -9361,7 +9306,6 @@ function rmDeleteBay(){
   }
   bays.forEach(function(b,j){b.b=j+1;});
   RM_SEL=null;RM_EDIT=null;
-  rmPersist();
   renderRackMap();
 }
 function rmExport(){
@@ -9378,140 +9322,6 @@ function rmExport(){
   var wbk=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wbk,ws,'實體架位_編輯版');
   XLSX.writeFile(wbk,'儲位總表_實體架位_編輯版.xlsx');
-}
-
-// ---------- 持久化 / 啟動 / 拖曳 / 材積比對 ----------
-function rmPersist(){try{idbPut('rackmap_rm',rmClone(RM));}catch(e){}}
-async function rmBoot(){
-  if(!RM){var saved=null;try{saved=await idbGet('rackmap_rm');}catch(e){}
-    if(saved&&saved.aisles&&saved.design){RM=saved;}else{rmInit();}}
-  renderRackMap();
-}
-function rmResetLayout(){
-  if(!confirm('確定將儲架平面圖重置為系統預設？你所有的編輯與拖曳將被清除。'))return;
-  RM=null;rmInit();rmPersist();RM_SEL=null;RM_EDIT=null;renderRackMap();
-}
-function rmLenAuto(){ if(!RM_EDIT)return; RM_EDIT.Lfix=false; RM_EDIT.L=rmSnapCat(rmContentLen(RM_EDIT)); rmRenderEditor(); }
-// 以最新上傳的「儲位總表」(STORAGE_MASTER) 更新各儲位擺法；架長依內容自動重算。
-function rmSyncFromMaster(){
-  if(typeof STORAGE_MASTER==='undefined'||!STORAGE_MASTER||!Object.keys(STORAGE_MASTER).length){
-    alert('尚未載入儲位總表。請先於「儲位調整」分頁上傳儲位總表，再回來按此更新。');return;
-  }
-  if(!RM)rmInit();
-  var lut={};
-  Object.values(STORAGE_MASTER).forEach(function(arr){(arr||[]).forEach(function(o){ if(o&&o.slot)lut[String(o.slot).trim()]=String(o.layout||'').trim(); });});
-  var changed=0, slots=0;
-  for(var a in RM.aisles){ for(var sd in RM.aisles[a]){ RM.aisles[a][sd].forEach(function(b){
-    if(b.t!=='架'&&b.t!=='待確認')return;
-    (b.s||[]).forEach(function(sl){ for(var L=0;L<4;L++){ var id=a+'-'+rmPad(sl.q)+'-'+(L+1); if(id in lut){ slots++; var nv=lut[id]||null; if((sl.lay[L]||null)!==(nv||null)){sl.lay[L]=nv; changed++;} } } });
-  }); } }
-  rmPersist(); renderRackMap();
-  alert('已依儲位總表更新：比對 '+slots.toLocaleString()+' 個儲位，變更 '+changed.toLocaleString()+' 筆擺法。架長已自動重算。');
-}
-function rmResetDx(){
-  var d=document.getElementById('rm-dx');if(d)d.value=0;
-  if(RM_EDIT)RM_EDIT.dx=0;
-  if(RM_SEL){var b=RM.aisles[RM_SEL.a][RM_SEL.side][RM_SEL.i];if(b){b.dx=0;rmPersist();renderRackMap();}}
-}
-function rmFinishDrag(a,side,i,dxpx){
-  var S=RM_S||1;var bays=(RM.aisles[a]&&RM.aisles[a][side]);
-  if(!bays||!bays[i]){renderRackMap();return;}
-  var blk=RM_BLOCKS.find(function(b){return b.aisles.indexOf(a)>=0;});
-  var mirror=blk?blk.mirror:false, withGap=blk?blk.back:false;
-  var geom=rmFaceGeom(a,side,withGap), unit=geom.unit||29;
-  var self=null; geom.items.forEach(function(it){if(it.i===i)self=it;});
-  if(!self){renderRackMap();return;}
-  var logical=(mirror?-1:1)*(dxpx/S);      // 螢幕→邏輯（鏡向面左右相反）
-  var slots=Math.round(logical/unit);      // 鎖定為整格
-  if(!slots){renderRackMap();return;}
-  var delta=slots*unit;
-  var selfStart=self.x+(bays[self.i].dx||0), left=null;
-  geom.items.forEach(function(it){if(it.x<self.x-0.01){if(!left||it.x>left.x)left=it;}});
-  if(left){var leftEnd=left.x+(bays[left.i].dx||0)+left.w;
-    if(selfStart+delta<leftEnd-0.01){delta=leftEnd-selfStart;slots=Math.round(delta/unit);delta=slots*unit;}}
-  if(Math.abs(delta)<0.01){renderRackMap();return;}
-  geom.items.forEach(function(it){if(it.x>=self.x-0.01){var b=bays[it.i];b.dx=(b.dx||0)+delta;}}); // 右側鄰架一起後移，不重疊
-  if(RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_EDIT)RM_EDIT.dx=bays[RM_SEL.i].dx;
-  rmPersist();renderRackMap();
-}
-var _rmDrag=null;
-function rmSetView_installDrag(wrap){
-  var svg=wrap.querySelector('svg');if(!svg)return;
-  svg.style.touchAction='none';
-  svg.onpointerdown=function(e){
-    var g=e.target.closest?e.target.closest('.rm-bay'):null;if(!g)return;
-    _rmDrag={x0:e.clientX,a:g.getAttribute('data-a'),side:g.getAttribute('data-s'),i:parseInt(g.getAttribute('data-i'),10),el:g,moved:false};
-    try{g.setPointerCapture(e.pointerId);}catch(_){}
-  };
-  svg.onpointermove=function(e){
-    if(!_rmDrag)return;var dx=e.clientX-_rmDrag.x0;
-    if(Math.abs(dx)>4)_rmDrag.moved=true;
-    if(_rmDrag.moved)_rmDrag.el.setAttribute('transform','translate('+dx.toFixed(1)+',0)');
-  };
-  var up=function(e){
-    if(!_rmDrag)return;var d=_rmDrag;_rmDrag=null;
-    if(d.el)d.el.removeAttribute('transform');
-    if(d.moved){rmSuppressClick=true;rmFinishDrag(d.a,d.side,d.i,e.clientX-d.x0);}
-  };
-  svg.onpointerup=up;svg.onpointercancel=up;
-}
-function rmRenderCompare(){
-  var box=document.getElementById('rm-compare');if(!box||!RM)return;
-  var cfg={};
-  for(var a in RM.aisles){for(var side in RM.aisles[a]){RM.aisles[a][side].forEach(function(b){
-    if(b.t!=='架'&&b.t!=='待確認')return;
-    (b.s||[]).forEach(function(sl){
-      for(var Ly=0;Ly<4;Ly++){var c=sl.lay[Ly];if(!c||c==='配')continue;
-        var id=a+'-'+rmPad(sl.q)+'-'+(Ly+1);
-        cfg[id]={code:c,vol:rmCodeVol(c)};}
-    });
-  });}}
-  var db=(typeof DB!=='undefined'&&DB)||[];
-  var head='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><span style="font-weight:700;font-size:14px;color:var(--accent,#6B4F35)">儲架材積 vs 真實儲位材積 比對</span>'+
-    '<button onclick="rmRenderCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">重新比對</button>'+
-    '<button onclick="rmExportCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">匯出異常</button>'+
-    '<button onclick="rmResetLayout()" style="font-size:12px;cursor:pointer;border:1px solid #c0392b;color:#c0392b;border-radius:5px;padding:3px 10px;background:#fff">重置平面圖</button></div>';
-  if(!db.length){box.innerHTML=head+'<div style="color:#888;font-size:12.5px;padding:6px">尚未載入 EPR 主報表，無法取得真實儲位材積。請先於「儲區總覽」上傳 EPR 主報表。</div>';RM_CMP_ANOM=[];return;}
-  var anomalies=[],cmp=0,eq=0,bigger=0,smaller=0,seen={};
-  db.forEach(function(r){
-    var id=String(r['儲位']||'').trim();if(!id||seen[id])return;seen[id]=1;
-    var c=cfg[id];if(!c)return;
-    var real=+r['儲位材積']||0;cmp++;
-    if(Math.abs(real-c.vol)<=0.005){eq++;return;}
-    var dir=real>c.vol?'變大':'變小';
-    if(dir==='變大')bigger++;else smaller++;
-    anomalies.push({slot:id,sku:String(r['商品編號']||'').trim(),code:c.code,cfg:c.vol,real:real,rc:rmClosestCode(real),dir:dir});
-  });
-  anomalies.sort(function(u,v){if(u.dir!==v.dir)return u.dir==='變大'?-1:1;return Math.abs(v.real-v.cfg)-Math.abs(u.real-u.cfg);});
-  RM_CMP_ANOM=anomalies;
-  var stat='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'+
-    '<span>已比對儲位：<b>'+cmp+'</b></span>'+
-    '<span style="color:#2c6e49">相符：<b>'+eq+'</b></span>'+
-    '<span style="color:#c0392b">不一致：<b>'+anomalies.length+'</b></span>'+
-    '<span style="color:#c0392b">↑ 真實變大（需調整）：<b>'+bigger+'</b></span>'+
-    '<span style="color:#a67c00">↓ 真實變小（可能刻意調降）：<b>'+smaller+'</b></span></div>';
-  var tbl;
-  if(anomalies.length){
-    tbl='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555"><th style="padding:4px 6px;text-align:left">儲位</th><th style="padding:4px 6px;text-align:left">商品編號</th><th style="padding:4px 6px">儲架設定碼</th><th style="padding:4px 6px">設定材積</th><th style="padding:4px 6px">真實材積</th><th style="padding:4px 6px">最接近碼</th><th style="padding:4px 6px">方向</th></tr></thead><tbody>';
-    anomalies.forEach(function(x){
-      var col=x.dir==='變大'?'#c0392b':'#a67c00';
-      tbl+='<tr style="border-top:1px solid #eee"><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.slot)+'</td><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.sku||'—')+'</td><td style="padding:3px 6px;text-align:center">'+x.code+'</td><td style="padding:3px 6px;text-align:right">'+x.cfg+'</td><td style="padding:3px 6px;text-align:right;font-weight:600">'+x.real+'</td><td style="padding:3px 6px;text-align:center">'+x.rc+'</td><td style="padding:3px 6px;text-align:center;color:'+col+';font-weight:600">'+(x.dir==='變大'?'↑ 變大':'↓ 變小')+'</td></tr>';
-    });
-    tbl+='</tbody></table></div>';
-  }else{
-    tbl='<div style="color:#2c6e49;font-size:12.5px;padding:6px">✓ 所有已比對儲位的材積皆與儲架設定相符，無異常。</div>';
-  }
-  box.innerHTML=head+stat+tbl;
-}
-var RM_CMP_ANOM=[];
-function rmExportCompare(){
-  if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
-  if(!RM_CMP_ANOM||!RM_CMP_ANOM.length){alert('目前無異常可匯出');return;}
-  var rows=[['儲位','商品編號','儲架設定碼','設定材積','真實材積','最接近碼','方向']];
-  RM_CMP_ANOM.forEach(function(x){rows.push([x.slot,x.sku||'',x.code,x.cfg,x.real,x.rc,x.dir]);});
-  var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'材積比對異常');
-  XLSX.writeFile(wb,'儲架材積比對_異常清單.xlsx');
 }
 
 </script>
