@@ -3856,14 +3856,17 @@ function plnComplexityConsolidate(config, ctx){
     famMap.get(f).push({sku,raw:r});
   });
   // 1) 產生「欄區塊」(每塊 ≤4 筆，帶層號)：主組滿 4→整欄；溢出碼收集後再切 4 成獨立欄。
-  const blocks=[]; const ovPool=[];
+  //    ★ 與中等/次高一致：<4 尺碼的小色另置，不與真正溢出碼混欄。
+  const blocks=[]; const ovPool=[]; const smallPool=[];
   [...famMap.keys()].sort().forEach(f=>{
     const rs=famMap.get(f).sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
+    if(rs.length<4){ smallPool.push(...rs); return; }
     const full=Math.floor(rs.length/4);
     for(let g=0;g<full;g++) blocks.push(rs.slice(g*4,g*4+4).map((r,i)=>({sku:r.sku,layer:i+1})));
     for(let i=full*4;i<rs.length;i++) ovPool.push(rs[i]);
   });
   for(let i=0;i<ovPool.length;i+=4) blocks.push(ovPool.slice(i,i+4).map((r,j)=>({sku:r.sku,layer:j+1})));
+  for(let i=0;i<smallPool.length;i+=4) blocks.push(smallPool.slice(i,i+4).map((r,j)=>({sku:r.sku,layer:j+1})));
   // 2) 連續空位 range（col-major：每欄 layer1→4）→ 依欄分組保序。
   const runCols=[]; let _curc=null;
   range.forEach(c=>{ if(!c)return; if(!_curc||_curc.col!==c.col||_curc.aisle!==c.aisle){_curc={aisle:c.aisle,col:c.col,byL:{}};runCols.push(_curc);} _curc.byL[c.layer]=c; });
@@ -8957,6 +8960,14 @@ function rmEsc(x){return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g
 function rmCodeVol(p){return (RM_MATERIALS[p]&&RM_MATERIALS[p].vol)||0;}
 function rmClosestCode(vol){var best='',bd=Infinity;for(var c in RM_MATERIALS){var d=Math.abs(RM_MATERIALS[c].vol-vol);if(d<bd){bd=d;best=c;}}return best;}
 
+// 特定實體架長（cm）— 依走道+號碼範圍覆寫預設 175。特大=210、短鐵力士=120。
+const RM_SPECIAL_L={E01:{'004-009':210,'014-019':210,'020-025':210,'031-036':210,'037-042':210,'046-051':210,'060-065':210,'043-045':120}};
+function rmApplySpecialLen(rm){
+  if(!rm||!rm.aisles)return;
+  for(var a in RM_SPECIAL_L){ var map=RM_SPECIAL_L[a]; if(!rm.aisles[a])continue;
+    ['出','回'].forEach(function(sd){ (rm.aisles[a][sd]||[]).forEach(function(b){
+      if((b.t==='架'||b.t==='待確認')&&map[b.r]!=null)b.L=map[b.r]; }); }); }
+}
 function rmInit(){
   RM={design:RM_DATA.design,aisles:{}};
   for(const a in RM_DATA.aisles){
@@ -8969,6 +8980,7 @@ function rmInit(){
       });
     }
   }
+  rmApplySpecialLen(RM);
 }
 function rmSlotPlace(sl){
   var cnt={},best=null,bn=0;
@@ -9013,23 +9025,25 @@ function rmAisleL(a){ // 走道設計長（號碼數）
   if(!L){['出','回'].forEach(function(sd){((RM.aisles[a]&&RM.aisles[a][sd])||[]).forEach(function(b){var m=/^(\d+)-(\d+)$/.exec(b.r||'');if(m)L=Math.max(L,parseInt(m[2],10));});});}
   return L||108;
 }
-function rmFaceGeom(a,side,withGap){ // 號碼格線定位：x=(號碼-1)×單位寬；架寬=號碼跨距×單位寬
+function rmFaceGeom(a,side,withGap){ // 累積實體排列：架寬=實體架長(cm)；柱/截短=缺號數×標準格寬；跨越後走道插入空隙
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
   var N=rmUnitN(a),unit=175/N,L=rmAisleL(a),gapCM=9*175; // 後走道=第9架後(9×175cm)，跨走道同一直線
-  var items=[],prevEnd=0,total=0,gapX=null;
+  var items=[],cum=0,total=0,gapX=null,gapDone=false;
   bays.forEach(function(b,i){
     var m=/^(\d+)-(\d+)$/.exec(b.r||''),lo=null,hi=null;
     if(m){lo=parseInt(m[1],10);hi=parseInt(m[2],10);}
     else if(/^\d+$/.test(b.r||'')){lo=hi=parseInt(b.r,10);}
-    var w=(lo!=null)?(hi-lo+1)*unit:Math.max(b.s.length,1)*unit;
-    if(b.t==='柱'&&b.pw)w=b.pw*unit;
-    if(b.t==='截短')w=Math.min(w,175); // 截短僅示意，斜向由實架末端呈現
-    var start=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):prevEnd;
-    var x=start;
-    if(withGap&&start>=gapCM-0.5){x+=RM_GAP_CM;if(gapX===null)gapX=gapCM;}
-    items.push({i:i,b:b,x:x,w:w});
-    prevEnd=start+w;
-    total=Math.max(total,x+w);
+    var span=(lo!=null)?(hi-lo+1):Math.max(b.s.length,1);
+    var w;
+    if(b.t==='柱'){ w=(b.pw?b.pw:span)*unit; }            // 柱：缺號數×標準格寬
+    else if(b.t==='截短'){ w=span*unit; }                 // 截短：號碼跨距（示意）
+    else { w=(b.L||175); }                                // 架/待確認：實體架長(cm)
+    // 後走道空隙：以「設計號碼位置」判定插入點（維持與跨走道同一直線），插入到累積實體座標
+    var ds=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):cum;
+    if(withGap&&!gapDone&&ds>=gapCM-0.5){ cum+=RM_GAP_CM; gapX=cum-RM_GAP_CM/2; gapDone=true; }
+    items.push({i:i,b:b,x:cum,w:w});
+    cum+=w;
+    total=cum;
   });
   return {unit:unit,items:items,total:total,gapX:gapX};
 }
@@ -9214,7 +9228,7 @@ function rmRenderEditor(){
      ['架','柱','截短'].map(function(t){return '<option value="'+t+'"'+(t===bay.t||(bay.t==='待確認'&&t==='架')?' selected':'')+'>'+t+'</option>';}).join('')+'</select>'+
      (bay.t==='待確認'?' <span style="color:#e6a817">（原標記：待確認）</span>':'')+'</div>';
   if(bay.t!=='柱'&&bay.t!=='截短'){
-    h+='<div style="font-size:12px;margin-bottom:6px">架長：<input type="number" id="rm-len" value="'+bay.L+'" min="30" max="400" style="width:58px"> cm　<span style="color:#888">長175／鐵力士146／短115</span></div>';
+    h+='<div style="font-size:12px;margin-bottom:6px">架長：<input type="number" id="rm-len" value="'+bay.L+'" min="30" max="400" style="width:58px"> cm　<span style="color:#888">特大210／長175／鐵力士146／短鐵力士120／短115</span></div>';
     h+='<table style="font-size:11.5px;border-collapse:collapse;width:100%"><tr style="color:#666"><th>號碼</th><th>層1</th><th>層2</th><th>層3</th><th>層4</th><th></th></tr>';
     for(var k=0;k<bay.s.length;k++){
       var sl=bay.s[k];
@@ -9357,7 +9371,10 @@ function rmExport(){
 function rmPersist(){try{idbPut('rackmap_rm',rmClone(RM));}catch(e){}}
 async function rmBoot(){
   if(!RM){var saved=null;try{saved=await idbGet('rackmap_rm');}catch(e){}
-    if(saved&&saved.aisles&&saved.design){RM=saved;}else{rmInit();}}
+    if(saved&&saved.aisles&&saved.design){RM=saved;
+      // 一次性套用特定實體架長（含既有已儲存資料），套完即持久化並記旗標。
+      try{ if(!localStorage.getItem('rm_special_len_v1')){ rmApplySpecialLen(RM); localStorage.setItem('rm_special_len_v1','1'); rmPersist(); } }catch(e){ rmApplySpecialLen(RM); }
+    }else{rmInit();}}
   renderRackMap();
 }
 function rmResetLayout(){
