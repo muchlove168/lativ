@@ -3693,114 +3693,86 @@ function plnComplexityConcentrate(config, ctx, opt){
   const dests=config.destination||[];
   const failed=[];
 
-  // ── 來源 SKU 正規化（帶來源位置，供移動距離計分）──
+  // 來源 SKU 正規化（帶來源位置，供移動距離計分）
   const rows=selected.map(r=>{
     const sku=String(r['商品編號']||'');
     const srcCell=plnFindSkuCell(cells,sku,config.source);
     const src=srcCell?cells[srcCell]:null;
-    return {sku, size:r['尺寸'], raw:r,
-      srcAisle:src?src.aisle:null, srcCol:src?src.col:null};
+    return {sku, size:r['尺寸'], raw:r, srcAisle:src?src.aisle:null, srcCol:src?src.col:null};
   }).filter(r=>r.sku);
 
-  // ── 依色(color7)分組；≥3 碼 = 集中色，<3 碼 = 零散 ──
-  const colorMap=new Map();
-  rows.forEach(r=>{ const c=plnSkuKuanSe(r.sku); if(!colorMap.has(c))colorMap.set(c,[]); colorMap.get(c).push(r); });
-  const groupedColors=[]; const scattered=[];
-  for(const [c7, crows] of colorMap){
-    if(crows.length>=3) groupedColors.push({color7:c7, kc:plnSkuKuan(c7), rows:crows});
-    else scattered.push(...crows);
-  }
-
-  const freeLayersOf=(a,col)=>plnColState(cells,a,col).empty;  // §1.6 只用空層、不位移
-  const distSum=(crows,a,col)=>crows.reduce((s,r)=>{
+  const emptyLayersOf=(a,col)=>plnColState(cells,a,col).empty;
+  const distSum=(grp,a,col)=>grp.reduce((s,r)=>{
     if(r.srcAisle!==a)return s+999;
     return s+(geo[a]?plnAisleDistance(r.srcCol,col,geo[a].min,geo[a].max):Math.abs(r.srcCol-col));
   },0);
 
-  // 為一個色挑最佳單欄：碼對層多 → 大材積 → 移動少 → 欄號 → 浪費少
-  function bestColumnForColor(crows){
-    const N=crows.length; let best=null,bestScore=null;
-    for(const a of dests){
-      for(const col of plnValidCols(cells,a)){
-        const empty=freeLayersOf(a,col);
-        if(empty.length<N)continue;
-        const asg=plnAssignColorToColumn(empty,crows);
-        if(!asg)continue;
-        const layout=(cells[plnCellId(a,col,empty[0])]||{}).layout||'';
-        const score=[N-asg.matched, -plnLayoutVol(layout), distSum(crows,a,col), col, empty.length-N];
-        if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){ bestScore=score; best={aisle:a,col,assign:asg.assign}; }
-      }
+  function placeAt(a,col,L,r){
+    const dstCell=plnCellId(a,col,L);
+    const srcCell=plnFindSkuCell(cells,r.sku,config.source);
+    let srcInfo=null;
+    if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
+    cells[dstCell].sku=r.sku; cells[dstCell].info=srcInfo; cells[dstCell].locked=true;
+    moves.push({phase:'SOURCE_TO_DEST',sku:r.sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
+  }
+
+  // 一個「主組」(≤4 同色尺碼) 放入單欄：碼序對層(S/M/L/XL→層1/2/3/4)。
+  function placeGroupInColumn(a,col,grp){
+    const empty=emptyLayersOf(a,col);
+    const asg=plnAssignColorToColumn(empty, grp.map(r=>({sku:r.sku,size:r.size})));
+    if(!asg)return false;
+    const byS={}; grp.forEach(r=>byS[r.sku]=r);
+    Object.entries(asg.assign).forEach(([sku,L])=>placeAt(a,col,L,byS[sku]));
+    return true;
+  }
+  // 為一個主組挑最佳整欄(需 ≥grp.length 空層)：碼對層多→浪費少→大材積→移動少→欄號。
+  function bestColForGroup(grp){
+    const k=grp.length; let best=null,bs=null;
+    for(const a of dests) for(const col of plnValidCols(cells,a)){
+      const empty=emptyLayersOf(a,col); if(empty.length<k)continue;
+      const asg=plnAssignColorToColumn(empty, grp.map(r=>({sku:r.sku,size:r.size}))); if(!asg)continue;
+      const layout=(cells[plnCellId(a,col,empty[0])]||{}).layout||'';
+      const score=[k-asg.matched, empty.length-k, -plnLayoutVol(layout), distSum(grp,a,col), col];
+      if(bs===null||plnCmpScoreArr(score,bs)<0){ bs=score; best={a,col}; }
     }
     return best;
   }
 
-  function placeColorInColumn(aisle,col,assign){
-    Object.entries(assign).forEach(([sku,L])=>{
-      const dstCell=plnCellId(aisle,col,L);
-      const srcCell=plnFindSkuCell(cells,sku,config.source);
-      let srcInfo=null;
-      if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
-      cells[dstCell].sku=sku; cells[dstCell].info=srcInfo; cells[dstCell].locked=true;
-      moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstCell,dstLayout:(cells[dstCell]||{}).layout||''});
-    });
+  // ── §1.2 依色切「主組(每4尺碼)＋溢出碼」：主組→整欄(碼對層)；溢出碼/小色→pool 密集打包 ──
+  //   ★ 修正舊版「整個色(含第5碼起)須塞進單欄」的過嚴條件——5 尺碼色永遠失敗→落到散排。
+  const colorMap=new Map();
+  rows.forEach(r=>{ const c=plnSkuKuanSe(r.sku); if(!colorMap.has(c))colorMap.set(c,[]); colorMap.get(c).push(r); });
+  const mainGroups=[]; const pool=[];
+  for(const [c7, crows] of colorMap){
+    const sorted=[...crows].sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
+    const full=Math.floor(sorted.length/4);
+    for(let g=0; g<full; g++) mainGroups.push({c7, kc:plnSkuKuan(c7), rows:sorted.slice(g*4,g*4+4)});
+    for(let i=full*4;i<sorted.length;i++) pool.push(sorted[i]);
   }
 
-  // 次高：為同款多色找「相鄰連續欄窗格」(col 號連續)，各色一欄、依色序排入。
-  function findAdjacentWindow(gcs){
-    const C=gcs.length; let best=null,bestScore=null;
-    for(const a of dests){
-      const cols=plnValidCols(cells,a);
-      for(let i=0;i+C<=cols.length;i++){
-        let consec=true;
-        for(let j=1;j<C;j++){ if(cols[i+j]!==cols[i+j-1]+1){consec=false;break;} }
-        if(!consec)continue;
-        const win=[]; let ok=true, pen=0, dist=0;
-        for(let k=0;k<C;k++){
-          const col=cols[i+k]; const empty=freeLayersOf(a,col);
-          if(empty.length<gcs[k].rows.length){ok=false;break;}
-          const asg=plnAssignColorToColumn(empty,gcs[k].rows);
-          if(!asg){ok=false;break;}
-          pen+=gcs[k].rows.length-asg.matched; dist+=distSum(gcs[k].rows,a,col);
-          win.push({aisle:a,col,assign:asg.assign});
-        }
-        if(!ok)continue;
-        const score=[pen,dist,cols[i]];
-        if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){ bestScore=score; best=win; }
-      }
-    }
-    return best;
+  // 主組排序：以款集中→同款相鄰(kc→c7)；以色集中→c7。逐一挑整欄（欄號小者優先→同款自然相鄰）。
+  mainGroups.sort((a,b)=> byKuan
+    ? (a.kc.localeCompare(b.kc) || a.c7.localeCompare(b.c7))
+    : (a.c7.localeCompare(b.c7)));
+  for(const mg of mainGroups){
+    const best=bestColForGroup(mg.rows);
+    if(best){ placeGroupInColumn(best.a,best.col,mg.rows); }
+    else { mg.rows.forEach(r=>pool.push(r)); }   // 無整欄可用→併入 pool 密集打包
   }
 
-  // ── 排入集中色 ──
-  groupedColors.sort((a,b)=>a.color7.localeCompare(b.color7));
-  if(!byKuan){
-    for(const gc of groupedColors){
-      const best=bestColumnForColor(gc.rows);
-      if(!best){ gc.rows.forEach(()=>failed.push({kc:gc.kc,n:1})); continue; }
-      placeColorInColumn(best.aisle,best.col,best.assign);
+  // ── pool 密集打包：同色相鄰、色內尺碼序；欄以「空層多者優先」consolidate，逐層填入 ──
+  pool.sort((a,b)=> a.sku.substring(0,7).localeCompare(b.sku.substring(0,7)) || PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku));
+  if(pool.length){
+    const colList=[];
+    dests.forEach(a=>plnValidCols(cells,a).forEach(col=>{ const e=emptyLayersOf(a,col); if(e.length)colList.push({a,col,e:e.length}); }));
+    colList.sort((x,y)=> (y.e-x.e) || (x.col-y.col));
+    let idx=0;
+    for(const c of colList){
+      if(idx>=pool.length)break;
+      const empty=emptyLayersOf(c.a,c.col).sort((x,y)=>x-y);
+      for(const L of empty){ if(idx>=pool.length)break; placeAt(c.a,c.col,L,pool[idx++]); }
     }
-  } else {
-    const kuanMap=new Map();
-    groupedColors.forEach(gc=>{ if(!kuanMap.has(gc.kc))kuanMap.set(gc.kc,[]); kuanMap.get(gc.kc).push(gc); });
-    for(const [,gcs] of [...kuanMap].sort((a,b)=>a[0].localeCompare(b[0]))){
-      gcs.sort((a,b)=>a.color7.localeCompare(b.color7));
-      const win=(gcs.length>1)?findAdjacentWindow(gcs):null;
-      if(win){ win.forEach(w=>placeColorInColumn(w.aisle,w.col,w.assign)); }
-      else {
-        // 單色款，或找不到相鄰窗格 → 退回各色獨立挑欄（仍保證同色同欄不同層）
-        for(const gc of gcs){
-          const best=bestColumnForColor(gc.rows);
-          if(!best){ gc.rows.forEach(()=>failed.push({kc:gc.kc,n:1})); continue; }
-          placeColorInColumn(best.aisle,best.col,best.assign);
-        }
-      }
-    }
-  }
-
-  // ── 零散 SKU → 找洞塞_匹配（在集中色排完後的剩餘空洞）──
-  if(scattered.length){
-    const hf=plnFindHoleFill(config, {cells, selected:scattered.map(r=>r.raw), capacity, deficit, xxSalesMax, moves}, {match:true});
-    (hf.failed||[]).forEach(f=>failed.push(f));
+    while(idx<pool.length){ failed.push({kc:plnSkuKuan(pool[idx].sku),n:1}); idx++; }
   }
 
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells,
