@@ -3847,17 +3847,48 @@ function plnComplexityConsolidate(config, ctx){
   const moves=[...baseMoves, ...bestInt.moves];                    // 內部整理 moves + 後續排入
   const range=bestInt._internalTargetRange.map(cid=>work[cid]);   // 連續空位（run 序）
 
-  // 排入：挑選 SKU 依尺碼碼升冪填入連續空位（碼1→run 首層…，碼序對層自然落地）
-  const rows=selected.map(r=>({sku:String(r['商品編號']||''), raw:r})).filter(r=>r.sku)
-    .sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
-  rows.forEach((r,i)=>{
-    const dst=range[i];
-    if(!dst){ failed.push({kc:plnSkuKuan(r.sku),n:1}); return; }
-    const srcCell=plnFindSkuCell(work,r.sku,config.source);
-    let srcInfo=null;
-    if(srcCell){ srcInfo=work[srcCell].info; work[srcCell].sku=null; work[srcCell].info=null; }
-    work[dst.cell].sku=r.sku; work[dst.cell].info=srcInfo; work[dst.cell].locked=true;
-    moves.push({phase:'SOURCE_TO_DEST',sku:r.sku,src:srcCell,dst:dst.cell,dstLayout:dst.layout||''});
+  // 排入（§1.2 家族切組定層，與「以色/以款集中」一致）：
+  //   同色(前7碼)每 4 個尺碼一組 → 整欄（組內位置→層：S/M/L/XL = 層1/2/3/4）；
+  //   第 5 碼起（XXL…）＝溢出碼 → 另集中打包成獨立欄（位置→層）。
+  //   ★ 修正舊「全域尺碼升冪 flat 填入」造成同尺碼跨色填滿一欄、尺碼未配對到層的錯誤。
+  const famMap=new Map();
+  selected.forEach(r=>{
+    const sku=String(r['商品編號']||''); if(!sku)return;
+    const f=sku.substring(0,7);
+    if(!famMap.has(f))famMap.set(f,[]);
+    famMap.get(f).push({sku,raw:r});
+  });
+  // 1) 產生「欄區塊」(每塊 ≤4 筆，帶層號)：主組滿 4→整欄；溢出碼收集後再切 4 成獨立欄。
+  const blocks=[]; const ovPool=[];
+  [...famMap.keys()].sort().forEach(f=>{
+    const rs=famMap.get(f).sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
+    const full=Math.floor(rs.length/4);
+    for(let g=0;g<full;g++) blocks.push(rs.slice(g*4,g*4+4).map((r,i)=>({sku:r.sku,layer:i+1})));
+    for(let i=full*4;i<rs.length;i++) ovPool.push(rs[i]);
+  });
+  for(let i=0;i<ovPool.length;i+=4) blocks.push(ovPool.slice(i,i+4).map((r,j)=>({sku:r.sku,layer:j+1})));
+  // 2) 連續空位 range（col-major：每欄 layer1→4）→ 依欄分組保序。
+  const runCols=[]; let _curc=null;
+  range.forEach(c=>{ if(!c)return; if(!_curc||_curc.col!==c.col||_curc.aisle!==c.aisle){_curc={aisle:c.aisle,col:c.col,byL:{}};runCols.push(_curc);} _curc.byL[c.layer]=c; });
+  // 3) 每個欄區塊放入一欄（位置對層；該層不存在時退用該欄最小未用層）。
+  let _ci=0;
+  blocks.forEach(block=>{
+    const rc=runCols[_ci++];
+    if(!rc){ block.forEach(it=>failed.push({kc:plnSkuKuan(it.sku),n:1})); return; }
+    const usedL=new Set();
+    block.forEach(it=>{
+      let dst=rc.byL[it.layer];
+      if(!dst||usedL.has(it.layer)){
+        const freeL=Object.keys(rc.byL).map(Number).sort((a,b)=>a-b).find(L=>!usedL.has(L));
+        dst=(freeL!=null)?rc.byL[freeL]:null; if(dst)usedL.add(freeL);
+      } else usedL.add(it.layer);
+      if(!dst){ failed.push({kc:plnSkuKuan(it.sku),n:1}); return; }
+      const srcCell=plnFindSkuCell(work,it.sku,config.source);
+      let srcInfo=null;
+      if(srcCell){ srcInfo=work[srcCell].info; work[srcCell].sku=null; work[srcCell].info=null; }
+      work[dst.cell].sku=it.sku; work[dst.cell].info=srcInfo; work[dst.cell].locked=true;
+      moves.push({phase:'SOURCE_TO_DEST',sku:it.sku,src:srcCell,dst:dst.cell,dstLayout:dst.layout||''});
+    });
   });
 
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:work,
