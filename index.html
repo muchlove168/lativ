@@ -9188,7 +9188,51 @@ const RM_BLOCKS=[
 const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B10','B09','B08','B07','B06','B05','B04','B03','B02','B01'],
  C:['C11','C10','C09','C08','C07','C06','C05','C04','C03','C02','C01'],D:['D11','D10','D09'],
  E:['E10','E09','E08','E07','E06','E05','E04','E03','E02','E01'],F:['F02','F01']};
-let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false;
+let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false,RM_ADD=null;
+const RM_UNIT_CM_OVR={A02:35,E08:35,E09:35};   // 每號碼實體寬(cm)特例：5格/175 或 6格/210
+const RM_LPOS={'C11回':177,'B10回':108};            // B10回以108格網定位使尾端與其他走道平齊(實際107號)                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
+const RM_CALIB_VER='v3_0705';
+// ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
+// ax=柱/截短「右緣」錨定位置（自走道口起算的號碼格數，實測換算）；未給 ax 者依自身號碼範圍推得。
+const RM_CALIB=[
+ {a:'B06',s:'出',m:{t:'柱',r:'007-009'},set:{r:'008-009',ax:9, br:'100-101',nt:'實測柱位8-9'}},
+ {a:'B06',s:'出',m:{t:'柱',r:'022-027'},set:{r:'023-027',ax:27,br:'082-086',nt:'實測柱位23-27'}},
+ {a:'B06',s:'出',m:{t:'柱',r:'040-045'},set:{r:'041-044',ax:44,br:'065-068',nt:'實測柱位41-44'}},
+ {a:'B05',s:'回',m:{t:'柱',r:'100-102'},set:{r:'100-101',ax:9, br:'008-009',nt:'實測(B06出8-9)'}},
+ {a:'B05',s:'回',m:{t:'柱',r:'082-087'},set:{r:'082-086',ax:27,br:'023-027',nt:'實測(B06出23-27)'}},
+ {a:'B05',s:'回',m:{t:'柱',r:'064-069'},set:{r:'065-068',ax:44,br:'041-044',nt:'實測(B06出41-44)'}},
+ {a:'B10',s:'回',m:{t:'柱',r:'098-104'},set:{ax:11,nt:'牆側柱(單面)｜實測≈對面006-011'}},
+ {a:'B10',s:'回',m:{t:'柱',r:'084-085'},set:{ax:26,nt:'牆側柱(單面)｜實測≈對面024-026'}},
+ {a:'B10',s:'回',m:{t:'柱',r:'064-069'},set:{ax:45,nt:'牆側柱(單面)｜實測≈對面041-045'}},
+ {a:'C11',s:'回',m:{t:'架',r:'178-182'},set:{nt:'凸出走道外，自177起才對應對面001'}},
+ {a:'C11',s:'回',m:{t:'柱',r:'166-167'},set:{ax:16,nt:'牆側柱(單面)｜實測≈對面011-016'}},
+ {a:'C11',s:'回',m:{t:'柱',r:'146-155'},set:{ax:34,nt:'牆側柱(單面)｜實測≈對面027-034'}},
+ {a:'C11',s:'回',m:{t:'截短',r:'092-130'},repl:[{t:'截短',r:'128-130'},{t:'柱',r:'125-127',nt:'牆側柱(單面)｜實測≈對面051-053'},{t:'截短',r:'092-124'}]},
+ {a:'D11',s:'出',m:{t:'柱',r:'067-069'},set:{ax:70,nt:'柱實位67-70；070儲位為當初錯位命名，實際位於柱後'}},
+ {a:'E06',s:'回',m:{t:'柱',r:'084-085'},set:{ax:58,br:'056-058',nt:'實測(E07出56-58)'}},
+ {a:'E01',s:'出',m:{t:'柱',r:'026-030'},set:{r:'026-029',ax:29,nt:'牆側柱(單面)｜實測(回面112-115)'}},
+ {a:'E01',s:'出',m:{t:'架',r:'043-045'},set:{out:1,nt:'鐵力士短架，凸出走道外側，不佔走道長度'}},
+ {a:'E01',s:'出',m:{t:'架',r:'043-045'},insAfter:{t:'柱',r:'',ax:45,pt:'柱',nt:'牆側柱(單面)｜實測(回面096-099)'}},
+];
+function rmLpos(a,side){var k=RM_LPOS[a+side];return k!=null?k:rmAisleL(a);}
+function rmUnitCM(a){return RM_UNIT_CM_OVR[a]||175/rmUnitN(a);}
+function rmApplyFieldCalib(rm){  // 對 RM 結構套用實測校正（冪等；亦用於 idb 舊資料遷移）
+  if(!rm||rm._calib===RM_CALIB_VER)return rm;
+  RM_CALIB.forEach(function(p){
+    var bays=rm.aisles[p.a]&&rm.aisles[p.a][p.s];if(!bays)return;
+    for(var i=0;i<bays.length;i++){
+      var b=bays[i];
+      if(b.t!==p.m.t||(b.r||'')!==p.m.r)continue;
+      if(p.set)for(var k in p.set)b[k]=p.set[k];
+      if(p.insAfter)bays.splice(i+1,0,Object.assign({b:0,L:175,ba:'',br:'',nt:'',s:[]},p.insAfter));
+      if(p.repl){var arr=p.repl.map(function(x){return Object.assign({b:0,L:175,ba:b.ba||'',br:b.br||'',nt:'',s:[]},x);});bays.splice.apply(bays,[i,1].concat(arr));}
+      break;
+    }
+    bays.forEach(function(bb,j){bb.b=j+1;});
+  });
+  rm._calib=RM_CALIB_VER;
+  return rm;
+}
 
 function rmWidth(p){return RM_WIDTHS[p]||RM_DEFAULT_W;}
 function rmKnown(p){return Object.prototype.hasOwnProperty.call(RM_WIDTHS,p);}
@@ -9224,6 +9268,7 @@ function rmInit(){
       });
     }
   }
+  rmApplyFieldCalib(RM);
 }
 function rmSlotPlace(sl){
   var cnt={},best=null,bn=0;
@@ -9268,26 +9313,62 @@ function rmAisleL(a){ // 走道設計長（號碼數）
   if(!L){['出','回'].forEach(function(sd){((RM.aisles[a]&&RM.aisles[a][sd])||[]).forEach(function(b){var m=/^(\d+)-(\d+)$/.exec(b.r||'');if(m)L=Math.max(L,parseInt(m[2],10));});});}
   return L||108;
 }
-function rmFaceGeom(a,side,withGap){ // 累積實體排列：架寬=實體架長(cm)；柱/截短=缺號數×標準格寬；跨越後走道插入空隙
+function rmFaceGeom(a,side,withGap){ // 錨定式排列(2026-07-05)：架=實體長依序緊排；柱/截短=吸收段，右緣錨定至實測/設計位置(誤差壓進柱寬)；面尾縮放對齊設計終點 → 各走道頭尾平齊
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
-  var N=rmUnitN(a),unit=175/N,L=rmAisleL(a),gapCM=9*175; // 後走道=第9架後(9×175cm)，跨走道同一直線
-  var items=[],cum=0,total=0,gapX=null,gapDone=false;
+  var unit=rmUnitCM(a),L=rmAisleL(a),Lp=rmLpos(a,side),gapCM=9*175;
+  var items=[],cum=null,total=0,gapX=null,gapDone=false,segStart=0,segFrom=0;
+  function rangeOf(bb){var m=/^(\d+)-(\d+)$/.exec(bb.r||'');if(m)return [parseInt(m[1],10),parseInt(m[2],10)];if(/^\d+$/.test(bb.r||''))return [parseInt(bb.r,10),parseInt(bb.r,10)];return null;}
+  function scaleSeg(from,to,x0,x1){ // 將 items[from..to) 內的架等比縮放至 [x0,x1]（跳過走道外凸出架）
+    var nat=0,k;for(k=from;k<to;k++)if(!items[k].out)nat+=items[k].w;
+    if(nat<=0)return x0;
+    var f=(x1-x0)/nat;if(f<0.02)f=0.02;
+    var x=x0;for(k=from;k<to;k++){if(items[k].out)continue;items[k].x=x;items[k].w*=f;x+=items[k].w;}
+    return x;
+  }
   bays.forEach(function(b,i){
-    var m=/^(\d+)-(\d+)$/.exec(b.r||''),lo=null,hi=null;
-    if(m){lo=parseInt(m[1],10);hi=parseInt(m[2],10);}
-    else if(/^\d+$/.test(b.r||'')){lo=hi=parseInt(b.r,10);}
-    var span=(lo!=null)?(hi-lo+1):Math.max(b.s.length,1);
+    var rg=rangeOf(b),lo=rg?rg[0]:null,hi=rg?rg[1]:null;
+    var ds=(lo!=null)?((side==='出')?(lo-1)*unit:(Lp-hi)*unit):null;
+    if(cum==null){cum=(ds!=null?Math.min(ds,0):0);segStart=cum;}
+    if(b.out){ // 走道外凸出架（如 E01 043-045）：不佔走道長度，僅以偏移標示
+      var xo=(ds!=null?ds:cum);if(gapDone&&ds!=null&&ds*1>=gapCM)xo+=RM_GAP_CM;
+      items.push({i:i,b:b,x:xo,w:rmRackLen(b),out:1});
+      return;
+    }
+    if(withGap&&!gapDone&&(ds!=null?ds:cum)>=gapCM-0.5){cum+=RM_GAP_CM;gapX=cum-RM_GAP_CM/2;gapDone=true;segStart=cum;segFrom=items.length;}
     var w;
-    if(b.t==='柱'){ w=(b.pw?b.pw:span)*RM_STD_SLOT; }        // 柱：缺號數×標準格寬
-    else if(b.t==='截短'){ w=Math.min(span*RM_STD_SLOT,175); } // 截短：示意，上限 175
-    else { w=rmRackLen(b); }                                // 架/待確認：依擺法內容自動算架長
-    // 後走道空隙：以「設計號碼位置」判定插入點（維持與跨走道同一直線），插入到累積實體座標
-    var ds=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):cum;
-    if(withGap&&!gapDone&&ds>=gapCM-0.5){ cum+=RM_GAP_CM; gapX=cum-RM_GAP_CM/2; gapDone=true; }
-    items.push({i:i,b:b,x:cum,w:w});
-    cum+=w;
+    if(b.t==='柱'||b.t==='截短'){
+      var axU=(b.ax!=null)?b.ax:(lo!=null?((side==='出')?hi:(Lp-lo+1)):null);
+      var end;
+      if(b.t==='柱'&&b.pw){end=cum+b.pw*RM_STD_SLOT;}              // 手動指定柱寬 → 固定寬
+      else if(axU!=null){
+        end=axU*unit;
+        if(gapDone&&end>=gapCM-0.5)end+=RM_GAP_CM;
+        else if(withGap&&!gapDone&&end>gapCM+0.5){end+=RM_GAP_CM;gapDone=true;gapX=gapCM+RM_GAP_CM/2;} // 吸收段本身跨越後走道（尾緣恰於走道口者不算跨越）
+      }
+      else {end=cum+rmSpan(b)*RM_STD_SLOT;}
+      if(end-cum<12){cum=scaleSeg(segFrom,items.length,segStart,end-12);} // 前段架微縮，柱至少留 12cm
+      w=Math.max(end-cum,12);
+      items.push({i:i,b:b,x:cum,w:w});cum+=w;
+      segStart=cum;segFrom=items.length;
+    }else{
+      w=rmRackLen(b);
+      items.push({i:i,b:b,x:cum,w:w});cum+=w;
+    }
     total=cum;
   });
+  // 面尾對齊：最後一段（柱/截短之後的架）縮放至該面設計終點 → 跨走道尾端平齊
+  if(items.length&&segFrom<items.length){
+    var lastIdx=items.length-1;
+    while(lastIdx>=segFrom&&items[lastIdx].out)lastIdx--;
+    if(lastIdx>=segFrom){
+      var lb=bays[items[lastIdx].i],rg2=rangeOf(lb);
+      if(rg2){
+        var T=(side==='出')?rg2[1]*unit:(Lp-rg2[0]+1)*unit;
+        if(gapDone&&T>=gapCM-0.5)T+=RM_GAP_CM;
+        if(T>segStart){cum=scaleSeg(segFrom,lastIdx+1,segStart,T);total=cum;}
+      }
+    }
+  }
   return {unit:unit,items:items,total:total,gapX:gapX};
 }
 // ---------- 渲染 ----------
@@ -9300,20 +9381,21 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
   var geom=rmFaceGeom(a,side,withGap);
   geom.items.forEach(function(it){
     var bay=it.b,i=it.i;
+    var py2=py+(it.out?Math.round(stripH*0.65):0);   // 走道外凸出架：往走道側偏移呈現
     var lx=it.x+(bay.dx||0);
     var xcm=mirror?(blockW-(lx+it.w)):lx;
     var x=px+xcm*S,w=it.w*S;
-    RM_HIT.push({a:a,side:side,i:i,x:x,w:w,py:py,h:stripH});
+    RM_HIT.push({a:a,side:side,i:i,x:x,w:w,py:py2,h:stripH});
     var sel=RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_SEL.i===i;
-    var tip=a+' '+side+'面 第'+(i+1)+'架｜'+bay.t+'｜'+(bay.r||'—')+(bay.ba?'｜背面 '+bay.ba+' '+bay.br:'')+(bay.nt?'｜'+bay.nt:'');
-    var g='<g class="rm-bay" data-a="'+a+'" data-s="'+side+'" data-i="'+i+'" style="cursor:pointer">';
+    var tip=a+' '+side+'面 第'+(i+1)+'架｜'+bay.t+'｜'+(bay.r||'—')+(bay.ba?'｜背面 '+bay.ba+' '+bay.br:'')+(it.out?'｜凸出走道外':'')+(bay.nt?'｜'+bay.nt:'');
+    var g='<g class="rm-bay" data-a="'+a+'" data-s="'+side+'" data-i="'+i+'" style="cursor:pointer"'+(it.out?' opacity="0.88"':'')+'>';
     if(bay.t==='柱'){
       var ptxt=bay.pt||'柱';
-      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="2" fill="'+RM_COLORS['柱']+'" stroke="#8a8a8a" stroke-width="1"/>';
-      if(w>=9)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.4).toFixed(1)+'" font-size="'+Math.min(8,Math.max(5,w/(ptxt.length*1.15))).toFixed(1)+'" fill="#333" text-anchor="middle" style="pointer-events:none">'+rmEsc(ptxt)+'</text>';
-      g+='<title>'+tip+'（柱寬='+rmSpan(bay)+'儲位）</title>';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py2+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="2" fill="'+RM_COLORS['柱']+'" stroke="#8a8a8a" stroke-width="1"/>';
+      if(w>=9)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py2+stripH/2+2.4).toFixed(1)+'" font-size="'+Math.min(8,Math.max(5,w/(ptxt.length*1.15))).toFixed(1)+'" fill="#333" text-anchor="middle" style="pointer-events:none">'+rmEsc(ptxt)+'</text>';
+      g+='<title>'+tip+'（柱寬'+(bay.pw?'='+bay.pw+'儲位(手動)':'＝自動吸收誤差 '+Math.round(it.w)+'cm')+'）</title>';
     }else if(bay.t==='截短'){
-      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#c8c8c8" stroke-dasharray="3,3"/>';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py2+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#c8c8c8" stroke-dasharray="3,3"/>';
       g+='<title>'+tip+'（斜向截短，點擊可改為架）</title>';
     }else{
       var n=bay.s.length;
@@ -9334,22 +9416,22 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
           var cx=x+li2*cw, sl2=byIdx[li2];
           if(sl2){
             var p=rmSlotPlace(sl2),col=p?(RM_COLORS[p]||RM_UNK_COLOR):'#dddddd';
-            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
-            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl2.q)+'</text>';
-            if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
+            g+='<rect x="'+cx.toFixed(1)+'" y="'+py2+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
+            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py2+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl2.q)+'</text>';
+            if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py2+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
           }else{
-            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="#f0f0f0" stroke="#fff" stroke-width="0.5"/>';
-            g+='<rect x="'+(cx+0.7).toFixed(1)+'" y="'+(py+0.7)+'" width="'+Math.max(0,cw-1.4).toFixed(1)+'" height="'+(stripH-1.4)+'" fill="none" stroke="#c9c9c9" stroke-width="0.6" stroke-dasharray="2,2"/>';
-            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(6,cw/2.9).toFixed(1)+'" fill="#c0c0c0" text-anchor="middle" style="pointer-events:none">空</text>';
+            g+='<rect x="'+cx.toFixed(1)+'" y="'+py2+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="#f0f0f0" stroke="#fff" stroke-width="0.5"/>';
+            g+='<rect x="'+(cx+0.7).toFixed(1)+'" y="'+(py2+0.7)+'" width="'+Math.max(0,cw-1.4).toFixed(1)+'" height="'+(stripH-1.4)+'" fill="none" stroke="#c9c9c9" stroke-width="0.6" stroke-dasharray="2,2"/>';
+            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py2+stripH/2+2.2)+'" font-size="'+Math.min(6,cw/2.9).toFixed(1)+'" fill="#c0c0c0" text-anchor="middle" style="pointer-events:none">空</text>';
           }
         }
-        if(cw<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
-      }else g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="#eeeeee" stroke="#cccccc"/>';
-      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="1.5" fill="none" stroke="#3a3a3a" stroke-width="1.4"/>';
-      if(bay.t==='待確認')g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#e6a817" stroke-width="1.5" stroke-dasharray="3,2"/>';
-      g+='<title>'+tip+'｜'+n+'格｜架長'+bay.L+'cm</title>';
+        if(cw<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py2+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
+      }else g+='<rect x="'+x.toFixed(1)+'" y="'+py2+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="#eeeeee" stroke="#cccccc"/>';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py2+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="1.5" fill="none" stroke="'+(it.out?'#b06a00':'#3a3a3a')+'" stroke-width="1.4"'+(it.out?' stroke-dasharray="4,2"':'')+'/>';
+      if(bay.t==='待確認')g+='<rect x="'+x.toFixed(1)+'" y="'+py2+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#e6a817" stroke-width="1.5" stroke-dasharray="3,2"/>';
+      g+='<title>'+tip+'｜'+n+'格｜架長'+Math.round(rmRackLen(bay))+'cm</title>';
     }
-    if(sel)g+='<rect x="'+(x-1).toFixed(1)+'" y="'+(py-1)+'" width="'+(w+2).toFixed(1)+'" height="'+(stripH+2)+'" fill="none" stroke="#111" stroke-width="1.8"/>';
+    if(sel)g+='<rect x="'+(x-1).toFixed(1)+'" y="'+(py2-1)+'" width="'+(w+2).toFixed(1)+'" height="'+(stripH+2)+'" fill="none" stroke="#111" stroke-width="1.8"/>';
     parts.push(g+'</g>');
   });
   // 末端「＋」（遠離走道端）
@@ -9430,7 +9512,7 @@ function renderRackMap(){
     if(ad){var aa=ad.getAttribute('data-a'),ss=ad.getAttribute('data-s');rmInsertBay(aa,ss,(RM.aisles[aa][ss]||[]).length);return;}
     var zl=e.target.closest?e.target.closest('.rm-zoomlbl'):null;
     if(zl){rmSetView({mode:'aisle',aisle:zl.getAttribute('data-aisle')});return;}
-    if(RM_SEL){RM_SEL=null;RM_EDIT=null;renderRackMap();}   // 點空白 → 取消選取、關閉編輯
+    if(RM_SEL||RM_ADD){RM_SEL=null;RM_EDIT=null;RM_ADD=null;renderRackMap();}   // 點空白 → 取消選取／新增、關閉編輯
   };
   var vb=document.getElementById('rm-viewbar');
   if(vb){
@@ -9464,7 +9546,8 @@ function rmPlaceOpts(cur){
 }
 function rmRenderEditor(){
   var ed=document.getElementById('rm-editor');if(!ed)return;
-  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點上方平面圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>可直接<b>拖曳</b>架或柱微調位置。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」新增儲架。<br><br>格寬呈現原則：同架外框等長，格數由材積決定，架內平分（架長÷格數）；柱寬=缺號數×單儲位寬。</div>';return;}
+  if(RM_ADD){rmRenderAddForm(ed);return;}
+  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點上方平面圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>可直接<b>拖曳</b>架或柱微調位置。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」或選架後「插入架」→ 先選<b>款式與格數</b>再建立。<br><br>排列原則（2026-07-05 實測校準）：架依實體長依序緊排；<b>柱／截短為吸收段</b>，右緣錨定在實測位置，長度誤差壓縮進柱寬；各走道頭尾自動平齊。</div>';return;}
   var a=RM_SEL.a,side=RM_SEL.side,i=RM_SEL.i,bay=RM_EDIT;
   var h='<div style="font-weight:700;font-size:13.5px;margin-bottom:6px">'+a+'　'+(side==='出'?'小號面':'大號面')+'　第 '+(i+1)+' 架</div>';
   h+='<div style="font-size:12px;margin-bottom:6px">類型：<select id="rm-type" onchange="rmHarvest();rmRenderEditor()">'+
@@ -9472,6 +9555,7 @@ function rmRenderEditor(){
      (bay.t==='待確認'?' <span style="color:#e6a817">（原標記：待確認）</span>':'')+'</div>';
   if(bay.t!=='柱'&&bay.t!=='截短'){
     h+='<div style="font-size:12px;margin-bottom:6px">架長：<input type="number" id="rm-len" value="'+(bay.Lfix?bay.L:rmRackLen(bay))+'" min="30" max="400" style="width:58px"> cm '+(bay.Lfix?'<span style="color:#c0392b">手動鎖定</span> <button onclick="rmLenAuto()" style="font-size:11px;cursor:pointer">自動</button>':'<span style="color:#2c8">自動('+rmContentLen(bay)+'cm)</span>')+'<br><span style="color:#888;font-size:11px">特大210／大175／鐵力士146／短鐵力士120／短115／特短80（改數字＝手動鎖定）</span></div>';
+    h+='<div style="font-size:12px;margin:6px 0"><label><input type="checkbox" id="rm-out"'+(bay.out?' checked':'')+'> 凸出走道外（不佔走道長度，偏移呈現，如 E01 043-045）</label></div>';
     h+='<table style="font-size:11.5px;border-collapse:collapse;width:100%"><tr style="color:#666"><th>號碼</th><th>層1</th><th>層2</th><th>層3</th><th>層4</th><th></th></tr>';
     for(var k=0;k<bay.s.length;k++){
       var sl=bay.s[k];
@@ -9482,7 +9566,8 @@ function rmRenderEditor(){
     h+='</table><div style="margin:6px 0"><button onclick="rmAddSlot()" style="font-size:12px;cursor:pointer">＋ 新增儲位號碼</button></div>';
   }else if(bay.t==='柱'){
     h+='<div style="font-size:12px;margin:6px 0">柱文字：<input type="text" id="rm-ptext" value="'+rmEsc(bay.pt||'柱')+'" style="width:130px"></div>';
-    h+='<div style="font-size:12px;margin:6px 0">柱寬（儲位數）：<input type="number" id="rm-pw" value="'+(bay.pw||rmSpan(bay)||1)+'" min="1" max="30" step="1" style="width:58px"> 個</div>';
+    h+='<div style="font-size:12px;margin:6px 0">柱寬（儲位數）：<input type="number" id="rm-pw" value="'+(bay.pw||'')+'" placeholder="自動" min="1" max="30" step="1" style="width:58px"> 個 <span style="color:#888;font-size:11px">留空＝自動（吸收前段架長誤差，右緣對齊錨點）</span></div>';
+    h+='<div style="font-size:12px;margin:6px 0">右緣錨點（自走道口第幾格）：<input type="number" id="rm-ax" value="'+(bay.ax!=null?bay.ax:'')+'" placeholder="依號碼推算" step="0.5" style="width:74px"> <span style="color:#888;font-size:11px">實測校正用；留空＝依柱號碼範圍</span></div>';
     h+='<div style="font-size:12px;color:#888;margin:6px 0">柱＝blocked bay，不放貨。'+(bay.ba?'<br>共用柱背面：'+bay.ba+' '+bay.br:'')+'（切回「架」可編輯儲位）</div>';
   }else{
     h+='<div style="font-size:12px;color:#888;margin:6px 0">截短＝斜向縮短區，無實體架。（切回「架」可編輯儲位）</div>';
@@ -9507,7 +9592,10 @@ function rmHarvest(){
     else {RM_EDIT.Lfix=false;RM_EDIT.L=_auto;}            // 等於自動值＝維持自動
   }
   var _dx=document.getElementById('rm-dx');if(_dx)RM_EDIT.dx=parseFloat(_dx.value)||0;
-  if(RM_EDIT.t==='柱'){var _pt=document.getElementById('rm-ptext');if(_pt)RM_EDIT.pt=_pt.value;var _pw=document.getElementById('rm-pw');if(_pw)RM_EDIT.pw=Math.max(1,parseInt(_pw.value,10)||1);}
+  if(RM_EDIT.t==='柱'){var _pt=document.getElementById('rm-ptext');if(_pt)RM_EDIT.pt=_pt.value;
+    var _pw=document.getElementById('rm-pw');if(_pw){var _pv=parseInt(_pw.value,10);if(_pv>=1)RM_EDIT.pw=_pv;else delete RM_EDIT.pw;}
+    var _ax=document.getElementById('rm-ax');if(_ax){var _av=parseFloat(_ax.value);if(_ax.value!==''&&isFinite(_av))RM_EDIT.ax=_av;else delete RM_EDIT.ax;}}
+  var _out=document.getElementById('rm-out');if(_out){if(_out.checked)RM_EDIT.out=1;else delete RM_EDIT.out;}
   if(RM_EDIT.t!=='柱'&&RM_EDIT.t!=='截短'){
     for(var k=0;k<RM_EDIT.s.length;k++){
       var q=document.getElementById('rm-q-'+k);if(!q)continue;
@@ -9556,27 +9644,68 @@ function rmApply(){
   renderRackMap();
   rmMsg('已套用（自動儲存）',true);
 }
-function rmInsertBay(a,side,at){
+const RM_CAT_NAMES={210:'特大 210cm',175:'大 175cm',146:'鐵力士 146cm',120:'短鐵力士 120cm',115:'短 115cm',80:'特短 80cm'};
+function rmInsertBay(a,side,at){ // 開啟「新增儲架」表單（選款式＋手動輸入格數）
   var bays=RM.aisles[a][side];
   var nb=bays[Math.min(at,bays.length-1)]||bays[at-1]||null;
-  var L=nb?(nb.L||175):175,p='A';
+  var p='A';
   if(nb&&nb.s&&nb.s.length){
     var c={};nb.s.forEach(function(s){var x=rmSlotPlace(s);if(x)c[x]=(c[x]||0)+1;});
     var ks=Object.keys(c).sort(function(u,v){return c[v]-c[u];});if(ks.length)p=ks[0];
   }
-  var nmax=Math.max(1,Math.floor(L/rmWidth(p)));
+  var cat=rmSnapCat(nb?rmRackLen(nb):175);
+  if(RM_RACK_CATS.indexOf(cat)<0)cat=175;
+  RM_ADD={a:a,side:side,at:at,L:cat,p:p,n:(nb&&nb.s.length)||Math.max(1,Math.floor(cat/rmWidth(p)))};
+  RM_SEL=null;RM_EDIT=null;
+  renderRackMap();
+  var el=document.getElementById('rm-editor');if(el)el.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function rmAddHint(){
+  var Ls=document.getElementById('rm-add-L'),ps=document.getElementById('rm-add-p'),hint=document.getElementById('rm-add-hint');
+  if(!Ls||!ps||!hint)return;
+  var L=parseInt(Ls.value,10)||175,p=ps.value||'A',nmax=Math.max(1,Math.floor(L/rmWidth(p)));
+  hint.textContent='此款式（'+L+'cm）× 擺法 '+p+'（'+rmWidth(p)+'cm）最多可放 '+nmax+' 格';
+}
+function rmAddCancel(){RM_ADD=null;renderRackMap();}
+function rmAddConfirm(){
+  if(!RM_ADD)return;
+  var d=RM_ADD;
+  var L=parseInt(document.getElementById('rm-add-L').value,10)||175;
+  var p=document.getElementById('rm-add-p').value||'A';
+  var n=parseInt(document.getElementById('rm-add-n').value,10)||0;
+  if(!(n>=1&&n<=30)){rmMsg('格數需為 1~30',false);return;}
+  var wp=rmWidth(p),nmax=Math.floor(L/wp);
+  if(n>nmax){rmMsg('此架長 '+L+'cm 放不下 '+n+' 個 '+p+'（需 '+(n*wp)+'cm，最多 '+nmax+' 格）',false);return;}
   var used={},sd;
-  for(sd in RM.aisles[a])RM.aisles[a][sd].forEach(function(b){b.s.forEach(function(s){used[s.q]=1;});});
+  for(sd in RM.aisles[d.a])RM.aisles[d.a][sd].forEach(function(bb){bb.s.forEach(function(s){used[s.q]=1;});});
   var q=1,slots=[];
-  for(var k=0;k<nmax;k++){while(used[q])q++;used[q]=1;slots.push({q:q,lay:[p,p,p,p]});}
-  var bay={b:0,t:'架',r:'',L:L,ba:'',br:'',nt:'新增架',s:slots};
+  for(var k=0;k<n;k++){while(used[q])q++;used[q]=1;slots.push({q:q,lay:[p,p,p,p]});}
+  var bay={b:0,t:'架',r:'',L:L,Lfix:true,ba:'',br:'',nt:'新增架',s:slots};
   bay.r=rmBayRange(bay);
-  bays.splice(at,0,bay);
-  bays.forEach(function(b,j){b.b=j+1;});
-  RM_SEL={a:a,side:side,i:at};RM_EDIT=rmClone(bay);
+  var bays=RM.aisles[d.a][d.side];
+  bays.splice(d.at,0,bay);
+  bays.forEach(function(bb,j){bb.b=j+1;});
+  RM_ADD=null;RM_SEL={a:d.a,side:d.side,i:d.at};RM_EDIT=rmClone(bay);
   rmPersist();
   renderRackMap();
-  rmMsg('已新增一架（繼承架長 '+L+'cm、鄰架擺法 '+p+'、格數 '+nmax+'），號碼可在下方修改後套用',true);
+  rmMsg('已新增儲架（'+(RM_CAT_NAMES[L]||L+'cm')+' × '+n+' 格，擺法 '+p+'，架長已鎖定）。號碼可於上方修改後套用。',true);
+}
+function rmRenderAddForm(ed){
+  var d=RM_ADD;
+  var opts=RM_RACK_CATS.slice().reverse().map(function(c){return '<option value="'+c+'"'+(c===d.L?' selected':'')+'>'+(RM_CAT_NAMES[c]||c+'cm')+'</option>';}).join('');
+  var h='<div style="font-weight:700;font-size:13.5px;margin-bottom:8px">新增儲架 — '+d.a+'　'+(d.side==='出'?'小號面':'大號面')+'　插入至第 '+(d.at+1)+' 位</div>';
+  h+='<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:12.5px;margin-bottom:6px">';
+  h+='<label>款式：<select id="rm-add-L" onchange="rmAddHint()">'+opts+'</select></label>';
+  h+='<label>擺法：<select id="rm-add-p" onchange="rmAddHint()">'+rmPlaceOpts(d.p)+'</select></label>';
+  h+='<label>格數（儲位數）：<input type="number" id="rm-add-n" value="'+d.n+'" min="1" max="30" step="1" style="width:56px" onfocus="this.select()"></label>';
+  h+='</div>';
+  h+='<div id="rm-add-hint" style="font-size:12px;color:#2c6e49;margin-bottom:6px"></div>';
+  h+='<div style="font-size:11.5px;color:#888;margin-bottom:8px">格數可少於上限（如大架只放 5 格）；圖上會依「架長 ÷ 格數」平分呈現。號碼自動取走道內未用的最小號，建立後可再修改。</div>';
+  h+='<div id="rm-msg" style="font-size:12px;min-height:18px;margin:4px 0"></div>';
+  h+='<div style="display:flex;gap:8px"><button onclick="rmAddConfirm()" style="background:#2c6e49;color:#fff;border:none;border-radius:5px;padding:5px 16px;cursor:pointer;font-size:12.5px">建立</button>'+
+     '<button onclick="rmAddCancel()" style="font-size:12px;cursor:pointer">取消</button></div>';
+  ed.innerHTML=h;
+  rmAddHint();
 }
 function rmDeleteBay(){
   var a=RM_SEL.a,side=RM_SEL.side,i=RM_SEL.i,bays=RM.aisles[a][side];
@@ -9619,7 +9748,7 @@ function rmExport(){
 function rmPersist(){try{idbPut('rackmap_rm',rmClone(RM));}catch(e){}}
 async function rmBoot(){
   if(!RM){var saved=null;try{saved=await idbGet('rackmap_rm');}catch(e){}
-    if(saved&&saved.aisles&&saved.design){RM=saved;}else{rmInit();}}
+    if(saved&&saved.aisles&&saved.design){var had=saved._calib===RM_CALIB_VER;RM=rmApplyFieldCalib(saved);if(!had)rmPersist();}else{rmInit();}}
   renderRackMap();
 }
 function rmResetLayout(){
