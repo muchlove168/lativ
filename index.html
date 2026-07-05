@@ -248,7 +248,7 @@
   <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
   <div class="tab" onclick="switchTab('compare')">銷售比對</div>
   <div class="tab" onclick="switchTab('plnarr')">儲位調整/新品安排</div>
-  <div class="tab" onclick="switchTab('rackmap')">儲架平面編輯</div>
+  <div class="tab" onclick="switchTab('rackmap')">儲架平面圖</div>
 </div>
 
 <div class="content">
@@ -872,7 +872,7 @@ function switchTab(name){
   }
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='slotdata'){renderSlotData();return;}
-  if(name==='rackmap'){renderRackMap();return;}
+  if(name==='rackmap'){rmBoot();return;}
   if(name==='compare'){renderSalesCompare();return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
@@ -966,6 +966,8 @@ function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.ope
 function idbPut(key,value){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbGet(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readonly');const req=tx.objectStore(IDB_STORE).get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>{db.close();reject(req.error);};}));}
 function idbClear(){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).clear();tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
+function idbDumpAll(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly'),os=tx.objectStore(IDB_STORE),out={};var kr=os.getAllKeys();kr.onsuccess=function(){var keys=kr.result||[];var vr=os.getAll();vr.onsuccess=function(){var vals=vr.result||[];for(var i=0;i<keys.length;i++)out[keys[i]]=vals[i];db.close();resolve(out);};vr.onerror=function(){db.close();reject(vr.error);};};kr.onerror=function(){db.close();reject(kr.error);};});});}
+function idbRestoreAll(obj){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readwrite'),os=tx.objectStore(IDB_STORE);Object.keys(obj||{}).forEach(function(k){os.put(obj[k],k);});tx.oncomplete=function(){db.close();resolve();};tx.onerror=function(){db.close();reject(tx.error);};});});}
 async function saveEPRData(dateLabel){try{await idbPut('epr_rows',DB);await idbPut('epr_date',dateLabel);}catch(e){console.warn('EPR IDB save failed:',e);}}
 async function loadEPRData(){
   try{
@@ -8612,11 +8614,15 @@ async function exportAllData(){
       try{history[k.replace(HIST_PREFIX,'')]=JSON.parse(localStorage.getItem(k));}catch(e){}
     });
 
-    // 4. 組裝完整資料包
+    // 4. 組裝完整資料包（v2：完整鏡射整台裝置，含儲架平面圖/拖曳/儲位數等所有 tab 設定）
+    let idbAll={};try{idbAll=await idbDumpAll();}catch(e){}
+    const localAll={};try{for(let li=0;li<localStorage.length;li++){const lk=localStorage.key(li);localAll[lk]=localStorage.getItem(lk);}}catch(e){}
     const dataPackage={
-      __version:'lativ_backup_v1',
+      __version:'lativ_backup_v2',
       __exportedAt:new Date().toISOString(),
       __exportedFrom:navigator.userAgent.substring(0,100),
+      idbAll:idbAll,
+      localAll:localAll,
       eprData:{rows:eprRows,date:eprDate,count:eprRows.length},
       fw26Data:{rows:fw26Rows,count:fw26Rows.length},
       arrangeData:{rows:arrangeRows,count:arrangeRows.length},
@@ -8662,6 +8668,21 @@ async function importAllData(file){
       }
 
       let imported={epr:0,fw26:0,arrange:0,forecast:0,settings:0,history:0};
+
+      // v2：完整鏡射還原（涵蓋儲架平面圖、拖曳位置、儲位數與所有 tab 設定/格式）
+      if(pkg.idbAll||pkg.localAll){
+        if(pkg.idbAll){await idbRestoreAll(pkg.idbAll);
+          imported.epr=((pkg.idbAll.epr_rows)||[]).length;
+          imported.fw26=((pkg.idbAll.fw26_rows)||[]).length;
+          imported.arrange=((pkg.idbAll.arrange_rows)||[]).length;
+          imported.forecast=((pkg.idbAll.forecast_rows)||[]).length;}
+        if(pkg.localAll){Object.keys(pkg.localAll).forEach(function(k){try{localStorage.setItem(k,pkg.localAll[k]);imported.settings++;}catch(e){}});}
+        hideLoading();
+        const exportTime2=pkg.__exportedAt?new Date(pkg.__exportedAt).toLocaleString('zh-TW'):'未知';
+        alert('✓ 匯入成功（完整鏡射）！\n\n備份時間：'+exportTime2+'\n\n已完整同步來源裝置：\n• EPR：'+imported.epr.toLocaleString()+' 筆\n• FW26：'+imported.fw26.toLocaleString()+' 筆\n• 設定/格式項目：'+imported.settings+'\n• 含儲架平面圖、拖曳位置、儲位數等所有調整\n\n頁面將自動重新整理...');
+        setTimeout(function(){location.reload();},600);
+        return;
+      }
 
       // 1. 還原 IndexedDB
       if(pkg.eprData&&pkg.eprData.rows){
@@ -9117,15 +9138,17 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 <div class="tab-panel" id="tab-rackmap">
   <div style="padding:12px 16px">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px">
-      <span style="font-weight:700;font-size:15px;color:var(--accent)">1F 儲架平面編輯</span>
+      <span style="font-weight:700;font-size:15px;color:var(--accent)">1F 儲架平面圖</span>
       <span id="rm-viewbar" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></span>
       <span id="rm-legend" style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;align-items:center;color:#555"></span>
       <button onclick="rmExport()" style="font-size:12px;cursor:pointer;border:1px solid var(--border,#ccc);border-radius:5px;padding:4px 10px;background:var(--surface,#f7f7f7)">匯出 Excel</button>
-      <span style="font-size:11px;color:#a67c00">⚠ O／R 等擺法尚無官方材積寬度，暫以 36cm 呈現並標「?」</span>
+      <button onclick="rmSyncFromMaster()" style="font-size:12px;cursor:pointer;border:1px solid #2c6e49;color:#2c6e49;border-radius:5px;padding:4px 10px;background:#fff" title="以最新上傳的儲位總表更新各儲位擺法，架長會自動重算">↻ 依儲位總表更新擺法</button>
+      <span style="font-size:11px;color:#2c6e49">💡 可直接拖曳「架/柱」微調位置；所有編輯自動儲存。</span>
     </div>
-    <div style="display:flex;gap:12px;align-items:flex-start">
-      <div id="rm-canvas" style="flex:1;overflow:auto;max-height:76vh;border:1px solid var(--border,#ddd);border-radius:8px;background:#fff"></div>
-      <div id="rm-editor" style="width:340px;flex:none;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;max-height:76vh;overflow:auto;background:var(--surface,#fafafa)"></div>
+    <div style="display:flex;flex-direction:column;gap:10px;align-items:stretch">
+      <div id="rm-canvas" style="width:100%;overflow:auto;max-height:70vh;border:1px solid var(--border,#ddd);border-radius:8px;background:#fff"></div>
+      <div id="rm-editor" style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;max-height:40vh;overflow:auto;background:var(--surface,#fafafa)"></div>
+      <div id="rm-compare" style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;background:var(--surface,#fafafa)"></div>
     </div>
   </div>
 </div>
@@ -9147,11 +9170,14 @@ const RM_DATA={"design":{"A02":123,"A03":108,"A04":108,"A05":108,"A06":108,"A07"
 // 每走道一帶：上條=大號面(回)、下條=小號面(出)；標示=走道名×2，貼走道側
 // 幾何單位=公分：架=實體架長(格數不足面典型者按比例縮短)；柱/截短=缺號數×單儲位寬 → 跨走道自然對位
 // ============================================================
-const RM_WIDTHS={A:28,B:24,C:31,D:34,G:36,H:27,L:36};
-const RM_COLORS={A:'#4E79A7',G:'#59A14F',C:'#F28E2B',B:'#E15759',D:'#B07AA1',H:'#76B7B2',L:'#9C755F','柱':'#3B3B3B'};
+const RM_MATERIALS={A:{len:27,w:35,vol:1.334},B:{len:23,w:28,vol:0.909},C:{len:46,w:28,vol:1.819},D:{len:49,w:32,vol:2.214},E:{len:41,w:40,vol:2.316},F:{len:41,w:40,vol:2.316},G:{len:54,w:35,vol:2.669},H:{len:27,w:35,vol:1.334},I:{len:55,w:40,vol:4.66},J:{len:41,w:40,vol:2.316},K:{len:55,w:74,vol:5.747},L:{len:52,w:35,vol:2.57},M:{len:40,w:60,vol:7.625},N:{len:40,w:60,vol:10.166},O:{len:60,w:40,vol:20.333},P:{len:54,w:35,vol:2.002},Q:{len:40,w:40,vol:3.389},R:{len:52,w:35,vol:2.57},S:{len:20,w:20,vol:0.141},T:{len:60,w:40,vol:3.389},U:{len:1,w:1,vol:0.0001},V:{len:200,w:195,vol:172.088},W:{len:50,w:40,vol:3.53},X:{len:60,w:40,vol:4.236},Y:{len:60,w:40,vol:63.54},Z:{len:10,w:10,vol:0.035}};
+const RM_WIDTHS={A:27,B:23,C:28,D:35,E:35,F:40,G:35,H:27,I:70,J:40,K:70,L:35,M:40,N:40,O:40,P:35,Q:40,R:40,S:35,T:40,U:27,V:40,W:40,X:40,Y:40,Z:27};
+const RM_STD_SLOT=35;                         // 缺號/柱 之單一號碼標準寬(cm)
+const RM_RACK_CATS=[80,115,120,146,175,210];  // 架長分類(cm)：特短/短/短鐵力士/鐵力士/大/特大
+const RM_COLORS={A:'#4E79A7',G:'#59A14F',C:'#F28E2B',B:'#E15759',D:'#B07AA1',H:'#76B7B2',L:'#9C755F','柱':'#d9d9d9'};
 const RM_UNK_COLOR='#9AA5B1';
 const RM_DEFAULT_W=36;
-const RM_PLACES=['A','G','C','B','D','H','L','O','R','Q','N','W','E','F','J','配'];
+const RM_PLACES=['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','配'];
 const RM_GAP_CM=160;          // 後走道留空寬
 const RM_BAYGAP_CM=4;         // 架與架間隙
 const RM_BLOCKS=[
@@ -9162,13 +9188,30 @@ const RM_BLOCKS=[
 const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B10','B09','B08','B07','B06','B05','B04','B03','B02','B01'],
  C:['C11','C10','C09','C08','C07','C06','C05','C04','C03','C02','C01'],D:['D11','D10','D09'],
  E:['E10','E09','E08','E07','E06','E05','E04','E03','E02','E01'],F:['F02','F01']};
-let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'};
+let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false;
 
 function rmWidth(p){return RM_WIDTHS[p]||RM_DEFAULT_W;}
 function rmKnown(p){return Object.prototype.hasOwnProperty.call(RM_WIDTHS,p);}
 function rmPad(q){return String(q).padStart(3,'0');}
 function rmClone(o){return JSON.parse(JSON.stringify(o));}
+function rmEsc(x){return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function rmCodeVol(p){return (RM_MATERIALS[p]&&RM_MATERIALS[p].vol)||0;}
+function rmClosestCode(vol){var best='',bd=Infinity;for(var c in RM_MATERIALS){var d=Math.abs(RM_MATERIALS[c].vol-vol);if(d<bd){bd=d;best=c;}}return best;}
 
+// 架長改為「依擺法內容自動計算」：架寬=各號碼擺法寬度總和（缺號/柱=標準寬）。
+// 內容總長 → 對應到最接近的分類，讓同號碼範圍走道(如 B04/B05)長度一致、且柱走道不再溢出。
+function rmContentLen(bay){
+  var m=/^(\d+)-(\d+)$/.exec(bay.r||''),lo=null,hi=null;
+  if(m){lo=parseInt(m[1],10);hi=parseInt(m[2],10);}
+  var byN={}; (bay.s||[]).forEach(function(sl){byN[sl.q]=rmSlotPlace(sl);});
+  var sum=0;
+  if(lo!=null){ for(var n=lo;n<=hi;n++){ var p=byN[n]; sum+=(p?rmWidth(p):RM_STD_SLOT); } }
+  else { (bay.s||[]).forEach(function(sl){ var p=rmSlotPlace(sl); sum+=(p?rmWidth(p):RM_STD_SLOT); }); }
+  return sum||RM_STD_SLOT;
+}
+function rmSnapCat(cm){ for(var i=0;i<RM_RACK_CATS.length;i++){ if(cm<=RM_RACK_CATS[i]+6)return RM_RACK_CATS[i]; } return Math.round(cm/5)*5; }
+// 架長(cm)：手動鎖定(Lfix)優先，否則依內容自動計算並吸附分類。
+function rmRackLen(bay){ if(bay.Lfix&&bay.L)return bay.L; return rmSnapCat(rmContentLen(bay)); }
 function rmInit(){
   RM={design:RM_DATA.design,aisles:{}};
   for(const a in RM_DATA.aisles){
@@ -9210,6 +9253,7 @@ function rmCapSig(bay){return (bay.L||175)+'|'+bay.s.map(function(s){return rmSl
 
 // ---------- 幾何 ----------
 function rmSpan(bay){ // 佔用儲位數（含缺號）
+  if(bay.t==='柱'&&bay.pw)return bay.pw;
   var m=/^(\d+)-(\d+)$/.exec(bay.r||'');
   var sp=m?Math.abs(parseInt(m[2],10)-parseInt(m[1],10))+1:(/^\d+$/.test(bay.r||'')?1:1);
   if(bay.t==='架'||bay.t==='待確認')sp=Math.max(sp,bay.s.length||1);
@@ -9224,22 +9268,25 @@ function rmAisleL(a){ // 走道設計長（號碼數）
   if(!L){['出','回'].forEach(function(sd){((RM.aisles[a]&&RM.aisles[a][sd])||[]).forEach(function(b){var m=/^(\d+)-(\d+)$/.exec(b.r||'');if(m)L=Math.max(L,parseInt(m[2],10));});});}
   return L||108;
 }
-function rmFaceGeom(a,side,withGap){ // 號碼格線定位：x=(號碼-1)×單位寬；架寬=號碼跨距×單位寬
+function rmFaceGeom(a,side,withGap){ // 累積實體排列：架寬=實體架長(cm)；柱/截短=缺號數×標準格寬；跨越後走道插入空隙
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
   var N=rmUnitN(a),unit=175/N,L=rmAisleL(a),gapCM=9*175; // 後走道=第9架後(9×175cm)，跨走道同一直線
-  var items=[],prevEnd=0,total=0,gapX=null;
+  var items=[],cum=0,total=0,gapX=null,gapDone=false;
   bays.forEach(function(b,i){
     var m=/^(\d+)-(\d+)$/.exec(b.r||''),lo=null,hi=null;
     if(m){lo=parseInt(m[1],10);hi=parseInt(m[2],10);}
     else if(/^\d+$/.test(b.r||'')){lo=hi=parseInt(b.r,10);}
-    var w=(lo!=null)?(hi-lo+1)*unit:Math.max(b.s.length,1)*unit;
-    if(b.t==='截短')w=Math.min(w,175); // 截短僅示意，斜向由實架末端呈現
-    var start=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):prevEnd;
-    var x=start;
-    if(withGap&&start>=gapCM-0.5){x+=RM_GAP_CM;if(gapX===null)gapX=gapCM;}
-    items.push({i:i,b:b,x:x,w:w});
-    prevEnd=start+w;
-    total=Math.max(total,x+w);
+    var span=(lo!=null)?(hi-lo+1):Math.max(b.s.length,1);
+    var w;
+    if(b.t==='柱'){ w=(b.pw?b.pw:span)*RM_STD_SLOT; }        // 柱：缺號數×標準格寬
+    else if(b.t==='截短'){ w=Math.min(span*RM_STD_SLOT,175); } // 截短：示意，上限 175
+    else { w=rmRackLen(b); }                                // 架/待確認：依擺法內容自動算架長
+    // 後走道空隙：以「設計號碼位置」判定插入點（維持與跨走道同一直線），插入到累積實體座標
+    var ds=(lo!=null)?((side==='出')?(lo-1)*unit:(L-hi)*unit):cum;
+    if(withGap&&!gapDone&&ds>=gapCM-0.5){ cum+=RM_GAP_CM; gapX=cum-RM_GAP_CM/2; gapDone=true; }
+    items.push({i:i,b:b,x:cum,w:w});
+    cum+=w;
+    total=cum;
   });
   return {unit:unit,items:items,total:total,gapX:gapX};
 }
@@ -9253,36 +9300,52 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
   var geom=rmFaceGeom(a,side,withGap);
   geom.items.forEach(function(it){
     var bay=it.b,i=it.i;
-    var xcm=mirror?(blockW-(it.x+it.w)):it.x;
+    var lx=it.x+(bay.dx||0);
+    var xcm=mirror?(blockW-(lx+it.w)):lx;
     var x=px+xcm*S,w=it.w*S;
+    RM_HIT.push({a:a,side:side,i:i,x:x,w:w,py:py,h:stripH});
     var sel=RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_SEL.i===i;
     var tip=a+' '+side+'面 第'+(i+1)+'架｜'+bay.t+'｜'+(bay.r||'—')+(bay.ba?'｜背面 '+bay.ba+' '+bay.br:'')+(bay.nt?'｜'+bay.nt:'');
     var g='<g class="rm-bay" data-a="'+a+'" data-s="'+side+'" data-i="'+i+'" style="cursor:pointer">';
     if(bay.t==='柱'){
-      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="2" fill="'+RM_COLORS['柱']+'"/>';
+      var ptxt=bay.pt||'柱';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="2" fill="'+RM_COLORS['柱']+'" stroke="#8a8a8a" stroke-width="1"/>';
+      if(w>=9)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.4).toFixed(1)+'" font-size="'+Math.min(8,Math.max(5,w/(ptxt.length*1.15))).toFixed(1)+'" fill="#333" text-anchor="middle" style="pointer-events:none">'+rmEsc(ptxt)+'</text>';
       g+='<title>'+tip+'（柱寬='+rmSpan(bay)+'儲位）</title>';
     }else if(bay.t==='截短'){
       g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#c8c8c8" stroke-dasharray="3,3"/>';
       g+='<title>'+tip+'（斜向截短，點擊可改為架）</title>';
     }else{
       var n=bay.s.length;
+      var _m=/^(\d+)-(\d+)$/.exec(bay.r||''),_s1=/^(\d+)$/.exec(bay.r||''),_lo=null,_hi=null;
+      if(_m){_lo=parseInt(_m[1],10);_hi=parseInt(_m[2],10);}else if(_s1){_lo=_hi=parseInt(_s1[1],10);}
+      var span=(_lo!=null)?(_hi-_lo+1):n; if(span<n)span=n;
       if(n){
-        var sorted=bay.s.slice().sort(function(u,v){return u.q-v.q;});
-        var cw=w/n;
-        for(var k=0;k<n;k++){
-          // 出面：小→大 遠離走道；回面：大→小（資料座標走道端在左）
-          var sl=(side==='出')?sorted[k]:sorted[n-1-k];
-          var kk=mirror?(n-1-k):k;
-          var cx=x+kk*cw;
-          var p=rmSlotPlace(sl),col=p?(RM_COLORS[p]||RM_UNK_COLOR):'#dddddd';
-          g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
-          if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl.q)+'</text>';
-          if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
+        var cw=w/span;
+        var _sorted=bay.s.slice().sort(function(u,v){return u.q-v.q;});
+        var byIdx={};
+        bay.s.forEach(function(sl){
+          var base;
+          if(_lo!=null){var off=sl.q-_lo;base=(side==='出')?off:((span-1)-off);}
+          else{var ki=_sorted.indexOf(sl);base=(side==='出')?ki:((span-1)-ki);}
+          var li=mirror?((span-1)-base):base; byIdx[li]=sl;
+        });
+        for(var li2=0;li2<span;li2++){
+          var cx=x+li2*cw, sl2=byIdx[li2];
+          if(sl2){
+            var p=rmSlotPlace(sl2),col=p?(RM_COLORS[p]||RM_UNK_COLOR):'#dddddd';
+            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="'+col+'" stroke="#fff" stroke-width="0.5"/>';
+            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(7,cw/2.6).toFixed(1)+'" fill="#fff" text-anchor="middle" style="pointer-events:none">'+rmPad(sl2.q)+'</text>';
+            if(p&&!rmKnown(p))g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+6)+'" font-size="6" fill="#ffe066" text-anchor="middle" style="pointer-events:none">?</text>';
+          }else{
+            g+='<rect x="'+cx.toFixed(1)+'" y="'+py+'" width="'+cw.toFixed(1)+'" height="'+stripH+'" fill="#f0f0f0" stroke="#fff" stroke-width="0.5"/>';
+            g+='<rect x="'+(cx+0.7).toFixed(1)+'" y="'+(py+0.7)+'" width="'+Math.max(0,cw-1.4).toFixed(1)+'" height="'+(stripH-1.4)+'" fill="none" stroke="#c9c9c9" stroke-width="0.6" stroke-dasharray="2,2"/>';
+            if(cw>=12)g+='<text x="'+(cx+cw/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="'+Math.min(6,cw/2.9).toFixed(1)+'" fill="#c0c0c0" text-anchor="middle" style="pointer-events:none">空</text>';
+          }
         }
-        var cwpx=w/n;
-        if(cwpx<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
+        if(cw<12&&w>=34&&bay.r)g+='<text x="'+(x+w/2).toFixed(1)+'" y="'+(py+stripH/2+2.2)+'" font-size="5.8" fill="#fff" text-anchor="middle" style="pointer-events:none">'+bay.r+'</text>';
       }else g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="#eeeeee" stroke="#cccccc"/>';
-      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="0.7"/>';
+      g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" rx="1.5" fill="none" stroke="#3a3a3a" stroke-width="1.4"/>';
       if(bay.t==='待確認')g+='<rect x="'+x.toFixed(1)+'" y="'+py+'" width="'+w.toFixed(1)+'" height="'+stripH+'" fill="none" stroke="#e6a817" stroke-width="1.5" stroke-dasharray="3,2"/>';
       g+='<title>'+tip+'｜'+n+'格｜架長'+bay.L+'cm</title>';
     }
@@ -9316,13 +9379,13 @@ function rmBandSVG(a,px,py,S,mirror,blockW,stripH,withGap,labelSide,parts){
 function renderRackMap(){
   if(!RM)rmInit();
   var wrap=document.getElementById('rm-canvas');if(!wrap)return;
-  var parts=[],W,H;
+  var parts=[],W,H;RM_HIT=[];
   var vis=rmVisibleAisles();
   if(!vis){ // ═ 全區一覽：AB(左，鏡向) | 走道 | CDE(右) ；F 在 AB 下方
     var abW=rmBlockW(RM_BLOCKS[0].aisles,false),cdeW=rmBlockW(RM_BLOCKS[1].aisles,true),fW=rmBlockW(RM_BLOCKS[2].aisles,false);
     var stripH=12,margin=8,lblW=38,corrW=46;
-    var designW=1500;
-    var S=(designW-2*margin-2*lblW-corrW)/(abW+cdeW);
+    var designW=1800;
+    var S=(designW-2*margin-2*lblW-corrW)/(abW+cdeW);RM_S=S;
     var abPx=margin, corrX=margin+abW*S+lblW, cdePx=corrX+corrW+lblW;
     W=designW;
     var y1=26,y2=26;
@@ -9347,8 +9410,8 @@ function renderRackMap(){
     var mirror=blk.mirror,withGap=blk.back;
     var bw=rmBlockW(vis,withGap);
     var stripH2=RM_VIEW.mode==='aisle'?24:17,margin2=8,lblW2=38;
-    var designW2=1500;
-    var S2=Math.max((designW2-2*margin2-lblW2)/bw,RM_VIEW.mode==='aisle'?0.42:0.18);
+    var designW2=1800;
+    var S2=Math.max((designW2-2*margin2-lblW2)/bw,RM_VIEW.mode==='aisle'?0.42:0.18);RM_S=S2;
     W=Math.max(designW2,margin2*2+lblW2+bw*S2);
     var px=mirror?margin2:margin2+lblW2, y=30;
     parts.push('<text x="'+(margin2+4)+'" y="18" font-size="13" font-weight="bold" fill="#333">'+(RM_VIEW.mode==='aisle'?('走道 '+vis[0]):(RM_VIEW.zone+' 區'))+'　<tspan font-size="10" fill="#888" font-weight="normal">上=大號面／下=小號面'+(mirror?'（001 在右、往左遞增）':'（001 在左、往右遞增）')+'</tspan></text>');
@@ -9360,6 +9423,7 @@ function renderRackMap(){
   }
   wrap.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" font-family="Helvetica,Arial,sans-serif" style="display:block">'+parts.join('')+'</svg>';
   wrap.onclick=function(e){
+    if(rmSuppressClick){rmSuppressClick=false;return;}
     var g=e.target.closest?e.target.closest('.rm-bay'):null;
     if(g){rmSelect(g.getAttribute('data-a'),g.getAttribute('data-s'),parseInt(g.getAttribute('data-i'),10));return;}
     var ad=e.target.closest?e.target.closest('.rm-add'):null;
@@ -9385,7 +9449,9 @@ function renderRackMap(){
     items.push('<span style="display:inline-flex;align-items:center;gap:3px"><span style="width:10px;height:10px;background:'+RM_COLORS['柱']+';display:inline-block;border-radius:2px"></span>柱</span>');
     lg.innerHTML=items.join('');
   }
+  rmSetView_installDrag(wrap);
   rmRenderEditor();
+  rmRenderCompare();
 }
 function rmSetView(v){RM_VIEW=v;renderRackMap();}
 function rmSelect(a,side,i){RM_SEL={a:a,side:side,i:i};RM_EDIT=rmClone(RM.aisles[a][side][i]);renderRackMap();}
@@ -9398,14 +9464,14 @@ function rmPlaceOpts(cur){
 }
 function rmRenderEditor(){
   var ed=document.getElementById('rm-editor');if(!ed)return;
-  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點左圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」新增儲架。<br><br>格寬呈現原則：同架外框等長，格數由材積決定，架內平分（架長÷格數）；柱寬=缺號數×單儲位寬。</div>';return;}
+  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點上方平面圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>可直接<b>拖曳</b>架或柱微調位置。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」新增儲架。<br><br>格寬呈現原則：同架外框等長，格數由材積決定，架內平分（架長÷格數）；柱寬=缺號數×單儲位寬。</div>';return;}
   var a=RM_SEL.a,side=RM_SEL.side,i=RM_SEL.i,bay=RM_EDIT;
   var h='<div style="font-weight:700;font-size:13.5px;margin-bottom:6px">'+a+'　'+(side==='出'?'小號面':'大號面')+'　第 '+(i+1)+' 架</div>';
   h+='<div style="font-size:12px;margin-bottom:6px">類型：<select id="rm-type" onchange="rmHarvest();rmRenderEditor()">'+
      ['架','柱','截短'].map(function(t){return '<option value="'+t+'"'+(t===bay.t||(bay.t==='待確認'&&t==='架')?' selected':'')+'>'+t+'</option>';}).join('')+'</select>'+
      (bay.t==='待確認'?' <span style="color:#e6a817">（原標記：待確認）</span>':'')+'</div>';
   if(bay.t!=='柱'&&bay.t!=='截短'){
-    h+='<div style="font-size:12px;margin-bottom:6px">架長：<input type="number" id="rm-len" value="'+bay.L+'" min="30" max="400" style="width:58px"> cm　<span style="color:#888">長175／鐵力士146／短115</span></div>';
+    h+='<div style="font-size:12px;margin-bottom:6px">架長：<input type="number" id="rm-len" value="'+(bay.Lfix?bay.L:rmRackLen(bay))+'" min="30" max="400" style="width:58px"> cm '+(bay.Lfix?'<span style="color:#c0392b">手動鎖定</span> <button onclick="rmLenAuto()" style="font-size:11px;cursor:pointer">自動</button>':'<span style="color:#2c8">自動('+rmContentLen(bay)+'cm)</span>')+'<br><span style="color:#888;font-size:11px">特大210／大175／鐵力士146／短鐵力士120／短115／特短80（改數字＝手動鎖定）</span></div>';
     h+='<table style="font-size:11.5px;border-collapse:collapse;width:100%"><tr style="color:#666"><th>號碼</th><th>層1</th><th>層2</th><th>層3</th><th>層4</th><th></th></tr>';
     for(var k=0;k<bay.s.length;k++){
       var sl=bay.s[k];
@@ -9414,9 +9480,14 @@ function rmRenderEditor(){
       h+='<td><button onclick="rmDelSlot('+k+')" title="刪除此儲位" style="color:#c0392b;border:none;background:none;cursor:pointer;font-size:13px">✕</button></td></tr>';
     }
     h+='</table><div style="margin:6px 0"><button onclick="rmAddSlot()" style="font-size:12px;cursor:pointer">＋ 新增儲位號碼</button></div>';
+  }else if(bay.t==='柱'){
+    h+='<div style="font-size:12px;margin:6px 0">柱文字：<input type="text" id="rm-ptext" value="'+rmEsc(bay.pt||'柱')+'" style="width:130px"></div>';
+    h+='<div style="font-size:12px;margin:6px 0">柱寬（儲位數）：<input type="number" id="rm-pw" value="'+(bay.pw||rmSpan(bay)||1)+'" min="1" max="30" step="1" style="width:58px"> 個</div>';
+    h+='<div style="font-size:12px;color:#888;margin:6px 0">柱＝blocked bay，不放貨。'+(bay.ba?'<br>共用柱背面：'+bay.ba+' '+bay.br:'')+'（切回「架」可編輯儲位）</div>';
   }else{
-    h+='<div style="font-size:12px;color:#888;margin:6px 0">'+(bay.t==='柱'?'柱＝blocked bay，寬度=缺號數×單儲位寬、不縮短走道、不放貨。'+(bay.ba?'<br>共用柱背面：'+bay.ba+' '+bay.br:''):'截短＝斜向縮短區，無實體架。')+'（切回「架」可編輯儲位）</div>';
+    h+='<div style="font-size:12px;color:#888;margin:6px 0">截短＝斜向縮短區，無實體架。（切回「架」可編輯儲位）</div>';
   }
+  h+='<div style="font-size:12px;margin:6px 0;border-top:1px dashed #ddd;padding-top:6px">位置微調（cm，或直接在圖上拖曳）：<input type="number" id="rm-dx" value="'+(Math.round((bay.dx||0)*10)/10)+'" step="1" style="width:66px"> <button onclick="rmResetDx()" style="font-size:11px;cursor:pointer">歸零</button></div>';
   h+='<div id="rm-msg" style="font-size:12px;min-height:18px;margin:4px 0"></div>';
   h+='<div style="display:flex;gap:6px;flex-wrap:wrap">'+
      '<button onclick="rmApply()" style="background:#2c6e49;color:#fff;border:none;border-radius:5px;padding:5px 14px;cursor:pointer;font-size:12.5px">套用</button>'+
@@ -9429,7 +9500,14 @@ function rmRenderEditor(){
 function rmHarvest(){
   if(!RM_EDIT)return;
   var t=document.getElementById('rm-type');if(t)RM_EDIT.t=t.value;
-  var len=document.getElementById('rm-len');if(len&&RM_EDIT.t!=='柱'&&RM_EDIT.t!=='截短')RM_EDIT.L=parseInt(len.value,10)||175;
+  var len=document.getElementById('rm-len');
+  if(len&&RM_EDIT.t!=='柱'&&RM_EDIT.t!=='截短'){
+    var _v=parseInt(len.value,10)||0, _auto=rmSnapCat(rmContentLen(RM_EDIT));
+    if(_v&&_v!==_auto){RM_EDIT.L=_v;RM_EDIT.Lfix=true;}   // 改成非自動值＝手動鎖定
+    else {RM_EDIT.Lfix=false;RM_EDIT.L=_auto;}            // 等於自動值＝維持自動
+  }
+  var _dx=document.getElementById('rm-dx');if(_dx)RM_EDIT.dx=parseFloat(_dx.value)||0;
+  if(RM_EDIT.t==='柱'){var _pt=document.getElementById('rm-ptext');if(_pt)RM_EDIT.pt=_pt.value;var _pw=document.getElementById('rm-pw');if(_pw)RM_EDIT.pw=Math.max(1,parseInt(_pw.value,10)||1);}
   if(RM_EDIT.t!=='柱'&&RM_EDIT.t!=='截短'){
     for(var k=0;k<RM_EDIT.s.length;k++){
       var q=document.getElementById('rm-q-'+k);if(!q)continue;
@@ -9474,8 +9552,9 @@ function rmApply(){
   if(eb.t==='柱'){eb.s=[];}
   if(eb.t==='截短'){eb.s=[];eb.r='';}
   RM.aisles[a][side][i]=rmClone(eb);
+  rmPersist();
   renderRackMap();
-  rmMsg('已套用，格寬已依「架長÷格數」重繪',true);
+  rmMsg('已套用（自動儲存）',true);
 }
 function rmInsertBay(a,side,at){
   var bays=RM.aisles[a][side];
@@ -9495,6 +9574,7 @@ function rmInsertBay(a,side,at){
   bays.splice(at,0,bay);
   bays.forEach(function(b,j){b.b=j+1;});
   RM_SEL={a:a,side:side,i:at};RM_EDIT=rmClone(bay);
+  rmPersist();
   renderRackMap();
   rmMsg('已新增一架（繼承架長 '+L+'cm、鄰架擺法 '+p+'、格數 '+nmax+'），號碼可在下方修改後套用',true);
 }
@@ -9516,6 +9596,7 @@ function rmDeleteBay(){
   }
   bays.forEach(function(b,j){b.b=j+1;});
   RM_SEL=null;RM_EDIT=null;
+  rmPersist();
   renderRackMap();
 }
 function rmExport(){
@@ -9532,6 +9613,140 @@ function rmExport(){
   var wbk=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wbk,ws,'實體架位_編輯版');
   XLSX.writeFile(wbk,'儲位總表_實體架位_編輯版.xlsx');
+}
+
+// ---------- 持久化 / 啟動 / 拖曳 / 材積比對 ----------
+function rmPersist(){try{idbPut('rackmap_rm',rmClone(RM));}catch(e){}}
+async function rmBoot(){
+  if(!RM){var saved=null;try{saved=await idbGet('rackmap_rm');}catch(e){}
+    if(saved&&saved.aisles&&saved.design){RM=saved;}else{rmInit();}}
+  renderRackMap();
+}
+function rmResetLayout(){
+  if(!confirm('確定將儲架平面圖重置為系統預設？你所有的編輯與拖曳將被清除。'))return;
+  RM=null;rmInit();rmPersist();RM_SEL=null;RM_EDIT=null;renderRackMap();
+}
+function rmLenAuto(){ if(!RM_EDIT)return; RM_EDIT.Lfix=false; RM_EDIT.L=rmSnapCat(rmContentLen(RM_EDIT)); rmRenderEditor(); }
+// 以最新上傳的「儲位總表」(STORAGE_MASTER) 更新各儲位擺法；架長依內容自動重算。
+function rmSyncFromMaster(){
+  if(typeof STORAGE_MASTER==='undefined'||!STORAGE_MASTER||!Object.keys(STORAGE_MASTER).length){
+    alert('尚未載入儲位總表。請先於「儲位調整」分頁上傳儲位總表，再回來按此更新。');return;
+  }
+  if(!RM)rmInit();
+  var lut={};
+  Object.values(STORAGE_MASTER).forEach(function(arr){(arr||[]).forEach(function(o){ if(o&&o.slot)lut[String(o.slot).trim()]=String(o.layout||'').trim(); });});
+  var changed=0, slots=0;
+  for(var a in RM.aisles){ for(var sd in RM.aisles[a]){ RM.aisles[a][sd].forEach(function(b){
+    if(b.t!=='架'&&b.t!=='待確認')return;
+    (b.s||[]).forEach(function(sl){ for(var L=0;L<4;L++){ var id=a+'-'+rmPad(sl.q)+'-'+(L+1); if(id in lut){ slots++; var nv=lut[id]||null; if((sl.lay[L]||null)!==(nv||null)){sl.lay[L]=nv; changed++;} } } });
+  }); } }
+  rmPersist(); renderRackMap();
+  alert('已依儲位總表更新：比對 '+slots.toLocaleString()+' 個儲位，變更 '+changed.toLocaleString()+' 筆擺法。架長已自動重算。');
+}
+function rmResetDx(){
+  var d=document.getElementById('rm-dx');if(d)d.value=0;
+  if(RM_EDIT)RM_EDIT.dx=0;
+  if(RM_SEL){var b=RM.aisles[RM_SEL.a][RM_SEL.side][RM_SEL.i];if(b){b.dx=0;rmPersist();renderRackMap();}}
+}
+function rmFinishDrag(a,side,i,dxpx){
+  var S=RM_S||1;var bays=(RM.aisles[a]&&RM.aisles[a][side]);
+  if(!bays||!bays[i]){renderRackMap();return;}
+  var blk=RM_BLOCKS.find(function(b){return b.aisles.indexOf(a)>=0;});
+  var mirror=blk?blk.mirror:false, withGap=blk?blk.back:false;
+  var geom=rmFaceGeom(a,side,withGap), unit=geom.unit||29;
+  var self=null; geom.items.forEach(function(it){if(it.i===i)self=it;});
+  if(!self){renderRackMap();return;}
+  var logical=(mirror?-1:1)*(dxpx/S);      // 螢幕→邏輯（鏡向面左右相反）
+  var slots=Math.round(logical/unit);      // 鎖定為整格
+  if(!slots){renderRackMap();return;}
+  var delta=slots*unit;
+  var selfStart=self.x+(bays[self.i].dx||0), left=null;
+  geom.items.forEach(function(it){if(it.x<self.x-0.01){if(!left||it.x>left.x)left=it;}});
+  if(left){var leftEnd=left.x+(bays[left.i].dx||0)+left.w;
+    if(selfStart+delta<leftEnd-0.01){delta=leftEnd-selfStart;slots=Math.round(delta/unit);delta=slots*unit;}}
+  if(Math.abs(delta)<0.01){renderRackMap();return;}
+  geom.items.forEach(function(it){if(it.x>=self.x-0.01){var b=bays[it.i];b.dx=(b.dx||0)+delta;}}); // 右側鄰架一起後移，不重疊
+  if(RM_SEL&&RM_SEL.a===a&&RM_SEL.side===side&&RM_EDIT)RM_EDIT.dx=bays[RM_SEL.i].dx;
+  rmPersist();renderRackMap();
+}
+var _rmDrag=null;
+function rmSetView_installDrag(wrap){
+  var svg=wrap.querySelector('svg');if(!svg)return;
+  svg.style.touchAction='none';
+  svg.onpointerdown=function(e){
+    var g=e.target.closest?e.target.closest('.rm-bay'):null;if(!g)return;
+    _rmDrag={x0:e.clientX,a:g.getAttribute('data-a'),side:g.getAttribute('data-s'),i:parseInt(g.getAttribute('data-i'),10),el:g,moved:false};
+    try{g.setPointerCapture(e.pointerId);}catch(_){}
+  };
+  svg.onpointermove=function(e){
+    if(!_rmDrag)return;var dx=e.clientX-_rmDrag.x0;
+    if(Math.abs(dx)>4)_rmDrag.moved=true;
+    if(_rmDrag.moved)_rmDrag.el.setAttribute('transform','translate('+dx.toFixed(1)+',0)');
+  };
+  var up=function(e){
+    if(!_rmDrag)return;var d=_rmDrag;_rmDrag=null;
+    if(d.el)d.el.removeAttribute('transform');
+    if(d.moved){rmSuppressClick=true;rmFinishDrag(d.a,d.side,d.i,e.clientX-d.x0);}
+  };
+  svg.onpointerup=up;svg.onpointercancel=up;
+}
+function rmRenderCompare(){
+  var box=document.getElementById('rm-compare');if(!box||!RM)return;
+  var cfg={};
+  for(var a in RM.aisles){for(var side in RM.aisles[a]){RM.aisles[a][side].forEach(function(b){
+    if(b.t!=='架'&&b.t!=='待確認')return;
+    (b.s||[]).forEach(function(sl){
+      for(var Ly=0;Ly<4;Ly++){var c=sl.lay[Ly];if(!c||c==='配')continue;
+        var id=a+'-'+rmPad(sl.q)+'-'+(Ly+1);
+        cfg[id]={code:c,vol:rmCodeVol(c)};}
+    });
+  });}}
+  var db=(typeof DB!=='undefined'&&DB)||[];
+  var head='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><span style="font-weight:700;font-size:14px;color:var(--accent,#6B4F35)">儲架材積 vs 真實儲位材積 比對</span>'+
+    '<button onclick="rmRenderCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">重新比對</button>'+
+    '<button onclick="rmExportCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">匯出異常</button>'+
+    '<button onclick="rmResetLayout()" style="font-size:12px;cursor:pointer;border:1px solid #c0392b;color:#c0392b;border-radius:5px;padding:3px 10px;background:#fff">重置平面圖</button></div>';
+  if(!db.length){box.innerHTML=head+'<div style="color:#888;font-size:12.5px;padding:6px">尚未載入 EPR 主報表，無法取得真實儲位材積。請先於「儲區總覽」上傳 EPR 主報表。</div>';RM_CMP_ANOM=[];return;}
+  var anomalies=[],cmp=0,eq=0,bigger=0,smaller=0,seen={};
+  db.forEach(function(r){
+    var id=String(r['儲位']||'').trim();if(!id||seen[id])return;seen[id]=1;
+    var c=cfg[id];if(!c)return;
+    var real=+r['儲位材積']||0;cmp++;
+    if(Math.abs(real-c.vol)<=0.005){eq++;return;}
+    var dir=real>c.vol?'變大':'變小';
+    if(dir==='變大')bigger++;else smaller++;
+    anomalies.push({slot:id,sku:String(r['商品編號']||'').trim(),code:c.code,cfg:c.vol,real:real,rc:rmClosestCode(real),dir:dir});
+  });
+  anomalies.sort(function(u,v){if(u.dir!==v.dir)return u.dir==='變大'?-1:1;return Math.abs(v.real-v.cfg)-Math.abs(u.real-u.cfg);});
+  RM_CMP_ANOM=anomalies;
+  var stat='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'+
+    '<span>已比對儲位：<b>'+cmp+'</b></span>'+
+    '<span style="color:#2c6e49">相符：<b>'+eq+'</b></span>'+
+    '<span style="color:#c0392b">不一致：<b>'+anomalies.length+'</b></span>'+
+    '<span style="color:#c0392b">↑ 真實變大（需調整）：<b>'+bigger+'</b></span>'+
+    '<span style="color:#a67c00">↓ 真實變小（可能刻意調降）：<b>'+smaller+'</b></span></div>';
+  var tbl;
+  if(anomalies.length){
+    tbl='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555"><th style="padding:4px 6px;text-align:left">儲位</th><th style="padding:4px 6px;text-align:left">商品編號</th><th style="padding:4px 6px">儲架設定碼</th><th style="padding:4px 6px">設定材積</th><th style="padding:4px 6px">真實材積</th><th style="padding:4px 6px">最接近碼</th><th style="padding:4px 6px">方向</th></tr></thead><tbody>';
+    anomalies.forEach(function(x){
+      var col=x.dir==='變大'?'#c0392b':'#a67c00';
+      tbl+='<tr style="border-top:1px solid #eee"><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.slot)+'</td><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.sku||'—')+'</td><td style="padding:3px 6px;text-align:center">'+x.code+'</td><td style="padding:3px 6px;text-align:right">'+x.cfg+'</td><td style="padding:3px 6px;text-align:right;font-weight:600">'+x.real+'</td><td style="padding:3px 6px;text-align:center">'+x.rc+'</td><td style="padding:3px 6px;text-align:center;color:'+col+';font-weight:600">'+(x.dir==='變大'?'↑ 變大':'↓ 變小')+'</td></tr>';
+    });
+    tbl+='</tbody></table></div>';
+  }else{
+    tbl='<div style="color:#2c6e49;font-size:12.5px;padding:6px">✓ 所有已比對儲位的材積皆與儲架設定相符，無異常。</div>';
+  }
+  box.innerHTML=head+stat+tbl;
+}
+var RM_CMP_ANOM=[];
+function rmExportCompare(){
+  if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
+  if(!RM_CMP_ANOM||!RM_CMP_ANOM.length){alert('目前無異常可匯出');return;}
+  var rows=[['儲位','商品編號','儲架設定碼','設定材積','真實材積','最接近碼','方向']];
+  RM_CMP_ANOM.forEach(function(x){rows.push([x.slot,x.sku||'',x.code,x.cfg,x.real,x.rc,x.dir]);});
+  var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'材積比對異常');
+  XLSX.writeFile(wb,'儲架材積比對_異常清單.xlsx');
 }
 
 </script>
