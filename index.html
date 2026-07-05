@@ -2517,8 +2517,10 @@ const PLN_SPEC_FLAGS = {
   // §1.3 主碼用「主碼組序 k 全走道 round-robin」＋§1.3c 同色不相鄰(空一欄)。false＝舊「逐架 G col 填」。
   //   ★ 階段1 已實作+驗證（8/9/10碼第2主碼組正確展開、同色不相鄰、6碼成對層12/34）→ 預設改 true。
   useRoundRobin: true,
-  // §1.3a/§3.5 儲位調整/高低庫存的相鄰判定採規格「整欄任一層」。false＝現行「同層」。
-  //   （新品引擎 runAgEngine 一律整欄，不受此旗標影響＝已對齊規格。）
+  // §1.3a/§3.5 儲位調整/高低庫存的相鄰判定。
+  //   ★ Gordon 2026-07-05 拍板: 「同層」才算相鄰為正式規則, 非過渡 — 不要再翻 true。
+  //   (例: 001-1/2/3 為 A 色、001-4 為 B 色 → 002-4 可放 A 色, 因同層鄰格非同款色, 不會補錯/揀錯)
+  //   (新品引擎 runAgEngine 維持整欄較嚴判定=更分散, 與需求7同色排開方向一致, 刻意保留。)
   adjAllLayerForAdjust: false,
 };
 
@@ -2674,6 +2676,12 @@ const PLN_SPEC = {
     {id:'1.2b-adj', status:'locked', impl:'plnFindHoleFill(opts.match)/plnAssignColorToColumn', desc:'(階段3；Gordon 2026-06-28 確認鎖定)儲位調整碼對層彈性：_匹配碼對層soft tiebreak、≥3碼同欄碼序對層(條件充裕對、不足彈性)、中等/次高其餘零散SKU一律走找洞塞_匹配'},
     {id:'3.6-sel', status:'locked', impl:'plnSelectSourceSKUs v6', desc:'(Gordon 2026-07-04)高庫存挑選以「色組」為單位：整款優先→整色→DP精確湊數→回溯；同款同色永不拆散到不同走道；唯一例外=整色組湊不出N時優先拆「未到≤10、銷售低」SKU並附_selWarnings警告(UI顯示)。廢除v5散戶補餘/兜底逐SKU補滿(會拆色，見F02→A03/E06案例7239402+7264701被拆)'},
     {id:'5a-split', status:'locked', impl:'plnComplexityConcentrate 色組切塊', desc:'(2026-07-04)以色/以款集中：>4碼色組依§1.2切「4碼主組+溢出碼」，主組集中一欄、溢出碼走找洞塞_匹配(=Gordon手排4+1模式)；找不到可容整組的欄→降級找洞塞_匹配，不再整組failed(舊版會誤觸§1.7溢位區位移把15個SKU踢到XX)'},
+    {id:'3.6-rel', status:'locked', impl:'plnSelectSourceSKUs v7', desc:'(Gordon 2026-07-05)高庫存改「相對」判定：廢除款內過半≥100絕對門檻，以來源走道內款平均庫存件數互比排序(整條走道都低庫存也挑得出相對高者)'},
+    {id:'5a-dist', status:'locked', impl:'plnFindHoleFill cohesionDist/plnComplexityConcentrate nearestKuanCol', desc:'(Gordon 2026-07-05)跨走道距離=目的走道內部集中度(離同款5碼欄最近，次要靠近本步排入欄)；同走道仍用來源移動距離；銷售≥50先對層再距離、<50距離優先於對層(低庫存不在意對層，省距離)'},
+    {id:'1.6-lock', status:'locked', impl:'plnCloneCells(keepLocked)/plnSelectSourceSKUs locked skip', desc:'(Gordon 2026-07-05)跨步驟保護：Run All Steps 串接時 locked 不重置，前步剛排SKU不被後續step重挑/位移/置換'},
+    {id:'1.3d-cname', status:'locked', impl:'plnColorNameOf/runAgEngine adjColorNameConflict/nextCol三段式', desc:'(Gordon 2026-07-05需求7)新品同「顏色名稱」跨款排開(黑色圖T牆案例)：主碼欄/降A欄/溢出欄候選一律soft避鄰同顏色名稱，全衝突才彈性放行；顏色名稱取報表顏色欄或商品名稱尾段(含顏色字樣才認定)'},
+    {id:'1.7-cluster', status:'locked', impl:'plnColorClusterSize/plnClusterGroupSales + plnRunInternalEngine起點評分', desc:'(Gordon 2026-07-05最終版, 覆寫同日兩版舊案)齊全色組與庫存「全相對、以庫存為準、無絕對門檻」：XX/溢位區候選=純庫存排序(銷售少→架上少)且齊全色欄不豁免(零散銷售>齊全欄銷售→齊全欄先走, 件數少移得快)；齊全度僅兩處相對參與—①內整起點評分=[被拆齊全欄成員銷售總和,移動次數]②自動模式(c)被拆齊全欄色組總銷售須<排入。舊「受保護集中欄」絕對門檻機制已廢除'},
+    {id:'5b-auto', status:'locked', impl:'plnComplexityAuto', desc:'(Gordon 2026-07-05核定)自動·需要才整理：分支一空欄夠→直接以色集中；分支二(單一目的走道)四條件全過才先整理再排入—(a)有≥3碼色組(b)被挪色組總銷售<排入色組總銷售(c)被拆齊全色欄色組總銷售<排入(相對, 最終版)(d)整理次數≤排入數×0.5；分支三不值得→以色集中+找洞塞。多目的走道v1不自動整理'},
     {id:'1.6',  status:'locked',  impl:'plnComplexityConsolidate→plnRunInternalEngine/plnApplyOverflowZone', desc:'(階段4)最低/次低/中等/次高不主動位移；最高=借內部整理騰位；目的走道位置不夠→挑既有SKU移溢位區(§1.7)已落地；新品永不被位移、locked防連鎖'},
     {id:'1.7',  status:'locked',  impl:'plnApplyOverflowZone/plnIdentifyOverflowCandidates/plnOverflowAisleFor/plnOverflowEmpties', flag:'config.overflow=[\'TX\',\'XX\']', desc:'(階段4)溢位區TX+XX自動承接：未到≤10且銷售≤6/銷售少優先移出；TX供L區/XX其他；空儲位材積最大優先排入；套用於每一複雜度等級'},
     {id:'1.8',  status:'todo',    desc:'包材→走道對應表（待補）'},
@@ -2689,7 +2697,7 @@ const PLN_SPEC = {
     {mode:'新品 runAgEngine', section:'1.2', gap:'(階段1已修)切組路徑落地，useGroupSplit 預設 true；翻 false 回退舊映射', fix:'已完成；保留旗標作回歸安全網'},
     {mode:'新品 runAgEngine', section:'1.3', gap:'(階段8 已收尾)密度切組為唯一新品路徑；useRoundRobin 關閉分支已移除、旗標退役為 no-op', fix:'已完成（階段8）'},
     {mode:'新品 runAgEngine', section:'1.5', gap:'(階段8 已落地)poolCol/hanging3/legacy 逐架 fill 已刪除；溢出走 GLOBAL OVERFLOW 正規通道；plnGetTargetLayer 不再供新品主路徑/PHASE D 使用', fix:'已完成（階段8 清舊）'},
-    {mode:'儲位調整/高低庫存 plnAdjConflict*', section:'1.3a', gap:'相鄰判定=同層，規格鎖定為整欄任一層', fix:'PLN_SPEC_FLAGS.adjAllLayerForAdjust=true'},
+    {mode:'儲位調整/高低庫存 plnAdjConflict*', section:'1.3a', gap:'(已結案)相鄰判定=同層 — Gordon 2026-07-05 拍板此為正式規則非落差; adjAllLayerForAdjust 永久保持 false', fix:'無需修正'},
     {mode:'架邊界 slice(i,i+6)', section:'0/B', gap:'假設每架6col，實際少數4col', fix:'待全儲區貨架表(§B)'},
   ],
 };
@@ -2818,15 +2826,15 @@ function plnValidCols(cells,aisle){
   return [...cols].sort((a,b)=>a-b);
 }
 
-// ═══ Phase 1: 來源 SKU 挑選 (★ 演算法 v6: 整色組挑選 + DP 精確湊數; Gordon 2026-07-04) ═══
+// ═══ Phase 1: 來源 SKU 挑選 (★ 演算法 v7: 相對高庫存 + 整色組挑選; Gordon 2026-07-05) ═══
 // 邏輯:
 //   1. 每 SKU 計算 _total = 銷售庫存 + 未到量 (=「庫存件數」)
-//   2. 按款(5碼)分組. 對每款 K:
-//      - K_high = K 內 _total ≥ 100 的 SKU
-//      - 若 K_high 比例 ≥ 50% (該款過半 SKU 庫存達標)
-//      - 形成候選款, 平均 = K_high 平均 _total
+//   2. ★ v7「相對高庫存」(Gordon 2026-07-05): 高庫存是相對概念, 以「來源走道內的款」
+//      互相比較 — 款平均庫存件數高者先挑, 不設絕對門檻.
+//      (v5/v6 舊規則「款內過半 SKU ≥100 件才算候選款」在整條走道都低庫存時會一款都挑不到,
+//       在整條都高庫存時又全數通過等於沒篩 → 廢除)
 //   3. 高庫存模式一律以「色組(7碼)」為單位進出 — 同款同色永不拆散到不同走道:
-//      - 優先序: 候選款(款平均 DESC → 款內色平均 DESC) → 非候選款(色平均 DESC)
+//      - 優先序: 款平均 DESC → 同款內色平均 DESC
 //      - 貪婪整組挑; 缺口以「整色組」DP 精確湊數; 湊不出 → 回溯已挑色組換組合
 //   4. 唯一拆色例外(Gordon 認可): 整色組無法湊出 N 時, 優先拆「未到量≤10、銷售低」的 SKU,
 //      並在回傳陣列附 _selWarnings 供 UI 顯示警告
@@ -2839,6 +2847,7 @@ function plnSelectSourceSKUs(config,cells){
     rows=[];
     Object.values(cells).forEach(cs=>{
       if(!cs.sku)return;
+      if(cs.locked)return;   // ★ 2026-07-05 跨步驟保護: 前面 step 剛排入的 SKU 不再被挑走
       if(!config.source.includes(cs.aisle))return;
       const info=cs.info||{};
       // 重建 row: info 內含原 ABC 元數據, 補上目前儲位
@@ -2884,21 +2893,17 @@ function plnSelectSourceSKUs(config,cells){
     return out;
   }
 
-  // ═══ 庫存高模式 (★ v6: 以「色組」為單位挑選 — 同款同色永不拆散; Gordon 2026-07-04) ═══
+  // ═══ 庫存高模式 (★ v7: 相對高庫存 + 整色組挑選; Gordon 2026-07-05) ═══
   // 按款分組
   const byKuan={};
   rows.forEach(r=>{
     if(!byKuan[r._kuan])byKuan[r._kuan]=[];
     byKuan[r._kuan].push(r);
   });
-  // 候選款判定 (≥100 件 SKU 過半 → K_high 平均; 沿用 v5)
+  // ★ v7 款相對排名: 款平均庫存件數 (以來源走道內的款互比, 無絕對門檻)
   const kuanRank=new Map();
   Object.entries(byKuan).forEach(([k,group])=>{
-    const highSkus=group.filter(r=>r._total>=100);
-    if(highSkus.length===0)return;
-    if(highSkus.length/group.length>=0.5){
-      kuanRank.set(k,highSkus.reduce((s,r)=>s+r._total,0)/highSkus.length);
-    }
+    kuanRank.set(k, group.reduce((s,r)=>s+r._total,0)/group.length);
   });
   // 色組池: 全來源依色(7碼)分組 — 整色進出, 同色不會被拆到不同走道
   //   (含款內 _total<100 的同色 SKU: 寧可跟著整色一起搬, 也不留下來被拆散)
@@ -2909,12 +2914,10 @@ function plnSelectSourceSKUs(config,cells){
     sum:skus.reduce((s,r)=>s+r._total,0),
     avg:skus.reduce((s,r)=>s+r._total,0)/skus.length,
   }));
-  // 優先序: 候選款(款平均 DESC → 同款內色平均 DESC) → 非候選款(色平均 DESC)
-  //   同款各色相鄰排列 → 貪婪挑選時整款自然一起被挑 (=v5「整款優先」精神)
+  // 優先序: 款平均庫存 DESC (相對高庫存款先挑) → 同款內色平均 DESC
+  //   同款各色相鄰排列 → 貪婪挑選時整款自然一起被挑 (整款優先精神)
   colorGroups.sort((a,b)=>{
-    const ta=kuanRank.has(a.kuan)?0:1, tb=kuanRank.has(b.kuan)?0:1;
-    if(ta!==tb)return ta-tb;
-    if(ta===0 && a.kuan!==b.kuan)
+    if(a.kuan!==b.kuan)
       return (kuanRank.get(b.kuan)-kuanRank.get(a.kuan))||a.kuan.localeCompare(b.kuan);
     return (b.avg-a.avg)||a.kc.localeCompare(b.kc);
   });
@@ -2994,7 +2997,39 @@ function plnAuditCapacity(cells,config){
   return result;
 }
 
+// ★ 2026-07-05 (Gordon 最終版): 齊全色組 vs 庫存 =「全相對、以庫存為準」—
+//   拉去溢位區/XX 一律純庫存排序(銷售少先走), 齊全色欄不豁免:
+//   走道中零散的銷售 > 齊全色欄的銷售 → 齊全色欄先走(件數少移得快, 整組會依銷售序一起遷走)。
+//   齊全度只在兩處以「相對」方式參與: ① 內部整理挑起點 — 被拆齊全欄成員的銷售總和當懲罰
+//   (低銷齊全欄幾乎無懲罰); ② 自動模式評估 — 被拆齊全欄的色組總銷售須 < 排入色組總銷售。
+//   (絕對門檻版「受保護集中欄」已於同日廢除, 不設任何絕對值。)
+//   plnColorClusterSize: 該格所屬「欄」內與其同色(7碼)的 SKU 數(含自身), ≥3 = 色碼集中欄。
+function plnColorClusterSize(cells,cs){
+  if(!cs||!cs.sku)return 0;
+  const c7=String(cs.sku).substring(0,7);
+  let n=0;
+  for(let L=1;L<=4;L++){
+    const cc=cells[plnCellId(cs.aisle,cs.col,L)];
+    if(cc&&cc.sku&&String(cc.sku).substring(0,7)===c7)n++;
+  }
+  return n;
+}
+// 該格所屬集中色欄(≥3同色)的「色組總銷售」; 非集中欄成員回傳 0。供相對比較/懲罰用。
+function plnClusterGroupSales(cells,cs){
+  if(!cs||!cs.sku)return 0;
+  const c7=String(cs.sku).substring(0,7);
+  const members=[];
+  for(let L=1;L<=4;L++){
+    const cc=cells[plnCellId(cs.aisle,cs.col,L)];
+    if(cc&&cc.sku&&String(cc.sku).substring(0,7)===c7)members.push(cc);
+  }
+  if(members.length<3)return 0;
+  return members.reduce((s,m)=>s+Number(((m.info||{})['銷售庫存'])||0),0);
+}
+
 // XX 候選 - 條件: 無未到 + 保留=0 + 銷售≤閾值
+// ★ 2026-07-05 (Gordon 最終版): 純庫存排序(銷售少→架上少), 齊全色欄不豁免 —
+//   低庫存是「相對」概念: 零散銷售 > 齊全色欄銷售 → 齊全色欄成員照樣先走(件數少移得快)。
 function plnIdentifyXXCandidates(cells,config,nNeeded,salesMax){
   const t=salesMax!=null?salesMax:5;
   const cands=[];
@@ -3007,7 +3042,7 @@ function plnIdentifyXXCandidates(cells,config,nNeeded,salesMax){
     cands.push({sku:cs.sku,cell:cs.cell,aisle:cs.aisle,
       sales:Number(inv['銷售庫存']||0),shelf:Number(inv['架上數量']||0)});
   });
-  cands.sort((a,b)=>(a.sales-b.sales)||(a.shelf-b.shelf));
+  cands.sort((a,b)=>(a.sales-b.sales)||(a.shelf-b.shelf));   // 以庫存為準 (相對)
   return cands.slice(0,nNeeded);
 }
 
@@ -3485,7 +3520,7 @@ function plnPackScatteredLow(cells,selected,config){
  *   本骨架依 §5a/§1.6 把最低/次低明確定義為「純找空洞、不主動位移」(displacement 只在高等級)，
  *   故新 'match' 與現行 plnRunEngine 不會逐字節相同——差異 = 現行多了連續打包/位移，屬規格分級要求。
  * ═══════════════════════════════════════════════════════════════════════════ */
-const PLN_COMPLEXITY_LEVELS = ['sort','match','color','kuan','consolidate'];
+const PLN_COMPLEXITY_LEVELS = ['sort','match','color','kuan','consolidate','auto'];
 
 function plnLayoutVol(layout){
   const v=PLN_LAYOUT_VOLUME[layout];
@@ -3507,6 +3542,7 @@ function plnLayoutVol(layout){
 
 // §1.7 候選：目的走道內既有 SKU，未到量≤10 且 銷售庫存≤6，銷售少優先（再架上少、再欄號）。
 //   排除新品（§1.6 永不被位移）與 locked（§1.6 防連鎖：剛放置/剛搬過者）。
+// ★ 2026-07-05 (Gordon 最終版): 純庫存排序, 齊全色欄不豁免 (相對低庫存先走, 整組會依序一起遷)。
 function plnIdentifyOverflowCandidates(cells, config){
   const cands=[];
   Object.values(cells).forEach(cs=>{
@@ -3521,7 +3557,7 @@ function plnIdentifyOverflowCandidates(cells, config){
       arr:Number(inv['未到量']||0),
       shelf:Number(inv['架上數量']||0)});
   });
-  cands.sort((a,b)=>(a.sales-b.sales)||(a.shelf-b.shelf)||(a.cell<b.cell?-1:1)); // 銷售少優先
+  cands.sort((a,b)=>(a.sales-b.sales)||(a.shelf-b.shelf)||(a.cell<b.cell?-1:1)); // 以庫存為準 (相對)
   return cands;
 }
 
@@ -3561,7 +3597,7 @@ function plnApplyOverflowZone(config, ctx, res){
   const overflowMoves=[];
   const freedCells=[];
 
-  // 1. 挑既有 SKU 移溢位區（騰位）
+  // 1. 挑既有 SKU 移溢位區（騰位）— 純庫存排序 (2026-07-05 最終版)
   const cands=plnIdentifyOverflowCandidates(cells, config);
   for(const c of cands){
     if(freedCells.length>=need)break;
@@ -3604,6 +3640,7 @@ function plnDispatchComplexity(config, ctx){
     case 'color':       res=plnComplexityConcentrate(config, ctx, {byKuan:false}); break;
     case 'kuan':        res=plnComplexityConcentrate(config, ctx, {byKuan:true}); break;
     case 'consolidate': res=plnComplexityConsolidate(config, ctx); break;
+    case 'auto':        res=plnComplexityAuto(config, ctx); break;   // ★ §5b (Gordon 2026-07-05)
     default:
       throw new Error('plnDispatchComplexity: 未知複雜度等級 "'+lvl+'"（合法值：'+PLN_COMPLEXITY_LEVELS.join('/')+'）');
   }
@@ -3643,6 +3680,28 @@ function plnFindHoleFill(config, ctx, opts){
   rows.sort((a,b)=> (b.sales-a.sales)||(b.shelf-a.shelf)||(b.total-a.total)
     || a.sku.localeCompare(b.sku));
 
+  // ★ 2026-07-05 (Gordon): 跨走道時舊 dist=999 全部同值＝距離沒作用 →
+  //   改「目的走道內部集中度」當距離: 離「同款(5碼)已在目的走道/本步剛排入」的欄位越近越好;
+  //   同款無參考點時退而靠近本步其他排入欄位。同走道移動仍用來源距離(移動最少)。
+  const kuanCols=new Map();   // aisle → (kuan5 → Set<col>)
+  const batchCols=new Map();  // aisle → Set<col> (本步已排入的欄)
+  const noteKuanCol=(a,col,sku)=>{
+    if(!kuanCols.has(a))kuanCols.set(a,new Map());
+    const m=kuanCols.get(a); const k=String(sku).substring(0,5);
+    if(!m.has(k))m.set(k,new Set());
+    m.get(k).add(col);
+  };
+  Object.values(cells).forEach(cs=>{ if(cs.sku&&dests.includes(cs.aisle))noteKuanCol(cs.aisle,cs.col,cs.sku); });
+  const cohesionDist=(a,col,sku)=>{
+    const m=kuanCols.get(a); const k=String(sku).substring(0,5);
+    let best=null;
+    if(m&&m.has(k))for(const c of m.get(k)){ const d=Math.abs(c-col); if(best==null||d<best)best=d; }
+    if(best!=null)return best;
+    const b=batchCols.get(a);
+    if(b&&b.size){ let bb=null; for(const c of b){ const d=Math.abs(c-col); if(bb==null||d<bb)bb=d; } return 100+bb; }
+    return 500;   // 無任何參考點 → 中性值(交給欄號 tiebreak)
+  };
+
   const assigns={};            // sku -> dstCell
   const usedCells=new Set();
   const failed=[];
@@ -3654,19 +3713,26 @@ function plnFindHoleFill(config, ctx, opts){
     for(const cs of empties){
       if(usedCells.has(cs.cell))continue;
       const vol=plnLayoutVol(cs.layout);
-      let dist=999;                         // 跨走道：以 999 + 欄號 tiebreak（同現行慣例）
+      let dist;
       if(src && src.aisle===cs.aisle){
         dist=geo[cs.aisle]?plnAisleDistance(src.col,cs.col,geo[cs.aisle].min,geo[cs.aisle].max)
                           :Math.abs(src.col-cs.col);
+      } else {
+        dist=cohesionDist(cs.aisle,cs.col,row.sku);   // ★ 跨走道: 目的走道內部集中度
       }
       const layerMatch=(match && codeLayer!=null && cs.layer===codeLayer)?0:1;
-      // 材積大優先 → (匹配:碼對層) → 移動最少 → 欄號 → 層
-      const key=match ? [-vol, layerMatch, dist, cs.col, cs.layer]
+      // ★ 2026-07-05 (Gordon): 銷售≥50 → 材積 → 碼對層 → 距離 (庫存多盡量對層);
+      //   銷售<50 → 材積 → 距離 → 碼對層 (庫存低不在意對層, 能省距離就省距離)
+      const key=match ? (row.sales>=50 ? [-vol, layerMatch, dist, cs.col, cs.layer]
+                                       : [-vol, dist, layerMatch, cs.col, cs.layer])
                       : [-vol, dist, cs.col, cs.layer];
       if(bestKey===null || plnCmpScoreArr(key,bestKey)<0){ bestKey=key; best=cs; }
     }
     if(!best){ failed.push({kc:plnSkuKuan(row.sku),n:1}); continue; }
     assigns[row.sku]=best.cell; usedCells.add(best.cell);
+    noteKuanCol(best.aisle,best.col,row.sku);                        // 本步排入 → 供後續 SKU 聚集
+    if(!batchCols.has(best.aisle))batchCols.set(best.aisle,new Set());
+    batchCols.get(best.aisle).add(best.col);
   }
 
   // 套用 moves（SOURCE_TO_DEST；info 跟著 sku 搬；dst 立即 locked）
@@ -3754,9 +3820,22 @@ function plnComplexityConcentrate(config, ctx, opt){
   }
 
   const freeLayersOf=(a,col)=>plnColState(cells,a,col).empty;  // §1.6 只用空層、不位移
+  // ★ 2026-07-05 (Gordon): 跨走道時以「目的走道內部集中度」當距離 —
+  //   離同款(5碼)既有/剛排入的欄位最近; 同走道仍用來源距離(移動最少)。
+  //   (cells 即時更新: placeColorInColumn 放完立即生效 → 同款後續色自然靠攏)
+  const nearestKuanCol=(a,col,kuan5)=>{
+    let best=null;
+    Object.values(cells).forEach(cs=>{
+      if(cs.aisle!==a||!cs.sku)return;
+      if(String(cs.sku).substring(0,5)!==kuan5)return;
+      const d=Math.abs(cs.col-col); if(best==null||d<best)best=d;
+    });
+    return best==null?500:best;
+  };
   const distSum=(crows,a,col)=>crows.reduce((s,r)=>{
-    if(r.srcAisle!==a)return s+999;
-    return s+(geo[a]?plnAisleDistance(r.srcCol,col,geo[a].min,geo[a].max):Math.abs(r.srcCol-col));
+    if(r.srcAisle===a)
+      return s+(geo[a]?plnAisleDistance(r.srcCol,col,geo[a].min,geo[a].max):Math.abs(r.srcCol-col));
+    return s+nearestKuanCol(a,col,String(r.sku).substring(0,5));
   },0);
 
   // 為一個色挑最佳單欄：碼對層多 → 大材積 → 移動少 → 欄號 → 浪費少
@@ -3909,10 +3988,99 @@ function plnComplexityConsolidate(config, ctx){
           consolidateMoves:bestInt.moves.length, targetRange:bestInt._internalTargetRange};
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ★★★ §5b 自動＝需要才整理（Gordon 2026-07-05 拍板）★★★
+ * ───────────────────────────────────────────────────────────────────────────
+ * 分支一: 目的現有空欄已能讓來源色組(≥3碼塊)全部集中 → 不整理, 直接以色集中。
+ * 分支二: 有色組集中不了 → 「條件夠好」四項全過才先整理再排入:
+ *   (a) 有 ≥3 碼色組要集中 (零散貨不值得整理)
+ *   (b) 被挪 SKU 色組總銷售 < 要集中排入的色組總銷售 (色組總和比, 非單 SKU)
+ *   (c) 被拆「齊全色欄」的色組總銷售須 < 排入色組總銷售 (相對比較, 無絕對門檻 — 2026-07-05 最終版)
+ *   (d) 整理搬動次數 ≤ 排入 SKU 數 × 0.5 (Gordon 核定係數)
+ * 分支三: 條件不好 → 不折騰, 直接以色集中(塞得下的集中、其餘找洞塞_匹配)。
+ * v1 限制: 自動整理僅在「單一目的走道」時評估; 多目的走道一律走分支一/三。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+function plnComplexityAuto(config, ctx){
+  const {cells, selected}=ctx;
+  const dests=config.destination||[];
+  // ── 色組切塊 (同以色集中: ≥3碼成組, 每 4 碼一塊) ──
+  const byC=new Map();
+  selected.forEach(r=>{ const sku=String(r['商品編號']||''); if(!sku)return;
+    const c=sku.substring(0,7); if(!byC.has(c))byC.set(c,[]); byC.get(c).push(r); });
+  const chunks=[];
+  for(const [c7,rs] of byC){
+    if(rs.length<3)continue;
+    const sorted=[...rs].sort((a,b)=>
+      PLN_PRIM.sizeCodeNum(String(a['商品編號']))-PLN_PRIM.sizeCodeNum(String(b['商品編號'])));
+    for(let i=0;i<sorted.length;i+=4){ const ch=sorted.slice(i,i+4); if(ch.length>=3)chunks.push({c7,rows:ch}); }
+  }
+  // ── 分支一測試: 現有空欄容得下全部色塊? (greedy 模擬: 大塊先配, 一欄一塊) ──
+  const freeCount=new Map();
+  dests.forEach(a=>plnValidCols(cells,a).forEach(col=>{
+    freeCount.set(a+'#'+col, plnColState(cells,a,col).empty.length); }));
+  const unfit=[];
+  for(const ch of [...chunks].sort((x,y)=>y.rows.length-x.rows.length)){
+    let done=false;
+    for(const [k,n] of freeCount){ if(n>=ch.rows.length){ freeCount.set(k,0); done=true; break; } }
+    if(!done)unfit.push(ch);
+  }
+  if(!unfit.length || dests.length!==1){
+    const r=plnComplexityConcentrate(config, ctx, {byKuan:false});
+    r.complexity='auto';
+    r.strategy='自動('+(unfit.length?'多目的走道不整理→':'空欄足夠→')+'以色集中)';
+    return r;
+  }
+  // ── 分支二: 單一目的走道, 試算整理是否值得 ──
+  const aisle=dests[0];
+  const unfitRows=unfit.flatMap(ch=>ch.rows);
+  const needN=unfitRows.length;
+  const intCfg={source:[aisle],destination:[aisle],nToPick:needN,
+    aisleGeometry:config.aisleGeometry||plnGetAisleGeometry()};
+  const trial=plnRunInternalEngine(intCfg, cells);   // 內部 clone 試跑, 不動 ctx.cells
+  let ok=false, reason='';
+  if(trial._internalError){ reason='整理不出連續空位'; }
+  else {
+    const srcCellOf={}; trial.moves.forEach(m=>{srcCellOf[m.sku]=m.src;});
+    const movedSkus=Object.keys(srcCellOf);
+    const inSales=unfitRows.reduce((s,r)=>s+Number(r['銷售庫存']||0),0);
+    // (b) 色組總銷售比較 (被挪全部 vs 排入全部)
+    const dispSales=movedSkus.reduce((s,sku)=>{
+      const cs=cells[srcCellOf[sku]]; return s+Number(((cs||{}).info||{})['銷售庫存']||0); },0);
+    // (c) 相對檢查 (Gordon 2026-07-05 最終版): 被拆「齊全色欄」的色組總銷售必須 < 排入色組總銷售
+    //     — 齊全度不豁免、無絕對門檻; 低銷齊全欄拆走反而快, 高銷齊全欄不為較差的來源讓位。
+    let brokenHighCol=false, brokenColSales=0;
+    for(const sku of movedSkus){
+      const cs=cells[srcCellOf[sku]]; if(!cs)continue;
+      const g=plnClusterGroupSales(cells,cs);
+      if(g>0 && g>=inSales){ brokenHighCol=true; brokenColSales=g; break; }
+    }
+    // (d) 搬動上限
+    const cap=Math.ceil(needN*0.5);
+    if(brokenHighCol)reason=`被拆齊全色欄銷售(${brokenColSales})不低於排入(${inSales})`;
+    else if(!(dispSales<inSales))reason=`被挪色組總銷售(${dispSales})未低於排入(${inSales})`;
+    else if(trial.moves.length>cap)reason=`整理${trial.moves.length}次>上限${cap}`;
+    else ok=true;
+  }
+  if(!ok){
+    const r=plnComplexityConcentrate(config, ctx, {byKuan:false});
+    r.complexity='auto'; r.strategy=`自動(不值得整理:${reason}→以色集中+找洞塞)`;
+    return r;
+  }
+  // ── 套用整理 → 以色集中 (整理出的連續空欄會被色塊自然選中) ──
+  const work=trial.finalCells;
+  const moves=[...(ctx.moves||[]), ...trial.moves];
+  const r=plnComplexityConcentrate(config,
+    {cells:work, selected, capacity:ctx.capacity, deficit:ctx.deficit, xxSalesMax:ctx.xxSalesMax, moves},
+    {byKuan:false});
+  r.complexity='auto'; r.strategy=`自動(先整理${trial.moves.length}次→以色集中)`;
+  r.consolidateMoves=trial.moves.length;
+  return r;
+}
+
 // 引擎主執行 (★ 支援 initialCells: 多步驟串接時, 第 2+ step 從上一步結束狀態起算)
 function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
   // 多步驟: 若 initialCells 提供, 用 deep clone 作為起點; 否則從 STORAGE_MASTER 重建
-  const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
+  const cells=initialCells?plnCloneCells(initialCells,true):plnBuildState();  // ★ 2026-07-05 跨步驟保護
   const moves=[];
   const selected=initialSelected||plnSelectSourceSKUs(config,cells);
   const capacity=plnAuditCapacity(cells,config);
@@ -4036,12 +4204,28 @@ function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells};
 }
 
+// ★ 2026-07-05 (Gordon 需求7): 取「顏色名稱」供跨款比對 (如不同款的黑色圖T不可整排相鄰)。
+//   優先用報表「顏色」欄; 新品報表無顏色欄 → 從商品名稱尾段擷取 (如 "純棉寬版印花T恤-女-白色" → 白色)。
+//   尾段須含顏色字樣才視為顏色, 避免 "-Baby"、"-男" 等誤判; 取不到回傳 '' (= 不做排開限制)。
+function plnColorNameOf(info){
+  if(!info)return '';
+  const c=String(info['顏色']||'').trim();
+  if(c)return c;
+  const nm=String(info['商品名稱']||'');
+  const i=nm.lastIndexOf('-');
+  if(i<0)return '';
+  const tail=nm.substring(i+1).trim();
+  return /(色|黑|白|灰|藍|綠|粉|紅|黃|紫|棕|杏|青|米|膚|橘|橙|金|銀|條|紋|卡其|咖啡)/.test(tail)?tail:'';
+}
+
 // ★ Deep clone cells (multi-step 用, 避免上一步 state 污染後續)
-function plnCloneCells(src){
+// ★ 2026-07-05 (Gordon): 跨步驟保護 — keepLocked=true 時 locked 跨 step 繼承,
+//   前面 step 剛排好的 SKU 不會被後續 step 重挑/位移/置換 (Run All Steps 串接一律 true)。
+//   舊行為(重置)僅剩單獨呼叫且不傳參時生效。
+function plnCloneCells(src,keepLocked){
   const out={};
   Object.entries(src).forEach(([k,v])=>{
-    out[k]={cell:v.cell,aisle:v.aisle,col:v.col,layer:v.layer,layout:v.layout,sku:v.sku,info:v.info,locked:false};
-    // locked 重置: 一個 step 內的 locked 是防 chained displacement, 跨 step 不繼承
+    out[k]={cell:v.cell,aisle:v.aisle,col:v.col,layer:v.layer,layout:v.layout,sku:v.sku,info:v.info,locked:keepLocked?!!v.locked:false};
   });
   return out;
 }
@@ -4064,7 +4248,7 @@ function plnCloneCells(src){
 //        Greedy 順序: 先處理「目標層 refuge 數最少」的 displacee, 避免搶位
 //   5. 不做 XX/TX overflow, 不做款色分組, 直接逐筆 move
 function plnRunInternalEngine(config,initialCells){
-  const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
+  const cells=initialCells?plnCloneCells(initialCells,true):plnBuildState();  // ★ 2026-07-05 跨步驟保護
   const moves=[];
   const failed=[];
   
@@ -4111,17 +4295,24 @@ function plnRunInternalEngine(config,initialCells){
   }
   
   // 嘗試每個可能的起點 col (起點必為 layer 1, 由 sortedCols 保證)
-  let bestStartCol=-1, bestCost=Infinity, bestRange=null;
+  // ★ 2026-07-05 (Gordon): 齊全色組保護 — 起點評分改 [拆散集中色欄數, 移動次數]:
+  //   範圍內屬於「色碼集中欄」(欄內同色7 ≥3) 的 SKU 會被逐格撤到分散空位=拆散,
+  //   優先選不拆散齊全色欄的起點, 同分才比移動次數少。
+  let bestStartCol=-1, bestScore=null, bestRange=null;
   for(const startCol of sortedCols){
     const r=getRangeFrom(startCol,N);
     if(!r)continue;
-    // cost = 範圍內有 SKU 的 cell 數 = 需移動次數
     // (locked cell 不可動, 視為「不可用範圍」直接跳過此 startCol)
     const lockedInRange=r.some(c=>c.locked);
     if(lockedInRange)continue;
-    const cost=r.filter(c=>c.sku).length;
-    if(cost<bestCost){
-      bestCost=cost;
+    const cost=r.filter(c=>c.sku).length;                                    // 需移動次數
+    // ★ 2026-07-05 最終版 (Gordon): 齊全色欄懲罰改「相對」— 以被拆齊全欄成員的銷售總和計分,
+    //   銷售低的齊全欄拆了也快移(幾乎無懲罰), 銷售高的盡量避開; 同分再比移動次數。
+    const clusterBreakSales=r.filter(c=>c.sku&&plnColorClusterSize(cells,c)>=3)
+      .reduce((s,c)=>s+Number(((c.info||{})['銷售庫存'])||0),0);
+    const score=[clusterBreakSales,cost];
+    if(bestScore===null||score[0]<bestScore[0]||(score[0]===bestScore[0]&&score[1]<bestScore[1])){
+      bestScore=score;
       bestStartCol=startCol;
       bestRange=r;
     }
@@ -4232,7 +4423,7 @@ function plnRunInternalEngine(config,initialCells){
 // ★ 最少移動: 有足夠連續空格時直接排入, 不觸發內部整理
 // ═══════════════════════════════════════════════════════════════════
 function plnRunNewEngine(config,initialCells){
-  const cells=initialCells?plnCloneCells(initialCells):plnBuildState();
+  const cells=initialCells?plnCloneCells(initialCells,true):plnBuildState();  // ★ 2026-07-05 跨步驟保護
   const moves=[];
   const failed=[];
   const placed=[];
@@ -4302,7 +4493,7 @@ function plnRunNewEngine(config,initialCells){
     const cell=plnCellId(aisle,col,layer);
     const cs=cells[cell];
     if(!cs||cs.sku||cs.locked)return false;
-    const info={'商品編號':s.code,'商品名稱':s.name||'','尺寸':s.size||'','顏色':'',
+    const info={'商品編號':s.code,'商品名稱':s.name||'','尺寸':s.size||'','顏色':plnColorNameOf({'商品名稱':s.name||''}),
       '銷售庫存':0,'架上數量':0,'未到量':s.pending||0,'未抓貨':0,'保留數量':0,
       '商品包材':s.packaging||'','類別':kuCat,'儲位':cell,'_isNewProduct':true};
     cs.sku=s.code;cs.info=info;cs.locked=true;
@@ -4480,7 +4671,8 @@ function plnRunNewEngine(config,initialCells){
         const numSizes=all.length||1;
         const avgPending=totalPending/numSizes;
         colorEntries.push({kc:ku.kc,color7:c7,mainSkus:fittingMain,size5Skus:allOverflow,groups,
-          avgPending,totalPending,numSizes,ku,placed:false,mainCol:null,mainRackIdx:null});
+          avgPending,totalPending,numSizes,ku,placed:false,mainCol:null,mainRackIdx:null,
+          colorName:plnColorNameOf({'商品名稱':(all[0]&&all[0].name)||''})});   // ★ 需求7: 顏色名稱(跨款排開用)
       });
     });
 
@@ -4607,6 +4799,18 @@ function plnRunNewEngine(config,initialCells){
       function physAdjacent(c1,c2){ return physAdjCols(c1).includes(c2); }
       // §1.3a 分段感知相鄰：僅同一架同一 segment 的相鄰位置算相鄰（跨架、跨儲位箱不算）。
       function physAdjConflict(col,c7){ for(const nb of physAdjCols(col)){ for(let L=1;L<=4;L++){ const cs=cells[plnCellId(aisle,nb,L)]; if(cs&&cs.sku&&String(cs.sku).substring(0,7)===c7)return true; } } return false; }
+      // ★ 需求7 (Gordon 2026-07-05): 同「顏色名稱」跨款盡量不相鄰 (黑色圖T牆案例) —
+      //   soft 檢查: 候選欄優先避開鄰欄有同顏色名稱者; 全部衝突時彈性放行 (不因此排不進)。
+      function adjColorNameConflict(col,cname){
+        if(!cname)return false;
+        for(const nb of physAdjCols(col)){
+          for(let L=1;L<=4;L++){
+            const cs=cells[plnCellId(aisle,nb,L)];
+            if(cs&&cs.sku&&plnColorNameOf(cs.info)===cname)return true;
+          }
+        }
+        return false;
+      }
 
 
       // ★ A材積降級 (Gordon 確認): G(大材積)欄不足以容納所有色時,
@@ -4700,7 +4904,10 @@ function plnRunNewEngine(config,initialCells){
 
         // ── 主碼放置：非降級色 → 大材積欄（footprint 升冪逐架填滿，§1.3c 非相鄰）──
         //   §1.3 切組多主碼組仍逐組取下一個非相鄰 col（同色第2組空一欄）。
-        function nextCol(pool,c7){
+        function nextCol(pool,c7,cname){
+          // ① 首選: 不鄰同款色(color7) 且 不鄰同顏色名稱(需求7, 跨款)
+          for(const c of pool){ if(usedColSet.has(c)||!colFullyFree(c))continue; if(adjSameColor(c,c7))continue; if(adjColorNameConflict(c,cname))continue; return c; }
+          // ② 退一步: 只擋同款色 (顏色名稱衝突彈性放行 — 需求7「無法時再彈性處理」)
           for(const c of pool){ if(usedColSet.has(c)||!colFullyFree(c))continue; if(adjSameColor(c,c7))continue; return c; }
           for(const c of pool){ if(!usedColSet.has(c)&&colFullyFree(c))return c; } // 欄不足極端 fallback
           return null;
@@ -4711,7 +4918,7 @@ function plnRunNewEngine(config,initialCells){
         for(let k=0;k<maxGroups;k++){
           for(const e of remaining){
             if(e._forceA||k>=e.groups.length)continue;
-            const col=nextCol(mainColPool,e.color7);
+            const col=nextCol(mainColPool,e.color7,e.colorName);
             if(col==null)break;
             putGroup(e,e.groups[k],col);
           }
@@ -4739,12 +4946,12 @@ function plnRunNewEngine(config,initialCells){
               const aFree=rk.ovfCols.filter(c=>colFullyFree(c)).sort((a,b)=>a-b);
               const demote=demoteByRack.get(ri); if(!demote)return;
               let demoteCol=aFree.find(c=>rk.mainCols.some(g=>physAdjacent(c,g))); if(demoteCol==null)demoteCol=aFree[aFree.length-1];
-              for(let k=0;k<demote.groups.length;k++){ const col=k===0?demoteCol:nextCol(smallColPool,demote.color7); if(col==null)break; putGroup(demote,demote.groups[k],col); }
+              for(let k=0;k<demote.groups.length;k++){ const col=k===0?demoteCol:nextCol(smallColPool,demote.color7,demote.colorName); if(col==null)break; putGroup(demote,demote.groups[k],col); }
               rk._demoteEntry=demote;
             });
           } else {
             // CB 降A（罕見，CCCC 容量通常足）：smallColPool
-            for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const sc=nextCol(smallColPool,e.color7); if(sc==null)break; putGroup(e,e.groups[k],sc); } }
+            for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const sc=nextCol(smallColPool,e.color7,e.colorName); if(sc==null)break; putGroup(e,e.groups[k],sc); } }
           }
           // 溢出（密度 + 就近 + 非相鄰，Gordon 2026-06-30）：以「色」為組整組放（同色溢出留同欄，因 CB 的
           //   架首C↔B 相鄰、不可拆兩欄）。每組候選欄排序：① 架距離最近（守不離主碼超過一架）→ ② 能容下整組者優先
@@ -4765,8 +4972,10 @@ function plnRunNewEngine(config,initialCells){
           for(const g of ovGroups){
             let remain=g.items.slice(); const mr=rackOf(g.mc);
             while(remain.length){
+              // ★ 需求7: 同顏色名稱衝突欄排最後 (soft — 僅剩衝突欄時仍可用, 彈性放行)
               const cands=[...allOvf,...shortBackup].filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7))
-                .sort((a,b)=> (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
+                .sort((a,b)=> ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
+                  || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
                   || ((emptyLayers(b).length>=remain.length?1:0)-(emptyLayers(a).length>=remain.length?1:0))
                   || (emptyLayers(a).length-emptyLayers(b).length)
                   || (Math.abs(a-g.mc)-Math.abs(b-g.mc)) || (a-b));
@@ -5104,6 +5313,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
           <option value="color" ${defaultComplexity==='color'?'selected':''}>中等 · 以色集中</option>
           <option value="kuan" ${defaultComplexity==='kuan'?'selected':''}>次高 · 以款集中</option>
           <option value="consolidate" ${defaultComplexity==='consolidate'?'selected':''}>最高 · 集中連續空位</option>
+          <option value="auto" ${defaultComplexity==='auto'?'selected':''}>自動 · 需要才整理</option>
         </select>
       </div>
       <span style="color:var(--text2)">SKU數</span>
@@ -5457,7 +5667,7 @@ function plannerRunAllSteps(){
     
     // ════ 高/低庫存 分支 (原邏輯) ════
     // 預檢 + xxSalesMax 對話 (每 step 獨立)
-    const tmpCells=cells?plnCloneCells(cells):plnBuildState();
+    const tmpCells=cells?plnCloneCells(cells,true):plnBuildState();  // ★ 2026-07-05 跨步驟保護
     // ★ N 防呆: 檢查來源走道實際可用 SKU 數 (扣掉前面 step 已搬走的)
     const srcSkuSet=new Set();
     Object.values(tmpCells).forEach(cs=>{
@@ -5498,7 +5708,7 @@ function plannerRunAllSteps(){
       if(strict.length<deficit){
         const allEligible=[];
         Object.values(tmpCells).forEach(cs=>{
-          if(!cs.sku||!config.destination.includes(cs.aisle))return;
+          if(!cs.sku||cs.locked||!config.destination.includes(cs.aisle))return;
           const inv=cs.info||{};
           if(Number(inv['未到量']||0)!==0)return;
           if(Number(inv['保留數量']||0)!==0)return;
