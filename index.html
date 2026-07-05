@@ -9190,29 +9190,43 @@ const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B1
  E:['E10','E09','E08','E07','E06','E05','E04','E03','E02','E01'],F:['F02','F01']};
 let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false,RM_ADD=null;
 const RM_UNIT_CM_OVR={A02:35,E08:35,E09:35};   // 每號碼實體寬(cm)特例：5格/175 或 6格/210
-const RM_LPOS={'C11回':177,'B10回':108};            // B10回以108格網定位使尾端與其他走道平齊(實際107號)                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
-const RM_CALIB_VER='v3_0705';
+const RM_LPOS={'C11回':177};                    // C11回 178-182 凸出走道外，177 對應對面 001                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
+const RM_CALIB_VER='v4_0705';
 // ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
 // ax=柱/截短「右緣」錨定位置（自走道口起算的號碼格數，實測換算）；未給 ax 者依自身號碼範圍推得。
 const RM_CALIB=[
- {a:'B06',s:'出',m:{t:'柱',r:'007-009'},set:{r:'008-009',ax:9, br:'100-101',nt:'實測柱位8-9'}},
- {a:'B06',s:'出',m:{t:'柱',r:'022-027'},set:{r:'023-027',ax:27,br:'082-086',nt:'實測柱位23-27'}},
- {a:'B06',s:'出',m:{t:'柱',r:'040-045'},set:{r:'041-044',ax:44,br:'065-068',nt:'實測柱位41-44'}},
- {a:'B05',s:'回',m:{t:'柱',r:'100-102'},set:{r:'100-101',ax:9, br:'008-009',nt:'實測(B06出8-9)'}},
- {a:'B05',s:'回',m:{t:'柱',r:'082-087'},set:{r:'082-086',ax:27,br:'023-027',nt:'實測(B06出23-27)'}},
- {a:'B05',s:'回',m:{t:'柱',r:'064-069'},set:{r:'065-068',ax:44,br:'041-044',nt:'實測(B06出41-44)'}},
- {a:'B10',s:'回',m:{t:'柱',r:'098-104'},set:{ax:11,nt:'牆側柱(單面)｜實測≈對面006-011'}},
- {a:'B10',s:'回',m:{t:'柱',r:'084-085'},set:{ax:26,nt:'牆側柱(單面)｜實測≈對面024-026'}},
- {a:'B10',s:'回',m:{t:'柱',r:'064-069'},set:{ax:45,nt:'牆側柱(單面)｜實測≈對面041-045'}},
+ // B05/B06：柱號碼依實測（新資料）；並清除 v3 遺留 ax（格線定位已足夠）
+ {a:'B06',s:'出',m:{t:'柱',r:'007-009'},set:{r:'008-009',br:'100-101',nt:'實測柱位8-9'}},
+ {a:'B06',s:'出',m:{t:'柱',r:'022-027'},set:{r:'023-027',br:'082-086',nt:'實測柱位23-27'}},
+ {a:'B06',s:'出',m:{t:'柱',r:'040-045'},set:{r:'041-044',br:'065-068',nt:'實測柱位41-44'}},
+ {a:'B05',s:'回',m:{t:'柱',r:'100-102'},set:{r:'100-101',br:'008-009',nt:'實測(B06出8-9)'}},
+ {a:'B05',s:'回',m:{t:'柱',r:'082-087'},set:{r:'082-086',br:'023-027',nt:'實測(B06出23-27)'}},
+ {a:'B05',s:'回',m:{t:'柱',r:'064-069'},set:{r:'065-068',br:'041-044',nt:'實測(B06出41-44)'}},
+ {a:'B06',s:'出',m:{t:'柱',r:'008-009'},del:['ax']},
+ {a:'B06',s:'出',m:{t:'柱',r:'023-027'},del:['ax']},
+ {a:'B06',s:'出',m:{t:'柱',r:'041-044'},del:['ax']},
+ {a:'B05',s:'回',m:{t:'柱',r:'100-101'},del:['ax']},
+ {a:'B05',s:'回',m:{t:'柱',r:'082-086'},del:['ax']},
+ {a:'B05',s:'回',m:{t:'柱',r:'065-068'},del:['ax']},
+ // B10：純格線定位（清 v3 ax）
+ {a:'B10',s:'回',m:{t:'柱',r:'098-104'},del:['ax'],set:{nt:'牆側柱(單面)'}},
+ {a:'B10',s:'回',m:{t:'柱',r:'084-085'},del:['ax'],set:{nt:'牆側柱(單面)'}},
+ {a:'B10',s:'回',m:{t:'柱',r:'064-069'},del:['ax'],set:{nt:'牆側柱(單面)'}},
+ // C11回：實體柱較寬（實測對面11-16/27-34/51-53），其後儲位順移排列
  {a:'C11',s:'回',m:{t:'架',r:'178-182'},set:{nt:'凸出走道外，自177起才對應對面001'}},
  {a:'C11',s:'回',m:{t:'柱',r:'166-167'},set:{ax:16,nt:'牆側柱(單面)｜實測≈對面011-016'}},
  {a:'C11',s:'回',m:{t:'柱',r:'146-155'},set:{ax:34,nt:'牆側柱(單面)｜實測≈對面027-034'}},
  {a:'C11',s:'回',m:{t:'截短',r:'092-130'},repl:[{t:'截短',r:'128-130'},{t:'柱',r:'125-127',nt:'牆側柱(單面)｜實測≈對面051-053'},{t:'截短',r:'092-124'}]},
+ // D11：070 錯位命名，柱實佔至第70格，後架順移
  {a:'D11',s:'出',m:{t:'柱',r:'067-069'},set:{ax:70,nt:'柱實位67-70；070儲位為當初錯位命名，實際位於柱後'}},
- {a:'E06',s:'回',m:{t:'柱',r:'084-085'},set:{ax:58,br:'056-058',nt:'實測(E07出56-58)'}},
- {a:'E01',s:'出',m:{t:'柱',r:'026-030'},set:{r:'026-029',ax:29,nt:'牆側柱(單面)｜實測(回面112-115)'}},
- {a:'E01',s:'出',m:{t:'架',r:'043-045'},set:{out:1,nt:'鐵力士短架，凸出走道外側，不佔走道長度'}},
- {a:'E01',s:'出',m:{t:'架',r:'043-045'},insAfter:{t:'柱',r:'',ax:45,pt:'柱',nt:'牆側柱(單面)｜實測(回面096-099)'}},
+ // E06/E07：柱對齊 E05 格線 9-12/26-29/43-45/56-58；E06 081-083 為小材積短架，擠壓至格線終點
+ {a:'E06',s:'回',m:{t:'柱',r:'084-085'},set:{ax:58,br:'056-058',nt:'實測(E07出56-58，柱與E07同寬)'}},
+ {a:'E06',s:'回',m:{t:'架',r:'081-083'},set:{sq:1,nt:'小材積短架，緊貼柱後、寬度較窄'}},
+ // E01：柱依格線；043-045 內嵌回走道帶（撤銷 v3 的外偏移與無號柱）
+ {a:'E01',s:'出',m:{t:'柱',r:'026-030'},set:{r:'026-029',nt:'牆側柱(單面)｜實測(回面112-115)'}},
+ {a:'E01',s:'出',m:{t:'柱',r:'026-029'},del:['ax']},
+ {a:'E01',s:'出',m:{t:'柱',r:''},remove:1},
+ {a:'E01',s:'出',m:{t:'架',r:'043-045'},del:['out'],set:{nt:'鐵力士短架(實體位於走道外側，圖面內嵌呈現)'}},
 ];
 function rmLpos(a,side){var k=RM_LPOS[a+side];return k!=null?k:rmAisleL(a);}
 function rmUnitCM(a){return RM_UNIT_CM_OVR[a]||175/rmUnitN(a);}
@@ -9224,6 +9238,8 @@ function rmApplyFieldCalib(rm){  // 對 RM 結構套用實測校正（冪等；�
       var b=bays[i];
       if(b.t!==p.m.t||(b.r||'')!==p.m.r)continue;
       if(p.set)for(var k in p.set)b[k]=p.set[k];
+      if(p.del)p.del.forEach(function(k2){delete b[k2];});
+      if(p.remove){bays.splice(i,1);}
       if(p.insAfter)bays.splice(i+1,0,Object.assign({b:0,L:175,ba:'',br:'',nt:'',s:[]},p.insAfter));
       if(p.repl){var arr=p.repl.map(function(x){return Object.assign({b:0,L:175,ba:b.ba||'',br:b.br||'',nt:'',s:[]},x);});bays.splice.apply(bays,[i,1].concat(arr));}
       break;
@@ -9313,62 +9329,44 @@ function rmAisleL(a){ // 走道設計長（號碼數）
   if(!L){['出','回'].forEach(function(sd){((RM.aisles[a]&&RM.aisles[a][sd])||[]).forEach(function(b){var m=/^(\d+)-(\d+)$/.exec(b.r||'');if(m)L=Math.max(L,parseInt(m[2],10));});});}
   return L||108;
 }
-function rmFaceGeom(a,side,withGap){ // 錨定式排列(2026-07-05)：架=實體長依序緊排；柱/截短=吸收段，右緣錨定至實測/設計位置(誤差壓進柱寬)；面尾縮放對齊設計終點 → 各走道頭尾平齊
+function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬，架寬=號碼跨距×格寬、柱=其號碼範圍格線位置(可用 ax 實測右緣)；缺號=留白；跨走道自然對齊
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
-  var unit=rmUnitCM(a),L=rmAisleL(a),Lp=rmLpos(a,side),gapCM=9*175;
-  var items=[],cum=null,total=0,gapX=null,gapDone=false,segStart=0,segFrom=0;
+  var unit=rmUnitCM(a),Lp=rmLpos(a,side),gapCM=9*175;
+  var items=[],cumD=null,gapDone=false,gapX=null,total=0,prevLo=null,prevHi=null;
   function rangeOf(bb){var m=/^(\d+)-(\d+)$/.exec(bb.r||'');if(m)return [parseInt(m[1],10),parseInt(m[2],10)];if(/^\d+$/.test(bb.r||''))return [parseInt(bb.r,10),parseInt(bb.r,10)];return null;}
-  function scaleSeg(from,to,x0,x1){ // 將 items[from..to) 內的架等比縮放至 [x0,x1]（跳過走道外凸出架）
-    var nat=0,k;for(k=from;k<to;k++)if(!items[k].out)nat+=items[k].w;
-    if(nat<=0)return x0;
-    var f=(x1-x0)/nat;if(f<0.02)f=0.02;
-    var x=x0;for(k=from;k<to;k++){if(items[k].out)continue;items[k].x=x;items[k].w*=f;x+=items[k].w;}
-    return x;
-  }
   bays.forEach(function(b,i){
     var rg=rangeOf(b),lo=rg?rg[0]:null,hi=rg?rg[1]:null;
-    var ds=(lo!=null)?((side==='出')?(lo-1)*unit:(Lp-hi)*unit):null;
-    if(cum==null){cum=(ds!=null?Math.min(ds,0):0);segStart=cum;}
-    if(b.out){ // 走道外凸出架（如 E01 043-045）：不佔走道長度，僅以偏移標示
-      var xo=(ds!=null?ds:cum);if(gapDone&&ds!=null&&ds*1>=gapCM)xo+=RM_GAP_CM;
-      items.push({i:i,b:b,x:xo,w:rmRackLen(b),out:1});
-      return;
-    }
-    if(withGap&&!gapDone&&(ds!=null?ds:cum)>=gapCM-0.5){cum+=RM_GAP_CM;gapX=cum-RM_GAP_CM/2;gapDone=true;segStart=cum;segFrom=items.length;}
-    var w;
-    if(b.t==='柱'||b.t==='截短'){
-      var axU=(b.ax!=null)?b.ax:(lo!=null?((side==='出')?hi:(Lp-lo+1)):null);
-      var end;
-      if(b.t==='柱'&&b.pw){end=cum+b.pw*RM_STD_SLOT;}              // 手動指定柱寬 → 固定寬
-      else if(axU!=null){
-        end=axU*unit;
-        if(gapDone&&end>=gapCM-0.5)end+=RM_GAP_CM;
-        else if(withGap&&!gapDone&&end>gapCM+0.5){end+=RM_GAP_CM;gapDone=true;gapX=gapCM+RM_GAP_CM/2;} // 吸收段本身跨越後走道（尾緣恰於走道口者不算跨越）
-      }
-      else {end=cum+rmSpan(b)*RM_STD_SLOT;}
-      if(end-cum<12){cum=scaleSeg(segFrom,items.length,segStart,end-12);} // 前段架微縮，柱至少留 12cm
-      w=Math.max(end-cum,12);
-      items.push({i:i,b:b,x:cum,w:w});cum+=w;
-      segStart=cum;segFrom=items.length;
+    var gs=rg?((side==='出')?(lo-1)*unit:(Lp-hi)*unit):null;      // 格線起點
+    var ge=rg?((side==='出')?hi*unit:(Lp-lo+1)*unit):null;        // 格線終點
+    var span=rg?(hi-lo+1):Math.max(b.s.length,1);
+    var isAbs=(b.t==='柱'||b.t==='截短');
+    if(b.ax!=null&&isAbs)ge=b.ax*unit;                            // 實測右緣錨點
+    // 疊置柱：柱號碼範圍完全落在前一架的號碼範圍內（原始資料如 E07出 085-088）→ 畫在該架缺號格之上，不佔排列
+    var overlay=isAbs&&rg&&prevLo!=null&&lo>=prevLo&&hi<=prevHi;
+    // 後走道空隙
+    var ds=(gs!=null)?gs:(cumD==null?0:cumD);
+    if(withGap&&!gapDone&&ds>=gapCM-0.5){gapDone=true;gapX=gapCM+RM_GAP_CM/2;}
+    var x0,x1,gapW=0;
+    if(overlay){
+      x0=gs;x1=Math.max(ge,x0+8);
     }else{
-      w=rmRackLen(b);
-      items.push({i:i,b:b,x:cum,w:w});cum+=w;
-    }
-    total=cum;
-  });
-  // 面尾對齊：最後一段（柱/截短之後的架）縮放至該面設計終點 → 跨走道尾端平齊
-  if(items.length&&segFrom<items.length){
-    var lastIdx=items.length-1;
-    while(lastIdx>=segFrom&&items[lastIdx].out)lastIdx--;
-    if(lastIdx>=segFrom){
-      var lb=bays[items[lastIdx].i],rg2=rangeOf(lb);
-      if(rg2){
-        var T=(side==='出')?rg2[1]*unit:(Lp-rg2[0]+1)*unit;
-        if(gapDone&&T>=gapCM-0.5)T+=RM_GAP_CM;
-        if(T>segStart){cum=scaleSeg(segFrom,lastIdx+1,segStart,T);total=cum;}
+      x0=(gs!=null)?(cumD==null?gs:Math.max(gs,cumD)):(cumD==null?0:cumD);
+      if(isAbs){
+        if(b.t==='柱'&&b.pw){x1=x0+b.pw*RM_STD_SLOT;}             // 手動柱寬優先
+        else if(ge!=null){
+          x1=Math.max(ge,x0+8);
+          if(withGap&&!gapDone&&x1>gapCM+0.5){gapDone=true;gapX=gapCM+RM_GAP_CM/2;gapW=RM_GAP_CM;} // 吸收段自身跨越後走道
+        }
+        else {x1=x0+span*RM_STD_SLOT;}
+      }else{
+        x1=(b.sq&&ge!=null&&ge>x0+2)?ge:(x0+span*unit);           // sq=擠壓至格線終點（小材積短架）
       }
     }
-  }
+    var sh=(gapDone&&!gapW&&(gs!=null?gs:x0)>=gapCM-0.5)?RM_GAP_CM:0;  // 後走道位移
+    items.push({i:i,b:b,x:x0+sh,w:x1-x0+gapW,out:b.out?1:0,ov:overlay?1:0});
+    if(!overlay){cumD=x1;total=x1+sh+gapW;}
+    if(!isAbs&&rg&&!b.out){prevLo=lo;prevHi=hi;}
+  });
   return {unit:unit,items:items,total:total,gapX:gapX};
 }
 // ---------- 渲染 ----------
@@ -9547,7 +9545,7 @@ function rmPlaceOpts(cur){
 function rmRenderEditor(){
   var ed=document.getElementById('rm-editor');if(!ed)return;
   if(RM_ADD){rmRenderAddForm(ed);return;}
-  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點上方平面圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>可直接<b>拖曳</b>架或柱微調位置。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」或選架後「插入架」→ 先選<b>款式與格數</b>再建立。<br><br>排列原則（2026-07-05 實測校準）：架依實體長依序緊排；<b>柱／截短為吸收段</b>，右緣錨定在實測位置，長度誤差壓縮進柱寬；各走道頭尾自動平齊。</div>';return;}
+  if(!RM_SEL||!RM_EDIT){ed.innerHTML='<div style="color:#888;font-size:12.5px;line-height:1.7;padding:6px">點上方平面圖任一<b>架</b>或<b>柱</b>進行細部編輯（點空白處取消）。<br>可直接<b>拖曳</b>架或柱微調位置。<br>點灰色走道標籤可放大單一走道。<br>點各面末端「＋」或選架後「插入架」→ 先選<b>款式與格數</b>再建立。<br><br>排列原則（2026-07-05 格線定位）：<b>每格＝固定格寬、架寬＝號碼跨距</b>，柱佔其號碼範圍的格線位置（特殊柱依實測錨點），缺號＝留白；跨走道自然對齊、頭尾平齊。</div>';return;}
   var a=RM_SEL.a,side=RM_SEL.side,i=RM_SEL.i,bay=RM_EDIT;
   var h='<div style="font-weight:700;font-size:13.5px;margin-bottom:6px">'+a+'　'+(side==='出'?'小號面':'大號面')+'　第 '+(i+1)+' 架</div>';
   h+='<div style="font-size:12px;margin-bottom:6px">類型：<select id="rm-type" onchange="rmHarvest();rmRenderEditor()">'+
@@ -9566,7 +9564,7 @@ function rmRenderEditor(){
     h+='</table><div style="margin:6px 0"><button onclick="rmAddSlot()" style="font-size:12px;cursor:pointer">＋ 新增儲位號碼</button></div>';
   }else if(bay.t==='柱'){
     h+='<div style="font-size:12px;margin:6px 0">柱文字：<input type="text" id="rm-ptext" value="'+rmEsc(bay.pt||'柱')+'" style="width:130px"></div>';
-    h+='<div style="font-size:12px;margin:6px 0">柱寬（儲位數）：<input type="number" id="rm-pw" value="'+(bay.pw||'')+'" placeholder="自動" min="1" max="30" step="1" style="width:58px"> 個 <span style="color:#888;font-size:11px">留空＝自動（吸收前段架長誤差，右緣對齊錨點）</span></div>';
+    h+='<div style="font-size:12px;margin:6px 0">柱寬（儲位數）：<input type="number" id="rm-pw" value="'+(bay.pw||'')+'" placeholder="自動" min="1" max="30" step="1" style="width:58px"> 個 <span style="color:#888;font-size:11px">留空＝自動（依號碼格線位置；右緣可用錨點微調）</span></div>';
     h+='<div style="font-size:12px;margin:6px 0">右緣錨點（自走道口第幾格）：<input type="number" id="rm-ax" value="'+(bay.ax!=null?bay.ax:'')+'" placeholder="依號碼推算" step="0.5" style="width:74px"> <span style="color:#888;font-size:11px">實測校正用；留空＝依柱號碼範圍</span></div>';
     h+='<div style="font-size:12px;color:#888;margin:6px 0">柱＝blocked bay，不放貨。'+(bay.ba?'<br>共用柱背面：'+bay.ba+' '+bay.br:'')+'（切回「架」可編輯儲位）</div>';
   }else{
