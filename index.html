@@ -2686,6 +2686,9 @@ const PLN_SPEC = {
     {id:'5b-auto', status:'locked', impl:'plnComplexityAuto', desc:'(Gordon 2026-07-05核定)自動·需要才整理：分支一空欄夠→直接以色集中；分支二(單一目的走道)四條件全過才先整理再排入—(a)有≥3碼色組(b)被挪色組總銷售<排入色組總銷售(c)被拆齊全色欄色組總銷售<排入(相對, 最終版)(d)整理次數≤排入數×0.5；分支三不值得→以色集中+找洞塞。多目的走道v1不自動整理'},
     {id:'1.6',  status:'locked',  impl:'plnComplexityConsolidate→plnRunInternalEngine/plnApplyOverflowZone', desc:'(階段4)最低/次低/中等/次高不主動位移；最高=借內部整理騰位；目的走道位置不夠→挑既有SKU移溢位區(§1.7)已落地；新品永不被位移、locked防連鎖'},
     {id:'1.7',  status:'locked',  impl:'plnApplyOverflowZone/plnIdentifyOverflowCandidates/plnOverflowAisleFor/plnOverflowEmpties', flag:'config.overflow=[\'TX\',\'XX\']', desc:'(階段4)溢位區TX+XX自動承接：未到≤10且銷售≤6/銷售少優先移出；TX供L區/XX其他；空儲位材積最大優先排入；套用於每一複雜度等級'},
+    {id:'3.6-auto', status:'locked', impl:'plnAutoSelect (plnSelectSourceSKUs sortMode=auto)', desc:'(Gordon 2026-07-10)挑選「自動」＝預設：不限高/低庫存，雙軌評估取優—A零散優先(搬運件數少的整色組先，適合目的空格少) vs B整款優先(SKU數最貼近N的整款先，適合零散不足剛好有整款可拉走)；評分＝湊滿N→拆款少→搬運件數少；整色組進出+DP精確湊數+回溯，湊不出才拆色(未到≤10/銷售低優先)並附_selWarnings'},
+    {id:'1.3e-frontfill', status:'locked', impl:'plnRunNewEngine assignColorsToRuns (非AG fallback)', desc:'(Gordon 2026-07-10 F01案例)非AG/CB走道(如F01全D擺法)新品排入：廢除「單一連續段裝整款」(舊findBestRun跳過F01-038~044共28格直奔049)；改由前往後分段排入—連續段依欄號ASC，每段放得下幾個整色組就放幾個(色組不拆欄)，放不下續下一段；禁用/缺欄自然斷段。僅剩上層零格的欄(036-4/037-4)主碼組不可用(需4層整欄)，僅溢出碼可用'},
+    {id:'new-dedup2', status:'locked', impl:'plnRunNewEngine prePlaced 跨步驟去重', desc:'(Gordon 2026-07-10)前面step已排入的新品(cells._isNewProduct)自動從佇列扣除：step2不重複排入、queueTotal/UI剩餘SKU數正確歸零；plannerRefreshStepCounts補新品模擬分支(修step2來源/目的顯示?)+newq-count動態剩餘'},
     {id:'1.8',  status:'todo',    desc:'包材→走道對應表（待補）'},
     {id:'3.5c', status:'pending', desc:'溢出碼高未到量→大材積C精修（待Gordon定）'},
     {id:'3.7',  status:'locked',  desc:'(v0.8 階段7落地)pending不影響順序；1~3碼色當溢出由全走道best-fit打包；GLOBAL OVERFLOW 已實作'},
@@ -2916,6 +2919,14 @@ function plnSelectSourceSKUs(config,cells){
     sum:skus.reduce((s,r)=>s+r._total,0),
     avg:skus.reduce((s,r)=>s+r._total,0)/skus.length,
   }));
+  // ═══ 自動模式 (★ §3.6-auto Gordon 2026-07-10): 不限高/低庫存, 依來源/目的當下條件挑「相對合適」的 SKU ═══
+  //   雙軌評估: A「零散優先」(搬運件數少的整色組先, 適合空格少的情境) vs
+  //             B「整款優先」(SKU 數最貼近 N 的整款先, 適合零散不足、剛好有整款可整條拉走的情境)。
+  //   評分: 湊滿 N 優先 → 拆款數少 → 搬運件數少。整色組進出、DP 精確湊數與回溯與高庫存 v7 共用精神。
+  if(sortMode==='auto'){
+    return plnAutoSelect(rows,colorGroups,n);
+  }
+
   // 優先序: 款平均庫存 DESC (相對高庫存款先挑) → 同款內色平均 DESC
   //   同款各色相鄰排列 → 貪婪挑選時整款自然一起被挑 (整款優先精神)
   colorGroups.sort((a,b)=>{
@@ -2985,6 +2996,107 @@ function plnSelectSourceSKUs(config,cells){
     }
   });
   if(warns.length)selected._selWarnings=warns;
+  return selected;
+}
+
+// ═══ §3.6-auto 自動挑選 (Gordon 2026-07-10) ═══
+// 情境: 把多條走道的空格集中到其中一條。不硬性挑高或低庫存, 以當下來源/目的條件判斷:
+//   例1: A空10格/B空5格 → 挑 A 的 5 個 SKU 去 B → 零散/低庫存/單款色低SKU的整色組先 (不拆款不拆色)。
+//   例2: A空20格/B空50格, B 零散不足 20 但剛好有 20 SKU 的整款 → 整款拉去 A 的 20 格。
+// 作法: 雙軌評估取優。整色組為單位 (同色永不拆散), DP 精確湊數, 湊不出才拆色 (未到≤10/銷售低優先)。
+function plnAutoSelect(rows,colorGroups,n){
+  // 款彙總 (kuan 5碼)
+  const kuanAgg=new Map();
+  colorGroups.forEach(g=>{
+    if(!kuanAgg.has(g.kuan))kuanAgg.set(g.kuan,{kuan:g.kuan,count:0,sum:0,groups:[]});
+    const k=kuanAgg.get(g.kuan);k.count+=g.count;k.sum+=g.sum;k.groups.push(g);
+  });
+  // DP 精確湊數 — 目標: 湊滿 target 且「搬運件數 (庫存件數總和)」最小
+  function exactFillMin(pool,target){
+    if(target<=0)return target===0?[]:null;
+    const dp=new Array(target+1).fill(null);
+    dp[0]={w:0,g:null,from:null};
+    for(const g of pool){
+      if(g.count>target)continue;
+      for(let t=target;t>=g.count;t--){
+        const base=dp[t-g.count];
+        if(!base)continue;
+        const w=base.w+g.sum;
+        if(!dp[t]||w<dp[t].w)dp[t]={w,g,from:base};
+      }
+    }
+    if(!dp[target])return null;
+    const picked=[];
+    for(let node=dp[target];node&&node.g;node=node.from)picked.push(node.g);
+    return picked;
+  }
+  const cheapOrder=(a,b)=>(a.sum-b.sum)||(a.count-b.count)||a.kc.localeCompare(b.kc);
+  // 貪婪整組挑 → DP 精確湊數 → 回溯 (與 v7 相同機制, 排序目標不同)
+  function greedyFill(order,preTaken,preRem){
+    let taken=preTaken?preTaken.slice():[],rem=(preRem!=null)?preRem:n;
+    const takenKc=new Set(taken.map(g=>g.kc));
+    let pool=order.filter(g=>!takenKc.has(g.kc));
+    for(let i=0;i<pool.length&&rem>0;i++){
+      if(pool[i].count<=rem){rem-=pool[i].count;taken.push(pool[i]);pool.splice(i,1);i--;}
+    }
+    while(rem>0){
+      const fill=exactFillMin(pool,rem);
+      if(fill){taken.push(...fill);rem=0;break;}
+      if(!taken.length)break;
+      const back=taken.pop();pool.push(back);rem+=back.count;
+    }
+    return {taken,rem};
+  }
+  // Pass A 零散優先: 搬運件數少的整色組先 (低庫存/單款色低SKU 自然排前)
+  const passA=greedyFill([...colorGroups].sort(cheapOrder),null,null);
+  // Pass B 整款優先: 裝得下的整款中, SKU 數最貼近 N 者先; 缺口再以零散小組補
+  const fitKuans=[...kuanAgg.values()].filter(k=>k.count<=n)
+    .sort((a,b)=>((n-a.count)-(n-b.count))||(a.sum-b.sum)||a.kuan.localeCompare(b.kuan));
+  let takenB=[],remB=n;
+  for(const k of fitKuans){
+    if(k.count<=remB){k.groups.forEach(g=>takenB.push(g));remB-=k.count;}
+  }
+  const passB=(remB>0)?greedyFill([...colorGroups].sort(cheapOrder),takenB,remB):{taken:takenB,rem:0};
+  // 評分: 湊滿 N → 拆款數少 (款被部分挑走的數量) → 搬運件數少
+  function metric(p){
+    const per=new Map();
+    p.taken.forEach(g=>per.set(g.kuan,(per.get(g.kuan)||0)+g.count));
+    let splits=0;
+    per.forEach((c,k)=>{const tot=kuanAgg.get(k);if(tot&&c<tot.count)splits++;});
+    return {rem:p.rem,splits,sum:p.taken.reduce((s,g)=>s+g.sum,0)};
+  }
+  const mA=metric(passA),mB=metric(passB);
+  const useB=(mB.rem!==mA.rem)?(mB.rem<mA.rem):((mB.splits!==mA.splits)?(mB.splits<mA.splits):(mB.sum<mA.sum));
+  const win=useB?passB:passA;
+  const selected=[];
+  win.taken.forEach(g=>selected.push(...g.skus));
+  let rem=win.rem;
+  if(rem>0){
+    // 拆色 fallback (唯一例外): 缺口以單 SKU 補 — 優先「未到≤10、銷售低」, 其餘件數少先
+    const inSel=new Set(selected.map(r=>String(r['商品編號'])));
+    const rest=rows.filter(r=>!inSel.has(String(r['商品編號'])));
+    rest.sort((a,b)=>{
+      const ea=(a._arr<=10)?0:1, eb=(b._arr<=10)?0:1;
+      if(ea!==eb)return ea-eb;
+      return ea===0?(a._sales-b._sales):(a._total-b._total);
+    });
+    rest.slice(0,rem).forEach(r=>selected.push(r));
+    rem=0;
+  }
+  // 拆色安全網警告 (與高庫存共用格式)
+  const selSet=new Set(selected.map(r=>String(r['商品編號'])));
+  const warns=[];
+  colorGroups.forEach(g=>{
+    const inS=g.skus.filter(r=>selSet.has(String(r['商品編號'])));
+    if(inS.length>0&&inS.length<g.skus.length){
+      const minority=(inS.length*2<=g.skus.length)?inS:g.skus.filter(r=>!selSet.has(String(r['商品編號'])));
+      warns.push({kc:g.kc,picked:inS.length,total:g.skus.length,
+        acceptable:minority.every(r=>r._arr<=10),
+        skus:minority.map(r=>`${r['商品編號']}(未到${r._arr}/銷${r._sales})`)});
+    }
+  });
+  if(warns.length)selected._selWarnings=warns;
+  selected._autoMode=useB?'整款優先':'零散優先';   // 供 UI/除錯觀察自動判斷結果
   return selected;
 }
 
@@ -4258,14 +4370,14 @@ function plnRunInternalEngine(config,initialCells){
   if(!config.source.length||config.source.length!==1||config.destination.length!==1||config.source[0]!==config.destination[0]){
     return {selected:[],capacity:{total:0,byAisle:{},byLayout:{}},deficit:0,moves:[],failed:[],
       config,xxSalesMax:0,finalCells:cells,
-      _internalError:'內部整理模式: 需要剛好一個走道, 且來源=目的'};
+      _internalError:'整理模式: 需要剛好一個走道, 且來源=目的'};
   }
   const aisle=config.source[0];
   const N=config.nToPick;
   if(N<=0){
     return {selected:[],capacity:{total:0,byAisle:{[aisle]:0},byLayout:{}},deficit:0,moves:[],failed:[],
       config,xxSalesMax:0,finalCells:cells,
-      _internalError:'內部整理模式: 連續空格數需 > 0'};
+      _internalError:'整理模式: 連續空格數需 > 0'};
   }
   
   // 蒐集走道內所有 cell, 並建立 col→layer→cell 索引
@@ -4438,13 +4550,19 @@ function plnRunNewEngine(config,initialCells){
   queue.forEach(e=>{if(wanted.has(e.label))skus.push(...e.skus.map(s=>({...s,_cat:e.category})));});
   // ★ 去重（Gordon 2026-06-30）：同一商品編號可能因兩個貨櫃同時帶同款 SKU 而重複出現 →
   //   依「商品編號」去重，只保留第一筆，避免同一 SKU 被重複排入兩個儲位。
+  // ★ 跨步驟去重（Gordon 2026-07-10）：前面 step 已排入的新品 (cells 內 _isNewProduct) 從佇列扣掉，
+  //   step2 不會重複排入、queueTotal/剩餘 SKU 數也正確反映（修正 step1 排光後 step2 仍顯示 60 的問題）。
   {
-    const seen=new Set(); const dedup=[]; let dropped=0;
-    for(const s of skus){ const code=String(s.code||''); if(code&&seen.has(code)){dropped++;continue;} if(code)seen.add(code); dedup.push(s); }
-    if(dropped>0){ skus.length=0; skus.push(...dedup); if(typeof console!=='undefined')console.log(`[新品排入] 去重：移除 ${dropped} 筆重複商品編號（兩貨櫃同款 SKU），每個 SKU 只排入一次`); }
+    const prePlaced=new Set();
+    Object.values(cells).forEach(cs=>{ if(cs.sku&&cs.info&&cs.info._isNewProduct)prePlaced.add(String(cs.sku)); });
+    const seen=new Set(); const dedup=[]; let dropped=0, consumed=0;
+    for(const s of skus){ const code=String(s.code||'');
+      if(code&&prePlaced.has(code)){consumed++;_placedCodes.add(code);continue;}
+      if(code&&seen.has(code)){dropped++;continue;} if(code)seen.add(code); dedup.push(s); }
+    if(dropped>0||consumed>0){ skus.length=0; skus.push(...dedup); if(typeof console!=='undefined')console.log(`[新品排入] 去重：移除 ${dropped} 筆重複商品編號、${consumed} 筆前面步驟已排入的 SKU`); }
   }
   if(!skus.length){
-    return {selected:[],capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells};
+    return {selected:[],capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:0};
   }
 
   // Step 2: 按款(5碼)分組, 大款優先
@@ -5142,19 +5260,52 @@ function plnRunNewEngine(config,initialCells){
     }
   }
 
-  // Fallback: 非AG走道才用 findBestRun (AG走道空格碎片化, 連續段找不到)
+  // Fallback: 非AG走道用連續段排入 (AG走道空格碎片化, 連續段找不到)
+  // ★ 2026-07-10 (Gordon F01 案例): 舊版 findBestRun 要求「單一連續段」裝下整款 →
+  //   前面較短的空段被整段跳過 (F01-038~044 共 28 格空著, 整款 40 SKU 跳去 049 起排)。
+  //   改為「由前往後分段排入」: 連續段依欄號 ASC, 每段能放幾個整色組就放幾個 (色組不拆欄),
+  //   放不下的色組續下一段。禁用/缺欄 (如 F01-045~048) 自然斷段, 不影響前段利用。
+  //   注: 只剩上層零格的欄 (如 F01-036-4/037-4) 主碼組放不進 (需 4 層整欄), 僅溢出碼可用。
+  function assignColorsToRuns(ku,runs){
+    const colorMap={};
+    ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);(colorMap[c]=colorMap[c]||[]).push(s);});
+    const colors=Object.keys(colorMap).sort();
+    const plan=[];let ci=0;
+    for(const run of runs){
+      if(ci>=colors.length)break;
+      let bins=0,need=0;const take=[];
+      while(ci+take.length<colors.length){
+        const c=colors[ci+take.length];
+        const cn=colorMap[c].length;
+        const newBins=bins+1,newNeed=need+Math.max(4,cn);
+        if(newBins*4>run.length||newNeed>run.length)break;
+        take.push(c);bins=newBins;need=newNeed;
+      }
+      if(take.length){plan.push({run,colors:take});ci+=take.length;}
+    }
+    return {plan,placedColors:ci,totalColors:colors.length,colorMap};
+  }
   const placedKcsFinal=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
   for(const ku of remainKuans){
     if(placedKcsFinal.has(ku.kc))continue;
     const colorCount={};
     ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);colorCount[c]=(colorCount[c]||0)+1;});
     const needCells=Object.values(colorCount).reduce((a,b)=>a+Math.max(4,b),0);
-    let bestAisle=null,bestRun=null;
+    // 逐一非AG走道: 取全部連續段 (欄號 ASC) 由前往後分段試排, 整款放得下者中選
+    let bestPlan=null;
     for(const a of nonAgAisles){
-      const run=findBestRun(a,needCells);
-      if(run&&(!bestRun||run.length<bestRun.length)){bestAisle=a;bestRun=run;}
+      const runs=getRunsForAisle(a).filter(r=>r.length&&r[0].layer===1).sort((x,y)=>x[0].col-y[0].col);
+      const asg=assignColorsToRuns(ku,runs);
+      if(asg.placedColors===asg.totalColors){bestPlan=asg;break;}
+      if(!bestPlan||asg.placedColors>bestPlan.placedColors)bestPlan=asg;
     }
-    if(bestRun){placeKuanInRun(ku,bestRun);continue;}
+    if(bestPlan&&bestPlan.placedColors===bestPlan.totalColors){
+      for(const seg of bestPlan.plan){
+        const subSkus=[];seg.colors.forEach(c=>subSkus.push(...bestPlan.colorMap[c]));
+        placeKuanInRun({kc:ku.kc,cat:ku.cat,skus:subSkus},seg.run);
+      }
+      continue;
+    }
     let consolAisle=null,consolCost=Infinity,consolEmpty=0;
     for(const a of nonAgAisles){
       const en=countEmptyInAisle(a);if(en<needCells)continue;
@@ -5245,7 +5396,7 @@ function plannerRenderConfigUI(){
   // ★ 單走道提示: 僅 1 個走道時，若有新品佇列則優先建議「新品」；否則提示「內部整理/新品」
   // ★ FIX: 不再無條件鎖定為 internal，避免目的走道已有足夠連續空格時誤觸發整理
   const hasNewQueue=(window.NEW_PRODUCT_QUEUE&&window.NEW_PRODUCT_QUEUE.length>0);
-  const singleAisleNotice=aisles.length===1?`<div style="padding:6px 10px;margin-bottom:8px;background:rgba(120,76,150,0.08);border-left:3px solid #784c96;border-radius:3px;font-size:12px;color:var(--text2)">⚠ 走道報表僅偵測到 1 個走道 (${aisles[0]})，建議選擇「${hasNewQueue?'新品':'內部整理'}」模式（若目的走道空格已連續充足，新品模式會直接排入，無需額外內部整理步驟）</div>`:'';
+  const singleAisleNotice=aisles.length===1?`<div style="padding:6px 10px;margin-bottom:8px;background:rgba(120,76,150,0.08);border-left:3px solid #784c96;border-radius:3px;font-size:12px;color:var(--text2)">⚠ 走道報表僅偵測到 1 個走道 (${aisles[0]})，建議選擇「${hasNewQueue?'新品':'整理'}」模式（若目的走道空格已連續充足，新品模式會直接排入，無需額外整理步驟）</div>`:'';
   body.innerHTML=`
     ${singleAisleNotice}
     <div id="pln-steps-wrap" style="display:flex;flex-direction:column;gap:10px"></div>
@@ -5255,8 +5406,8 @@ function plannerRenderConfigUI(){
       <button onclick="plannerRunAllSteps()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
     </div>
   `;
-  // ★ FIX: 單走道有新品佇列時預設「new」；無新品佇列才預設「internal」
-  const defaultMode=aisles.length===1?(hasNewQueue?'new':'internal'):'high';
+  // ★ FIX: 單走道有新品佇列時預設「new」；無新品佇列才預設「internal」；多走道預設「自動」
+  const defaultMode=aisles.length===1?(hasNewQueue?'new':'internal'):'auto';
   plannerRenderStep(1,aisles,[],[],'',defaultMode);
   // ★ 掛載事件監聽: 任何 checkbox/radio/N 變更 → debounce 後重算所有 step 顯示數字
   const wrap=document.getElementById('pln-steps-wrap');
@@ -5270,8 +5421,8 @@ function plannerRenderConfigUI(){
 }
 
 function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSortMode,defaultComplexity){
-  defaultSortMode=defaultSortMode||'high';
-  defaultComplexity=defaultComplexity||'';
+  defaultSortMode=defaultSortMode||'auto';           // ★ 2026-07-10: 預設挑選 = 自動
+  defaultComplexity=defaultComplexity||'auto';       // ★ 2026-07-10: 預設複雜度 = 自動·需要才整理
   const wrap=document.getElementById('pln-steps-wrap');
   // ★ 來源 label: 「C02 (SKU: 62)」; 目標 label: 「C06 (空儲位: 121)」; 數字由 plannerRefreshStepCounts 動態填入
   const mkCb=(grp,a,checked)=>{
@@ -5281,7 +5432,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
   // ★ 虛擬新品 src 來源 (僅 src 區出現) - 從 window.NEW_PRODUCT_QUEUE 取
   const mkNewCb=(entry,checked)=>{
     const lbl=entry.label, n=entry.skus.length;
-    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px;margin-bottom:2px;cursor:pointer;white-space:nowrap;color:#784c96"><input type="checkbox" data-step="${idx}" data-grp="src" data-virtual="new" value="${lbl}" ${checked?'checked':''}>${lbl} <span style="color:var(--text3);font-size:12px">(SKU: ${n})</span></label>`;
+    return `<label style="display:inline-flex;align-items:center;gap:3px;font-size:13px;margin-right:8px;margin-bottom:2px;cursor:pointer;white-space:nowrap;color:#784c96"><input type="checkbox" data-step="${idx}" data-grp="src" data-virtual="new" value="${lbl}" ${checked?'checked':''}>${lbl} <span style="color:var(--text3);font-size:12px">(SKU: <span class="newq-count" data-step="${idx}" data-aisle="${lbl}">${n}</span>)</span></label>`;
   };
   const newQueue=window.NEW_PRODUCT_QUEUE||[];
   const newSrcHtml=newQueue.map(e=>mkNewCb(e,defaultSrc.includes(e.label))).join('');
@@ -5301,21 +5452,21 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
       <span style="color:var(--text2)">目的走道</span><div>${dstHtml}</div>
       <span style="color:var(--text2)">挑選</span>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:${aisles.length<2?'not-allowed':'pointer'};${aisles.length<2?'opacity:0.4':''}" title="${aisles.length<2?'走道數不足，需 2 個以上才能跨走道調撥':'依來源/目的走道當下條件自動判斷：零散/低庫存夠用就挑好搬的整色組；不夠時自動湊「整款」過去（不拆款不拆色）'}"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="auto" ${defaultSortMode==='auto'?'checked':''} ${aisles.length<2?'disabled':''}>自動</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:${aisles.length<2?'not-allowed':'pointer'};${aisles.length<2?'opacity:0.4':''}" title="${aisles.length<2?'走道數不足，需 2 個以上才能跨走道調撥':''}"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="high" ${defaultSortMode==='high'?'checked':''} ${aisles.length<2?'disabled':''}>高庫存</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:${aisles.length<2?'not-allowed':'pointer'};${aisles.length<2?'opacity:0.4':''}" title="${aisles.length<2?'走道數不足，需 2 個以上才能跨走道調撥':''}"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="low" ${defaultSortMode==='low'?'checked':''} ${aisles.length<2?'disabled':''}>低庫存</label>
-        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="internal" ${defaultSortMode==='internal'?'checked':''}>內部整理</label>
+        <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="internal" ${defaultSortMode==='internal'?'checked':''}>整理</label>
         <label style="display:inline-flex;align-items:center;gap:3px;cursor:pointer;color:#784c96"><input type="radio" name="pln-sort-${idx}" data-step="${idx}" data-grp="sortMode" value="new" ${defaultSortMode==='new'?'checked':''}>新品</label>
       </div>
-      <span style="color:var(--text2)" title="§5a 五級複雜度：與高/低庫存挑選可組合（內部整理/新品模式不適用）">複雜度</span>
+      <span style="color:var(--text2)" title="§5a 複雜度：與自動/高/低庫存挑選可組合（整理/新品模式不適用）">複雜度</span>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <select data-step="${idx}" data-grp="complexity" style="padding:3px 6px;font-size:13px">
-          <option value="" ${!defaultComplexity?'selected':''}>無（預設高/低庫存排法）</option>
+          <option value="auto" ${(!defaultComplexity||defaultComplexity==='auto')?'selected':''}>自動 · 需要才整理</option>
           <option value="sort" ${defaultComplexity==='sort'?'selected':''}>最低 · 找洞塞_排序</option>
           <option value="match" ${defaultComplexity==='match'?'selected':''}>次低 · 找洞塞_匹配</option>
           <option value="color" ${defaultComplexity==='color'?'selected':''}>中等 · 以色集中</option>
           <option value="kuan" ${defaultComplexity==='kuan'?'selected':''}>次高 · 以款集中</option>
           <option value="consolidate" ${defaultComplexity==='consolidate'?'selected':''}>最高 · 集中連續空位</option>
-          <option value="auto" ${defaultComplexity==='auto'?'selected':''}>自動 · 需要才整理</option>
         </select>
       </div>
       <span style="color:var(--text2)">SKU數</span>
@@ -5329,7 +5480,7 @@ function plannerAddStep(){
   const aisles=plnGetAislesInReport();
   PLN_STEPS_COUNT++;
   // 預設 source=第一個未被前步驟用過的, 但簡化: 預設全空, 讓使用者勾
-  const defMode=aisles.length===1?'internal':'high';
+  const defMode=aisles.length===1?'internal':'auto';
   plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],'',defMode);
   plannerScheduleRefresh();
 }
@@ -5372,8 +5523,8 @@ function plannerCollectStepConfig(idx){
     sortMode:sortMode,
     aisleGeometry:plnGetAisleGeometry(),
   };
-  // §5a 複雜度只在高/低庫存模式生效（內部整理/新品走各自引擎，不分派複雜度）
-  if(cplx && (sortMode==='high'||sortMode==='low'))cfg.complexity=cplx;
+  // §5a 複雜度只在自動/高/低庫存模式生效（整理/新品走各自引擎，不分派複雜度）
+  if(cplx && (sortMode==='auto'||sortMode==='high'||sortMode==='low'))cfg.complexity=cplx;
   return cfg;
 }
 
@@ -5415,8 +5566,8 @@ function plannerHandleInternalBind(e){
     stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').forEach(c=>{c.checked=false;});
     return;
   }
-  // 切到 high/low: 取消所有虛擬新品 src + 取消任何因 internal 同步而被勾的 dst (使用者再手動調整)
-  if(t.dataset.grp==='sortMode' && (mode==='high'||mode==='low')){
+  // 切到 auto/high/low: 取消所有虛擬新品 src + 取消任何因 internal 同步而被勾的 dst (使用者再手動調整)
+  if(t.dataset.grp==='sortMode' && (mode==='auto'||mode==='high'||mode==='low')){
     stepEl.querySelectorAll('input[data-grp="src"][data-virtual]').forEach(c=>{c.checked=false;});
     return;
   }
@@ -5436,9 +5587,9 @@ function plannerHandleInternalBind(e){
   if(mode==='new' && t.dataset.grp==='src' && !t.dataset.virtual && t.checked){
     // 取消所有虛擬新品 src
     stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]').forEach(c=>{c.checked=false;});
-    // 切換挑選模式: 走道數 ≥2 → high; 否則 internal
+    // 切換挑選模式: 走道數 ≥2 → auto; 否則 internal
     const realAisleCount=stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').length;
-    const fallbackMode=realAisleCount>=2?'high':'internal';
+    const fallbackMode=realAisleCount>=2?'auto':'internal';
     const fbRadio=stepEl.querySelector(`input[data-grp="sortMode"][value="${fallbackMode}"]`);
     if(fbRadio){fbRadio.checked=true;}
     plannerUpdateSortModeLocks(stepEl);
@@ -5482,12 +5633,13 @@ function plannerUpdateSortModeLocks(stepEl){
   const virtualSrcExist=stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]').length>0;
   const aisleCount=stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').length;
   const modeRadios={
+    auto:stepEl.querySelector('input[data-grp="sortMode"][value="auto"]'),
     high:stepEl.querySelector('input[data-grp="sortMode"][value="high"]'),
     low:stepEl.querySelector('input[data-grp="sortMode"][value="low"]'),
     internal:stepEl.querySelector('input[data-grp="sortMode"][value="internal"]'),
     new:stepEl.querySelector('input[data-grp="sortMode"][value="new"]'),
   };
-  ['high','low','internal'].forEach(m=>{
+  ['auto','high','low','internal'].forEach(m=>{
     const r=modeRadios[m];
     if(!r)return;
     const label=r.closest('label');
@@ -5496,8 +5648,8 @@ function plannerUpdateSortModeLocks(stepEl){
       r.disabled=true;
       if(label){label.style.opacity='0.4';label.style.cursor='not-allowed';}
     } else {
-      // 解除: high/low 仍受走道數限制 (<2 走道時 disabled)
-      const aisleLimited=(m==='high'||m==='low')&&aisleCount<2;
+      // 解除: auto/high/low 仍受走道數限制 (<2 走道時 disabled)
+      const aisleLimited=(m==='auto'||m==='high'||m==='low')&&aisleCount<2;
       r.disabled=aisleLimited;
       if(label){
         label.style.opacity=aisleLimited?'0.4':'';
@@ -5546,6 +5698,7 @@ function plannerRefreshStepCounts(){
         if(s1)s1.textContent='?';
         if(s2)s2.textContent='?';
       });
+      stepEl.querySelectorAll('.newq-count').forEach(sp=>{sp.textContent='?';});
       continue;
     }
 
@@ -5562,9 +5715,29 @@ function plannerRefreshStepCounts(){
       if(s1)s1.textContent=String(srcSet[a].size);
       if(s2)s2.textContent=String(emptyCnt[a]);
     });
+    // ★ 2026-07-10: 新品虛擬來源顯示「此 step 進入時的剩餘 SKU 數」(扣掉前面 step 已排入的)
+    if(window.NEW_PRODUCT_QUEUE&&window.NEW_PRODUCT_QUEUE.length){
+      const placedNew=new Set();
+      Object.values(cells).forEach(cs=>{ if(cs.sku&&cs.info&&cs.info._isNewProduct)placedNew.add(String(cs.sku)); });
+      window.NEW_PRODUCT_QUEUE.forEach(e=>{
+        const span=stepEl.querySelector(`.newq-count[data-aisle="${e.label}"]`);
+        if(span)span.textContent=String(e.skus.filter(s=>!placedNew.has(String(s.code||''))).length);
+      });
+    }
 
     // 嘗試模擬此 step (給下一個 step 用); 設定不完整則停止後續 step 的數字計算
     const config=plannerCollectStepConfig(idx);
+    // ★ 2026-07-10 FIX: 新品模式原本沒有模擬分支 → 直接掉進高/低庫存檢查而 simBroken,
+    //   造成後續 step 的來源/目的 SKU 數全部顯示「?」。補上 plnRunNewEngine 模擬。
+    if(config.sortMode==='new'){
+      const virtSrc=config.source.filter(v=>String(v).startsWith('新品-'));
+      if(!virtSrc.length||virtSrc.length!==config.source.length||!config.destination.length){simBroken=true;continue;}
+      try{
+        const r=plnRunNewEngine(config,cells);
+        cells=r.finalCells;
+      }catch(e){console.warn('Step',idx,'新品模擬失敗:',e);simBroken=true;}
+      continue;
+    }
     if(config.sortMode==='internal'){
       // 內部整理: 需要單一同走道 + N>0
       if(config.source.length!==1||config.destination.length!==1||config.source[0]!==config.destination[0]||!config.nToPick){simBroken=true;continue;}
@@ -5602,10 +5775,10 @@ function plannerRunAllSteps(){
   for(const s of stepConfigs){
     if(s.config.sortMode==='internal'){
       if(s.config.source.length!==1||s.config.destination.length!==1||s.config.source[0]!==s.config.destination[0]){
-        alert(`Step ${s.idx}: 內部整理模式需要剛好勾選同一個走道 (來源=目的)`);return;
+        alert(`Step ${s.idx}: 整理模式需要剛好勾選同一個走道 (來源=目的)`);return;
       }
       if(!s.config.nToPick||s.config.nToPick<=0){
-        alert(`Step ${s.idx}: 內部整理模式請輸入要產生的「連續空格數」`);return;
+        alert(`Step ${s.idx}: 整理模式請輸入要產生的「連續空格數」`);return;
       }
     } else if(s.config.sortMode==='new'){
       // 新品模式: 來源必須全部是「新品-*」虛擬走道; 目的需至少一個真實走道
@@ -5641,7 +5814,7 @@ function plannerRunAllSteps(){
       if(statusEl){
         const aisle=config.source[0];
         const startCol=r._internalStartCol;
-        statusEl.textContent=`✓ 內部整理 ${aisle} | 起點 col ${String(startCol).padStart(3,'0')}-1 | 移動 ${r.moves.length} 次 (產生連續 ${config.nToPick} 空格)`;
+        statusEl.textContent=`✓ 整理 ${aisle} | 起點 col ${String(startCol).padStart(3,'0')}-1 | 移動 ${r.moves.length} 次 (產生連續 ${config.nToPick} 空格)`;
         statusEl.style.color='var(--accent)';
       }
       continue;
