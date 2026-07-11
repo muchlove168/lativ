@@ -2687,7 +2687,7 @@ const PLN_SPEC = {
     {id:'1.6',  status:'locked',  impl:'plnComplexityConsolidate→plnRunInternalEngine/plnApplyOverflowZone', desc:'(階段4)最低/次低/中等/次高不主動位移；最高=借內部整理騰位；目的走道位置不夠→挑既有SKU移溢位區(§1.7)已落地；新品永不被位移、locked防連鎖'},
     {id:'1.7',  status:'locked',  impl:'plnApplyOverflowZone/plnIdentifyOverflowCandidates/plnOverflowAisleFor/plnOverflowEmpties', flag:'config.overflow=[\'TX\',\'XX\']', desc:'(階段4)溢位區TX+XX自動承接：未到≤10且銷售≤6/銷售少優先移出；TX供L區/XX其他；空儲位材積最大優先排入；套用於每一複雜度等級'},
     {id:'3.6-auto', status:'locked', impl:'plnAutoSelect (plnSelectSourceSKUs sortMode=auto)', desc:'(Gordon 2026-07-10)挑選「自動」＝預設：不限高/低庫存，雙軌評估取優—A零散優先(搬運件數少的整色組先，適合目的空格少) vs B整款優先(SKU數最貼近N的整款先，適合零散不足剛好有整款可拉走)；評分＝湊滿N→拆款少→搬運件數少；整色組進出+DP精確湊數+回溯，湊不出才拆色(未到≤10/銷售低優先)並附_selWarnings'},
-    {id:'1.3e-frontfill', status:'locked', impl:'plnRunNewEngine assignColorsToRuns (非AG fallback)', desc:'(Gordon 2026-07-10 F01案例)非AG/CB走道(如F01全D擺法)新品排入：廢除「單一連續段裝整款」(舊findBestRun跳過F01-038~044共28格直奔049)；改由前往後分段排入—連續段依欄號ASC，每段放得下幾個整色組就放幾個(色組不拆欄)，放不下續下一段；禁用/缺欄自然斷段。僅剩上層零格的欄(036-4/037-4)主碼組不可用(需4層整欄)，僅溢出碼可用'},
+    {id:'1.3f-nonag', status:'locked', impl:'plnRunNewEngine plnPlaceNonAgUnits (非AG fallback 唯一路徑)', desc:'(Gordon 2026-07-11核定, 取代1.3e)非AG走道(D/H擺法=配件類, 每格儲位箱隔開→同款色不同碼「允許」相鄰)新品排入：由前往後填全空欄(儲位總表序列連續, 柱位缺欄不斷段)；①色=原子單位, 缺任一格整色不排+失敗回報(整款能排幾色排幾色)；②帶溢出碼的色優先排, 溢出碼先吃既有殘格(F01-036-4/037-4型, 前面的先用)；③殘格不足消化溢出碼的色遞延最後排, 新殘格技術性留尾端供下批新品續用；④4碼款整欄完美排入, ≤3碼款排欄層1..k留上層殘格, 全空欄不足時整色改吃殘格(允許跨欄: 4款3碼12格→3款001-003層1-3+第4款001-4/002-4/003-4)；容量不足同①逐色回報'},
     {id:'new-dedup2', status:'locked', impl:'plnRunNewEngine prePlaced 跨步驟去重', desc:'(Gordon 2026-07-10)前面step已排入的新品(cells._isNewProduct)自動從佇列扣除：step2不重複排入、queueTotal/UI剩餘SKU數正確歸零；plannerRefreshStepCounts補新品模擬分支(修step2來源/目的顯示?)+newq-count動態剩餘'},
     {id:'1.8',  status:'todo',    desc:'包材→走道對應表（待補）'},
     {id:'3.5c', status:'pending', desc:'溢出碼高未到量→大材積C精修（待Gordon定）'},
@@ -3418,35 +3418,38 @@ function plnPackByFamily(cells,selected,config){
   
   // ── Step 3: 找目的走道最長連續可用段 ──
   // 連續性: 同走道內依 col asc, 每 col 內 layer asc 走訪 cell;
-  //         遇到 sku/locked/cell-missing 就切斷 run, 之後接續成新 run
+  //         遇到 sku/locked 就切斷 run, 之後接續成新 run
   // 可用 = master 有此 cell + sku 為 null + 非 locked
+  // ★ 2026-07-11 (Gordon): 連續段=「儲位總表」序列連續 — 缺欄(柱位等原因總表本來就沒列)不斷段:
+  //   走道欄序 1,2,3,5,6 → 3 與 5 相鄰視為連續 (下一個「存在的欄」即為連續)。
   function getRunsForAisle(aisle){
     const cols=plnValidCols(cells,aisle);
     const runs=[];
     let cur=[];
-    let lastCol=null,lastLayer=null;
-    cols.forEach(col=>{
+    let lastColIdx=null,lastLayer=null;
+    for(let ci=0;ci<cols.length;ci++){
+      const col=cols[ci];
       for(let L=1;L<=4;L++){
         const cid=plnCellId(aisle,col,L);
         const cs=cells[cid];
         if(!cs||cs.sku||cs.locked){
           if(cur.length){runs.push(cur);cur=[];}
-          lastCol=null;lastLayer=null;
+          lastColIdx=null;lastLayer=null;
           continue;
         }
-        // 連續性: 與前一 cell 必須 (a) 同 col 且 layer 緊鄰 +1, 或 (b) col+1 且前 layer=4 此 layer=1
+        // 連續性: 與前一 cell 必須 (a) 同 col 且 layer 緊鄰 +1, 或 (b) 序列下一欄 且前 layer=4 此 layer=1
         if(cur.length){
-          const okSameCol=(lastCol===col && lastLayer===L-1);
-          const okNextCol=(lastCol===col-1 && lastLayer===4 && L===1);
+          const okSameCol=(lastColIdx===ci && lastLayer===L-1);
+          const okNextCol=(lastColIdx===ci-1 && lastLayer===4 && L===1);
           if(!okSameCol && !okNextCol){
             runs.push(cur);
             cur=[];
           }
         }
         cur.push(cs);
-        lastCol=col;lastLayer=L;
+        lastColIdx=ci;lastLayer=L;
       }
-    });
+    }
     if(cur.length)runs.push(cur);
     return runs;
   }
@@ -4205,7 +4208,11 @@ function plnRunEngine(config,xxSalesMaxOverride,initialCells,initialSelected){
   // config.complexity 指定（'sort'|'match'|'color'|'kuan'|'consolidate'）→ 走複雜度階梯策略。
   // ★ 未指定（現行高/低庫存呼叫端）→ 完全不進此分支，維持現行已驗證行為（零回歸）。
   if(config.complexity){
-    return plnDispatchComplexity(config, {cells,moves,selected,capacity,deficit,xxSalesMax});
+    // ★ 2026-07-11 (Gordon 確認#1): 低庫存＋複雜度「自動」→ 維持散戶配對舊預設路徑
+    //   (plnPackScatteredLow: 小材積優先＋相鄰檢查＋層對齊)。其餘複雜度等級照使用者選擇分派。
+    if(!(config.complexity==='auto'&&config.sortMode==='low')){
+      return plnDispatchComplexity(config, {cells,moves,selected,capacity,deficit,xxSalesMax});
+    }
   }
 
   if(deficit>0 && config.overflow.length){
@@ -4623,100 +4630,107 @@ function plnRunNewEngine(config,initialCells){
     return true;
   }
 
-  // ── 一般連續段 (非AG走道 fallback) ──
-  function getRunsForAisle(a){
-    const cols=plnValidCols(cells,a);
-    const runs=[];
-    let cur=[],lastCol=null,lastLayer=null;
-    cols.forEach(col=>{
-      for(let L=1;L<=4;L++){
-        const cid=plnCellId(a,col,L);
-        const cs=cells[cid];
-        if(!cs||cs.sku||cs.locked){
-          if(cur.length){runs.push(cur);cur=[];}
-          lastCol=null;lastLayer=null;continue;
-        }
-        if(cur.length){
-          const ok=(lastCol===col&&lastLayer===L-1)||(lastCol===col-1&&lastLayer===4&&L===1);
-          if(!ok){runs.push(cur);cur=[];}
-        }
-        if(cur.length===0&&L!==1)continue;
-        cur.push(cs);lastCol=col;lastLayer=L;
-      }
-    });
-    if(cur.length)runs.push(cur);
-    return runs;
-  }
-  function findBestRun(a,needN){
-    const runs=getRunsForAisle(a);
-    const fit=runs.filter(r=>r.length>=needN&&r[0].layer===1);
-    if(!fit.length)return null;
-    return fit.sort((x,y)=>(x.length-y.length)||(x[0].col-y[0].col))[0];
-  }
+  // ── 非AG走道 fallback 工具 ──
   function countEmptyInAisle(a){
     return Object.values(cells).filter(c=>c.aisle===a&&!c.sku&&!c.locked).length;
   }
-  function placeKuanInRun(ku,run){
-    const colorMap={};
-    ku.skus.forEach(s=>{
-      const c=String(s.code||'').substring(0,7);
-      if(!colorMap[c])colorMap[c]=[];
-      colorMap[c].push(s);
-    });
-    const colors=Object.keys(colorMap).sort();
-    const usedIdx=new Set();const freeSlots=[];const spillQueue=[];let cursor=0;
-    for(const c of colors){
-      const skusInColor=colorMap[c];const binStart=cursor;
-      if(binStart+4>run.length){skusInColor.forEach(s=>spillQueue.push(s));continue;}
-      const usedLayers=new Set();
-      skusInColor.forEach(s=>{
-        const L=plnGetTargetLayer(s.code,s.size);
-        if(L>=1&&L<=4&&!usedLayers.has(L)){
-          const si=binStart+(L-1);
-          if(si<run.length&&run[si].layer===L){
-            const cell=run[si].cell;
-            const info={'商品編號':s.code,'商品名稱':s.name||'','尺寸':s.size||'','顏色':'',
-              '銷售庫存':0,'架上數量':0,'未到量':s.pending||0,'未抓貨':0,'保留數量':0,
-              '商品包材':s.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
-            cells[cell].sku=s.code;cells[cell].info=info;cells[cell].locked=true;
-            moves.push({phase:'NEW_PRODUCT',sku:s.code,src:'',dst:cell,dstLayout:run[si].layout||''});
-            placed.push(info);usedIdx.add(si);usedLayers.add(L);return;
-          }
-        }
-        spillQueue.push(s);
-      });
+  // ═══ §1.3f 非AG走道(D/H 擺法=配件類)排入 (Gordon 2026-07-11 核定) ═══
+  //   D/H 擺法每個儲位有儲位箱隔開 → 同款色不同碼「允許」相鄰擺放 (opp袋才有補錯/掉落問題);
+  //   條件足夠時仍盡量排開 — 溢出碼優先消化「既有殘格」(部分被佔欄的空格, 前面的先用) 自然分散。
+  //   規則:
+  //   ① 色=原子單位: 該色缺任一格則整色完全不排、列失敗回報 (整款則能排幾色排幾色)。
+  //   ② 帶溢出碼的色(5碼款等)優先排, 溢出碼先吃殘格 (如 F01-036-4/037-4, 前面的先用)。
+  //   ③ 殘格不足消化溢出碼的色 → 遞延到最後排 (新殘格技術性留在最尾端, 供下批新品續用)。
+  //   ④ 4碼款整欄完美排入; ≤3碼款正常排欄(層1..k, 上層留殘格), 全空欄不足時整色改吃殘格
+  //      (允許跨欄, 如 4款3碼 12格 → 3款排 001-003 層1-3, 第4款排 001-4/002-4/003-4)。
+  //   units: [{kc,color7,cat,skus}] — 依序就地排入, 回傳排不進的 units (原子性: 排不進=完全沒動)。
+  function plnPlaceNonAgUnits(aisle,units){
+    const colsAsc=plnValidCols(cells,aisle);
+    const freeCols=[];      // 整欄全空 (序列 ASC = 由前往後; 缺欄/柱位不斷段)
+    const residuals=[];     // 既有殘格: 部分被佔/鎖欄的空格 (col ASC, layer ASC)
+    colsAsc.forEach(col=>{
+      const empt=[];let blocked=0,exists=0;
       for(let L=1;L<=4;L++){
-        if(!usedLayers.has(L)){const si=binStart+(L-1);
-          if(si<run.length&&run[si].layer===L&&!usedIdx.has(si))freeSlots.push(si);}
+        const cs=cells[plnCellId(aisle,col,L)];
+        if(!cs)continue;
+        exists++;
+        if(cs.sku||cs.locked)blocked++;else empt.push(cs);
       }
-      cursor=binStart+4;
+      if(exists===4&&blocked===0)freeCols.push(col);
+      else empt.forEach(cs=>residuals.push(cs));
+    });
+    const leftoverSlots=[];  // 本批短碼款 bin 留下的上層殘格 (可被後續色續用)
+    const spillSlots=[];     // 已開溢出欄的剩餘格 (遞延色用, 未用部分=尾端殘格)
+    const takeSlot=()=>residuals.length?residuals.shift():(leftoverSlots.length?leftoverSlots.shift():null);
+    const slotCount=()=>residuals.length+leftoverSlots.length;
+    // §1.2 切組: 滿4碼組=主碼組(各占一欄, 位置0-3→層1-4); n<4 整色=短主碼組(層1..k);
+    //           有滿組時的餘數 (n>4, n mod 4) = 溢出碼
+    const prep=units.map(u=>{
+      const sorted=PLN_PRIM.sortBySizeCode(u.skus,s=>s.code);
+      const full=Math.floor(sorted.length/4);
+      const mainGroups=[];for(let g=0;g<full;g++)mainGroups.push(sorted.slice(g*4,g*4+4));
+      const restArr=sorted.slice(full*4);
+      let overflow=[];
+      if(restArr.length){ if(full===0)mainGroups.push(restArr); else overflow=restArr; }
+      return {u,mainGroups,overflow,need:sorted.length};
+    });
+    const placeBins=(p)=>{ // 主碼組各占一欄 (呼叫前已確認 freeCols 足夠)
+      p.mainGroups.forEach(g=>{
+        const col=freeCols.shift();
+        g.forEach((s,i)=>placeOneSku(s,aisle,col,i+1,p.u.cat));
+        for(let L=g.length+1;L<=4;L++){const cs=cells[plnCellId(aisle,col,L)];if(cs&&!cs.sku&&!cs.locked)leftoverSlots.push(cs);}
+      });
+    };
+    const unplaced=[];
+    const withOvf=prep.filter(p=>p.overflow.length>0);
+    const noOvf=prep.filter(p=>!p.overflow.length);
+    // Phase 1: 帶溢出碼且既有殘格足以消化 → 優先排 (§1.3f-②)
+    const deferred=[];
+    for(const p of withOvf){
+      if(freeCols.length>=p.mainGroups.length&&slotCount()>=p.overflow.length){
+        placeBins(p);
+        p.overflow.forEach(s=>{const cs=takeSlot();placeOneSku(s,aisle,cs.col,cs.layer,p.u.cat);});
+      } else deferred.push(p);
     }
-    freeSlots.sort((a,b)=>a-b);
-    for(const sp of spillQueue){
-      let done=false;
-      while(freeSlots.length){
-        const idx=freeSlots.shift();if(usedIdx.has(idx))continue;
-        const cell=run[idx].cell;
-        if(!cells[cell].sku){
-          const info={'商品編號':sp.code,'商品名稱':sp.name||'','尺寸':sp.size||'','顏色':'',
-            '銷售庫存':0,'架上數量':0,'未到量':sp.pending||0,'未抓貨':0,'保留數量':0,
-            '商品包材':sp.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
-          cells[cell].sku=sp.code;cells[cell].info=info;cells[cell].locked=true;
-          moves.push({phase:'NEW_PRODUCT',sku:sp.code,src:'',dst:cell,dstLayout:run[idx].layout||''});
-          placed.push(info);usedIdx.add(idx);done=true;break;
+    // Phase 2: 無溢出碼的色 (4碼/短碼款) (§1.3f-④)
+    for(const p of noOvf){
+      if(freeCols.length>=p.mainGroups.length){placeBins(p);continue;}
+      if(slotCount()>=p.need){ // 全空欄不足 → 整色改吃殘格 (跨欄允許, 儲位箱隔開)
+        p.mainGroups.forEach(g=>g.forEach(s=>{const cs=takeSlot();placeOneSku(s,aisle,cs.col,cs.layer,p.u.cat);}));
+        continue;
+      }
+      unplaced.push(p.u);
+    }
+    // Phase 3: 遞延色 — 批次處理: 先排完全部主碼組, 再統一排溢出碼 (§1.3f-③)
+    //   (Gordon 例: 4色5碼 → 主碼 001-004, 溢出碼依序 005 層1-4; 溢出欄開在所有主碼之後,
+    //    未用部分=新殘格, 技術性留在最尾端供下批新品續用)
+    {
+      // 可行性預檢 (色原子性): 逐色模擬 freeCols / 溢出格 供需
+      const toPlace=[];
+      let fc=freeCols.length, slots=slotCount()+spillSlots.length;
+      for(const p of deferred){
+        const spillNeed=Math.max(0,p.overflow.length-slots);
+        const extraCols=Math.ceil(spillNeed/4);
+        if(fc>=p.mainGroups.length+extraCols){
+          toPlace.push(p);
+          fc-=p.mainGroups.length+extraCols;
+          slots=slots-Math.min(slots,p.overflow.length)+extraCols*4-spillNeed;
+        } else unplaced.push(p.u);
+      }
+      toPlace.forEach(p=>placeBins(p));                       // ① 全部主碼組 (連續欄, 由前往後)
+      for(const p of toPlace){                                // ② 統一溢出碼: 剩餘殘格→溢出欄
+        for(const s of p.overflow){
+          let cs=takeSlot()||spillSlots.shift();
+          if(!cs){
+            const col=freeCols.shift();
+            for(let L=1;L<=4;L++){const c2=cells[plnCellId(aisle,col,L)];if(c2&&!c2.sku&&!c2.locked)spillSlots.push(c2);}
+            cs=spillSlots.shift();
+          }
+          placeOneSku(s,aisle,cs.col,cs.layer,p.u.cat);
         }
       }
-      if(done)continue;
-      while(cursor<run.length&&(usedIdx.has(cursor)||cells[run[cursor].cell].sku))cursor++;
-      if(cursor>=run.length)break;
-      const cell=run[cursor].cell;
-      const info={'商品編號':sp.code,'商品名稱':sp.name||'','尺寸':sp.size||'','顏色':'',
-        '銷售庫存':0,'架上數量':0,'未到量':sp.pending||0,'未抓貨':0,'保留數量':0,
-        '商品包材':sp.packaging||'','類別':ku.cat,'儲位':cell,'_isNewProduct':true};
-      cells[cell].sku=sp.code;cells[cell].info=info;cells[cell].locked=true;
-      moves.push({phase:'NEW_PRODUCT',sku:sp.code,src:'',dst:cell,dstLayout:run[cursor].layout||''});
-      placed.push(info);usedIdx.add(cursor);cursor++;
     }
+    return unplaced;
   }
 
   // ════════════════════════════════════════════════════════════
@@ -5260,89 +5274,37 @@ function plnRunNewEngine(config,initialCells){
     }
   }
 
-  // Fallback: 非AG走道用連續段排入 (AG走道空格碎片化, 連續段找不到)
-  // ★ 2026-07-10 (Gordon F01 案例): 舊版 findBestRun 要求「單一連續段」裝下整款 →
-  //   前面較短的空段被整段跳過 (F01-038~044 共 28 格空著, 整款 40 SKU 跳去 049 起排)。
-  //   改為「由前往後分段排入」: 連續段依欄號 ASC, 每段能放幾個整色組就放幾個 (色組不拆欄),
-  //   放不下的色組續下一段。禁用/缺欄 (如 F01-045~048) 自然斷段, 不影響前段利用。
-  //   注: 只剩上層零格的欄 (如 F01-036-4/037-4) 主碼組放不進 (需 4 層整欄), 僅溢出碼可用。
-  function assignColorsToRuns(ku,runs){
-    const colorMap={};
-    ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);(colorMap[c]=colorMap[c]||[]).push(s);});
-    const colors=Object.keys(colorMap).sort();
-    const plan=[];let ci=0;
-    for(const run of runs){
-      if(ci>=colors.length)break;
-      let bins=0,need=0;const take=[];
-      while(ci+take.length<colors.length){
-        const c=colors[ci+take.length];
-        const cn=colorMap[c].length;
-        const newBins=bins+1,newNeed=need+Math.max(4,cn);
-        if(newBins*4>run.length||newNeed>run.length)break;
-        take.push(c);bins=newBins;need=newNeed;
-      }
-      if(take.length){plan.push({run,colors:take});ci+=take.length;}
-    }
-    return {plan,placedColors:ci,totalColors:colors.length,colorMap};
-  }
+  // ═══ Fallback: 非AG走道 (D/H 擺法配件類) — §1.3f 色原子單位排入 (Gordon 2026-07-11) ═══
   const placedKcsFinal=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
+  let pendingUnits=[];
   for(const ku of remainKuans){
     if(placedKcsFinal.has(ku.kc))continue;
-    const colorCount={};
-    ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);colorCount[c]=(colorCount[c]||0)+1;});
-    const needCells=Object.values(colorCount).reduce((a,b)=>a+Math.max(4,b),0);
-    // 逐一非AG走道: 取全部連續段 (欄號 ASC) 由前往後分段試排, 整款放得下者中選
-    let bestPlan=null;
+    const cm={};
+    ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);(cm[c]=cm[c]||[]).push(s);});
+    Object.keys(cm).sort().forEach(c7=>pendingUnits.push({kc:ku.kc,color7:c7,cat:ku.cat,skus:cm[c7]}));
+  }
+  for(const a of nonAgAisles){
+    if(!pendingUnits.length)break;
+    pendingUnits=plnPlaceNonAgUnits(a,pendingUnits);
+  }
+  // 仍排不完 → 內部整理騰位後重試 (§1.6 精神)
+  if(pendingUnits.length){
     for(const a of nonAgAisles){
-      const runs=getRunsForAisle(a).filter(r=>r.length&&r[0].layer===1).sort((x,y)=>x[0].col-y[0].col);
-      const asg=assignColorsToRuns(ku,runs);
-      if(asg.placedColors===asg.totalColors){bestPlan=asg;break;}
-      if(!bestPlan||asg.placedColors>bestPlan.placedColors)bestPlan=asg;
-    }
-    if(bestPlan&&bestPlan.placedColors===bestPlan.totalColors){
-      for(const seg of bestPlan.plan){
-        const subSkus=[];seg.colors.forEach(c=>subSkus.push(...bestPlan.colorMap[c]));
-        placeKuanInRun({kc:ku.kc,cat:ku.cat,skus:subSkus},seg.run);
-      }
-      continue;
-    }
-    let consolAisle=null,consolCost=Infinity,consolEmpty=0;
-    for(const a of nonAgAisles){
-      const en=countEmptyInAisle(a);if(en<needCells)continue;
-      const cellByPos={};
-      Object.values(cells).filter(cs=>cs.aisle===a).forEach(cs=>{
-        if(!cellByPos[cs.col])cellByPos[cs.col]={};cellByPos[cs.col][cs.layer]=cs;
-      });
-      const cols=plnValidCols(cells,a);
-      let minCost=Infinity;
-      for(const sc of cols){
-        const range=[];
-        for(const col of cols){
-          if(col<sc)continue;
-          for(let L=1;L<=4&&range.length<needCells;L++){
-            if(cellByPos[col]&&cellByPos[col][L])range.push(cellByPos[col][L]);
-          }
-          if(range.length>=needCells)break;
-        }
-        if(range.length<needCells||range.some(cs=>cs.locked))continue;
-        const cost=range.filter(cs=>cs.sku).length;
-        if(cost<minCost)minCost=cost;
-      }
-      if(minCost<consolCost||(minCost===consolCost&&en>consolEmpty)){consolAisle=a;consolCost=minCost;consolEmpty=en;}
-    }
-    if(consolAisle){
-      const intCfg={source:[consolAisle],destination:[consolAisle],overflow:[],nToPick:needCells,
+      if(!pendingUnits.length)break;
+      const needCells=pendingUnits.reduce((s,u)=>s+u.skus.length,0);
+      if(countEmptyInAisle(a)<needCells)continue;
+      const intCfg={source:[a],destination:[a],overflow:[],nToPick:needCells,
         sortMode:'internal',aisleGeometry:config.aisleGeometry||plnGetAisleGeometry()};
       const intR=plnRunInternalEngine(intCfg,cells);
       if(intR&&!intR._internalError){
         intR.moves.forEach(m=>moves.push({...m,phase:'NEW_PRODUCT_CONSOLIDATION'}));
         Object.keys(intR.finalCells).forEach(k=>{cells[k]=intR.finalCells[k];});
-        const run2=findBestRun(consolAisle,needCells);
-        if(run2){placeKuanInRun(ku,run2);continue;}
+        pendingUnits=plnPlaceNonAgUnits(a,pendingUnits);
       }
     }
-    failed.push({kc:ku.kc,n:ku.n,reason:'NEW_NO_FIT',cat:ku.cat});
   }
+  // §1.3f-④/⑤/容量不足: 能排幾色排幾色, 排不進的「色」逐一失敗回報
+  pendingUnits.forEach(u=>failed.push({kc:u.color7,n:u.skus.length,reason:'NEW_NO_FIT_COLOR',cat:u.cat}));
   return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:skus.length};
 }
 
