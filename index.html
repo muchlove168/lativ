@@ -9609,7 +9609,8 @@ const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B1
 let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false,RM_ADD=null;
 const RM_UNIT_CM_OVR={};   // 每號碼實體寬(cm)特例（2026-07-14 取消 A02/E08/E09=35：H架一架六格、架長仍175 → 每格=175/6≈29.17，與AB前段格線同步）
 const RM_LPOS={'C11回':177};                    // C11回 178-182 凸出走道外，177 對應對面 001                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
-const RM_CALIB_VER='v5_0714';
+const RM_FACE_UNIT_OVR={'E09回':35};            // 2026-07-14 面別格寬特例：E09回為D架(5格/175cm)，格寬與E10一致且連續排列（缺號215/209…不留空格；出面H架仍用175/6格線）
+const RM_CALIB_VER='v6_0714';
 function rmDSlots(lo){var a=[];for(var q=lo;q<lo+4;q++)a.push({q:q,lay:['D','D','D','D']});return a;} // 4格D材積儲位產生器（v5 E07出重繪用）
 // ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
 // ax=柱/截短「右緣」錨定位置（自走道口起算的號碼格數，實測換算）；未給 ax 者依自身號碼範圍推得。
@@ -9661,6 +9662,8 @@ const RM_CALIB=[
  {a:'E07',s:'出',m:{t:'架',r:'095-100'},remove:1},
  {a:'E07',s:'出',m:{t:'柱',r:'097-098'},remove:1},
  {a:'E07',s:'出',m:{t:'截短',r:'101-110'},set:{r:'094-110',br:'031-047'}},
+ // ── 2026-07-14 v6（圖6）E07出 柱072-073實寬3格（多一格），074-093儲架整段順移一格 ──
+ {a:'E07',s:'出',m:{t:'柱',r:'072-073'},set:{pw:3,nt:'後段重繪(2026-07-14)｜柱實寬3格，074起儲架順移一格'}},
 ];
 function rmLpos(a,side){var k=RM_LPOS[a+side];return k!=null?k:rmAisleL(a);}
 function rmUnitCM(a){return RM_UNIT_CM_OVR[a]||175/rmUnitN(a);}
@@ -9767,12 +9770,14 @@ function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬�
   if(a==='E01'&&side==='出')withGap=false;   // 2026-07-14：E01小號面實體儲位位於後走道帶內（唯一允許），不做走道位移
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
   var unit=rmUnitCM(a),Lp=rmLpos(a,side),gapCM=9*175;
+  var fovr=RM_FACE_UNIT_OVR[a+side]||null;      // 面別格寬覆寫：忽略號碼格線，改以覆寫格寬連續排列（後走道帶位置由累計寬度觸發）
   var items=[],cumD=null,gapDone=false,gapX=null,total=0,prevLo=null,prevHi=null;
   function rangeOf(bb){var m=/^(\d+)-(\d+)$/.exec(bb.r||'');if(m)return [parseInt(m[1],10),parseInt(m[2],10)];if(/^\d+$/.test(bb.r||''))return [parseInt(bb.r,10),parseInt(bb.r,10)];return null;}
   bays.forEach(function(b,i){
     var rg=rangeOf(b),lo=rg?rg[0]:null,hi=rg?rg[1]:null;
     var gs=rg?((side==='出')?(lo-1)*unit:(Lp-hi)*unit):null;      // 格線起點
     var ge=rg?((side==='出')?hi*unit:(Lp-lo+1)*unit):null;        // 格線終點
+    if(fovr){gs=null;ge=null;}                                    // 面別覆寫：不用號碼格線 → 一律接續前一項排列
     var span=rg?(hi-lo+1):Math.max(b.s.length,1);
     var isAbs=(b.t==='柱'||b.t==='截短');
     if(b.ax!=null&&isAbs)ge=b.ax*unit;                            // 實測右緣錨點
@@ -9801,7 +9806,7 @@ function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬�
         }
         else {x1=x0+span*RM_STD_SLOT;}
       }else{
-        x1=(b.sq&&ge!=null&&ge>x0+2)?ge:(x0+span*unit);           // sq=擠壓至格線終點（小材積短架）
+        x1=(b.sq&&ge!=null&&ge>x0+2)?ge:(x0+span*(fovr||unit));   // sq=擠壓至格線終點（小材積短架）；fovr=面別覆寫格寬
       }
     }
     var sh=(gapDone&&!gapW&&(gs!=null?gs:x0)>=gapCM-0.5)?RM_GAP_CM:0;  // 後走道位移
@@ -9942,7 +9947,7 @@ function renderRackMap(){
     parts.push('<text x="'+(corrX+corrW/2)+'" y="'+(H/2)+'" font-size="13" fill="#888" text-anchor="middle" writing-mode="tb">走道</text>');
     // 後走道（CDE 幾何中已留空，補標示）
     var gg=rmFaceGeom('E10','出',true).gapX;
-    if(gg!=null){var gx=cdePx+(gg+RM_GAP_CM/2)*S;
+    if(gg!=null){var gx=cdePx+gg*S;   // 2026-07-14：gapX 已是走道帶中心
       parts.push('<text x="'+gx+'" y="'+(H/2)+'" font-size="12" fill="#999" text-anchor="middle" writing-mode="tb">走道</text>');}
   }else{ // ═ 單區 / 單走道
     var blk=RM_BLOCKS.find(function(b){return b.aisles.indexOf(vis[0])>=0;})||RM_BLOCKS[1];
@@ -9957,8 +9962,9 @@ function renderRackMap(){
     vis.forEach(function(a){y+=rmBandSVG(a,px,y,S2,mirror,bw,stripH2,withGap,mirror?'right':'left',parts)+10;});
     H=y+8;
     if(withGap){var gg2=rmFaceGeom(vis[0],'出',true).gapX;
-      if(gg2!=null){var gx2=px+(gg2+RM_GAP_CM/2)*S2;
-        parts.push('<text x="'+gx2+'" y="'+(H/2)+'" font-size="12" fill="#999" text-anchor="middle" writing-mode="tb">走道</text>');}}
+      if(gg2!=null){var gx2=px+gg2*S2,gbx=px+(gg2-RM_GAP_CM/2)*S2,gbw=RM_GAP_CM*S2;   // 2026-07-14：gapX 已是走道帶中心，修正原本再加半帶寬導致文字壓在儲位上
+        parts.splice(1,0,'<rect x="'+gbx.toFixed(1)+'" y="22" width="'+gbw.toFixed(1)+'" height="'+(H-30)+'" fill="#fafafa" stroke="#ddd" stroke-dasharray="4,3"/>');   // 全高走道帶（同全區中央走道樣式，墊底不遮儲位）
+        parts.push('<text x="'+gx2.toFixed(1)+'" y="'+Math.round(H*0.35)+'" font-size="13" fill="#888" text-anchor="middle" writing-mode="tb">走道</text>');}}
   }
   wrap.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'" font-family="Helvetica,Arial,sans-serif" style="display:block">'+parts.join('')+'</svg>';
   wrap.onclick=function(e){
