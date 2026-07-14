@@ -27,7 +27,7 @@
   .upload-btn { background: #fff; color: var(--accent); border: none; border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 0.15s; font-family: var(--font); letter-spacing: 0.3px; }
   .upload-btn:hover { background: #f0ece6; }
   #file-input { display: none; }
-  .tabs { display: flex; background: var(--surface); border-bottom: 2px solid var(--border); padding: 0 20px; gap: 0; overflow-x: auto; }
+  .tabs { display: flex; background: var(--surface); border-bottom: 2px solid var(--border); padding: 0 20px; gap: 0; overflow-x: auto; position: sticky; top: 52px; z-index: 99; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
   .tab { padding: 10px 18px; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; transition: all 0.15s; margin-bottom: -2px; white-space: nowrap; }
   .tab:hover { color: var(--accent); background: var(--accent-light); }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; background: var(--accent-light); }
@@ -245,7 +245,6 @@
   <div class="tab" onclick="switchTab('fw26')">26FW 新品</div>
   <div class="tab" onclick="switchTab('db')">資料庫</div>
   <div class="tab" onclick="switchTab('xx')">儲位釋放</div>
-  <div class="tab" onclick="switchTab('slotdata')">儲位數據</div>
   <div class="tab" onclick="switchTab('compare')">銷售比對</div>
   <div class="tab" onclick="switchTab('plnarr')">儲位調整/新品安排</div>
   <div class="tab" onclick="switchTab('rackmap')">儲架平面圖</div>
@@ -310,9 +309,16 @@
         <div class="tbl-wrap"><table id="tbl-fw26-cat"><thead><tr><th>類別</th><th>總SKU</th><th>已進倉</th><th>未進倉</th><th>儲區</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div class="card">
-        <div class="card-title" style="font-size:11px"><span class="dot"></span>季別 SKU 統計</div>
-        <div class="tbl-wrap"><table id="tbl-season-sku"><thead><tr><th>季別</th><th>SKU數</th></tr></thead><tbody></tbody></table></div>
+        <div class="card-title" style="font-size:11px"><span class="dot"></span>各季別 SKU 統計</div>
+        <div class="tbl-wrap"><table id="tbl-season-sku"><thead><tr><th colspan="2">季別</th><th>SKU數</th></tr></thead><tbody></tbody></table></div>
       </div>
+    </div>
+  </div>
+  <!-- ★ 儲位數據（原獨立 tab，於 init 時整個移入此插槽） -->
+  <div id="sku-slotdata-slot" style="margin-top:16px">
+    <div style="display:flex;align-items:center;gap:8px;padding:4px 2px 0;border-top:2px solid var(--border)">
+      <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block"></span>
+      <span style="font-weight:700;font-size:13px;color:var(--text2);letter-spacing:0.5px">儲位數據</span>
     </div>
   </div>
 </div>
@@ -850,8 +856,15 @@ function getXXStatus(r) {
 // ============================================================
 // TAB SWITCHING
 // ============================================================
+// ★ tab 標題列黏性置頂：依 header 實際高度調整 top（手機版 header 會換行、高度非固定 52px）
+function fixTabsSticky(){
+  const h=document.querySelector('.header'),t=document.querySelector('.tabs');
+  if(h&&t)t.style.top=h.offsetHeight+'px';
+}
+window.addEventListener('resize',fixTabsSticky);
+
 function switchTab(name){
-  const tabs=['sku','sales','fw26','db','xx','slotdata','compare','plnarr','rackmap'];
+  const tabs=['sku','sales','fw26','db','xx','compare','plnarr','rackmap'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   // ★ plnarr (合併版面): 把 tab-planner 移到 plnarr-left, tab-arrange 移到 plnarr-right
@@ -871,7 +884,8 @@ function switchTab(name){
     return;
   }
   document.getElementById('tab-'+name).classList.add('active');
-  if(name==='slotdata'){renderSlotData();return;}
+  // ★ 儲位數據已併入儲區總覽 tab 底部：進入 sku tab 時一併刷新
+  if(name==='sku'){try{renderSlotData();}catch(e){}}
   if(name==='rackmap'){rmBoot();return;}
   if(name==='compare'){renderSalesCompare();return;}
   if(DB.length>0&&DIRTY[name]){
@@ -936,7 +950,11 @@ async function handleUpload(event){
     });
     // 加入 XX 欄 — 須等 buildCache 後再算（依賴 CACHE.newSeason）
 
-    const dateStr=file.name.replace(/[^0-9]/g,'').slice(0,8);
+    // ★ 從檔名解析報表日期與時間：庫存查詢總表_20260714_083649 → date=20260714, time=083649
+    //   簡化檔名（如 20260714）只有日期、無時間
+    const _digits=file.name.replace(/[^0-9]/g,'');
+    const dateStr=_digits.slice(0,8);
+    const timeStr=_digits.length>=14?_digits.slice(8,14):'';
     let dateLabel='';
     if(dateStr.length===8){
       dateLabel=`${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
@@ -947,7 +965,7 @@ async function handleUpload(event){
     // buildCache 完成後才能正確判定 XX狀態
     DB.forEach(r=>{ r.XX狀態 = getXXStatus(r); });
     await saveEPRData(dateLabel||new Date().toISOString().slice(0,10));
-    histSave(dateLabel||new Date().toISOString().slice(0,10));
+    histSave(dateLabel||new Date().toISOString().slice(0,10),timeStr);
     checkMonthlyAutoSave();
     ensureAislesFromDB();
     Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);
@@ -1351,11 +1369,51 @@ function renderFWSkuTable(){
 }
 function renderSeasonSKUTable(){
   const tbody=document.querySelector('#tbl-season-sku tbody');if(!tbody)return;tbody.innerHTML='';
-  const seasons={};DB.forEach(r=>{const s=r.季別||'其他';seasons[s]=(seasons[s]||0)+1;});
-  const order=['26FW','26SS','25FW','25SS','24FW','24SS','其他'];
-  order.forEach(s=>{if(!seasons[s])return;const tr=document.createElement('tr');const isNew=s==='26FW';tr.innerHTML='<td class="label-cell">'+s+(isNew?' <span class="fw-tag fw-in">新品</span>':'')+'</td><td class="num">'+num(seasons[s])+'</td>';tbody.appendChild(tr);});
-  Object.keys(seasons).filter(s=>!order.includes(s)).forEach(s=>{const tr=document.createElement('tr');tr.innerHTML='<td class="label-cell">'+s+'</td><td class="num">'+num(seasons[s])+'</td>';tbody.appendChild(tr);});
-  const tr=document.createElement('tr');tr.className='total-row';tr.innerHTML='<td class="label-cell">合計</td><td class="num">'+num(DB.length)+'</td>';tbody.appendChild(tr);
+  if(!DB.length)return;
+  // ★ 最新一季 = SEASON_ORDER[0]（目前 26FW，前綴 74/75）
+  //   比最新一季前綴更大的款（如 76xx 免洗內褲開在 27SS 採購單，但新季資訊尚未匯入）
+  //   → 先併入目前最新一季統計；日後 SEASON_ORDER 加入 27SS 後自然歸位
+  const newest=SEASON_ORDER[0];
+  const newestMaxPfx=Math.max(...newest.pfx.map(p=>parseInt(p)));
+  const seasons={};let foldedCount=0;const foldedPfx=new Set();
+  DB.forEach(r=>{
+    const n=parseInt(String(r.商品編號||'').substring(0,2));
+    let s=r.季別||'其他';
+    if(!isNaN(n)&&n>newestMaxPfx){
+      s=newest.label;foldedCount++;foldedPfx.add(String(n)+'xx');
+    }
+    seasons[s]=(seasons[s]||0)+1;
+  });
+  const bd='border:1px solid var(--border);';
+  const mkRow=h=>{const tr=document.createElement('tr');tr.innerHTML=h;tbody.appendChild(tr);};
+  // 年度分組（F/W 在上、S/S 在下，年度儲存格 rowspan 合併）
+  const yearGroups=[
+    {year:'2026',rows:[{sub:'F/W',label:'26FW'},{sub:'S/S',label:'26SS'}]},
+    {year:'2025',rows:[{sub:'F/W',label:'25FW'},{sub:'S/S',label:'25SS'}]},
+    {year:'2024',rows:[{sub:'F/W',label:'24FW'},{sub:'S/S',label:'24SS'}]},
+  ];
+  yearGroups.forEach(g=>{
+    const active=g.rows.filter(r=>seasons[r.label]);
+    if(!active.length)return;
+    active.forEach((r,i)=>{
+      const isNewest=r.label===newest.label;
+      const foldTip=(isNewest&&foldedCount>0)?` title="含 ${Array.from(foldedPfx).join('、')} 等未匯入新季資訊之款號 ${foldedCount} 筆"`:'';
+      const foldMark=(isNewest&&foldedCount>0)?' <span style="color:#b8860b;cursor:help">*</span>':'';
+      let h='';
+      if(i===0)h+=`<td rowspan="${active.length}" style="${bd}text-align:center;font-weight:700;vertical-align:middle">${g.year}</td>`;
+      h+=`<td class="label-cell" style="${bd}"${foldTip}>${r.sub}${isNewest?' <span class="fw-tag fw-in">新品</span>':''}${foldMark}</td>`;
+      h+=`<td class="num" style="${bd}"${foldTip}>${num(seasons[r.label])}</td>`;
+      mkRow(h);
+    });
+  });
+  // 其他未列入的季別（如 62xx、其他）— 併入最新一季者不會出現在這裡
+  const listed=new Set(yearGroups.flatMap(g=>g.rows.map(r=>r.label)));
+  Object.keys(seasons).filter(s=>!listed.has(s)).sort().reverse().forEach(s=>{
+    mkRow(`<td colspan="2" class="label-cell" style="${bd}">${s}</td><td class="num" style="${bd}">${num(seasons[s])}</td>`);
+  });
+  const trT=document.createElement('tr');trT.className='total-row';
+  trT.innerHTML=`<td colspan="2" class="label-cell" style="${bd}font-weight:700">Total</td><td class="num" style="${bd}font-weight:700">${num(DB.length)}</td>`;
+  tbody.appendChild(trT);
 }
 
 // SALES rendering (unchanged)
@@ -6506,8 +6564,13 @@ function renderArrangeCompare(){
           catReminders[cat].add(_rm);
         }
       });
+      // ★ 同一貨櫃內同款號可能有多列（不同進倉批次）→ 去重後才累計 SKU 數，
+      //   否則 arrangeByStyle 的 skuCount 會被重複加總（如 73567 兩批次 16→32）
+      const _seenGrpStyles=new Set();
       grp.styles.forEach(style=>{
         if(!style)return;
+        if(_seenGrpStyles.has(style))return;
+        _seenGrpStyles.add(style);
         const cat=styleToCat[style];
         const arr=arrangeByStyle[style];
         const skuNum=arr?arr.skuCount:0;
@@ -8706,10 +8769,34 @@ function editSeasonCell(td){
 const HIST_PREFIX='lativ_hist_';   // localStorage 歷史記錄 key 前綴
 const HIST_MAX_DAYS=90;             // 保留最近 90 天的歷史記錄
 
-function histSave(dateKey){
+// ★ 歷史記錄改為「每天保留第一筆（最早的）ERP 報表」：
+//   回顧歷史的用途是看當天一早未抓量最多的報表；日期一律以「檔名日期」為準
+//   （即使今天上傳 20260711 的檔案，也存進 2026-07-11 的紀錄，不會蓋到今天的）。
+//   規則：
+//   1. 該日期尚無紀錄 → 直接存。
+//   2. 新舊檔名都有時間戳（庫存查詢總表_YYYYMMDD_HHMMSS）→ 保留報表時間較早者。
+//   3. 任一方無時間戳（簡化檔名如 20260714）→ 保留「總未抓貨」較大者（早上的報表未抓量最多）。
+function histSave(dateKey,srcTime){
   if(!DB.length)return;
-  const snapshot={date:dateKey,savedAt:new Date().toISOString(),rowCount:DB.length,totUngrab:CACHE.totUngrab,ssUngrab:CACHE.ssUngrab,fwUngrab:CACHE.fwUngrab,f1Sku:CACHE.f1Sku,f2Sku:CACHE.f2Sku,negAvail:CACHE.negAvail,highReserveCount:CACHE.highReserve.length,seasonStats:CACHE.seasonStats,aisleStats:CACHE.aisleStats,fw26arrived:DB.filter(r=>(r.商品編號||'').startsWith('74')||(r.商品編號||'').startsWith('75')).length};
-  try{localStorage.setItem(HIST_PREFIX+dateKey,JSON.stringify(snapshot));histPrune();histUpdateUI();}catch(e){console.warn('History save failed',e);}
+  const snapshot={date:dateKey,savedAt:new Date().toISOString(),srcTime:srcTime||'',rowCount:DB.length,totUngrab:CACHE.totUngrab,ssUngrab:CACHE.ssUngrab,fwUngrab:CACHE.fwUngrab,f1Sku:CACHE.f1Sku,f2Sku:CACHE.f2Sku,negAvail:CACHE.negAvail,highReserveCount:CACHE.highReserve.length,seasonStats:CACHE.seasonStats,aisleStats:CACHE.aisleStats,fw26arrived:DB.filter(r=>(r.商品編號||'').startsWith('74')||(r.商品編號||'').startsWith('75')).length};
+  try{
+    const prevRaw=localStorage.getItem(HIST_PREFIX+dateKey);
+    if(prevRaw){
+      let prev=null;try{prev=JSON.parse(prevRaw);}catch(e){}
+      if(prev){
+        const prevTime=String(prev.srcTime||'');
+        const newTime=String(srcTime||'');
+        let keepPrev;
+        if(prevTime&&newTime){
+          keepPrev=newTime>=prevTime;              // 兩者都有時間 → 早的贏
+        }else{
+          keepPrev=(prev.totUngrab||0)>=(snapshot.totUngrab||0); // 無法比時間 → 未抓量大的贏
+        }
+        if(keepPrev){histUpdateUI();return;}       // 保留既有的第一筆紀錄
+      }
+    }
+    localStorage.setItem(HIST_PREFIX+dateKey,JSON.stringify(snapshot));histPrune();histUpdateUI();
+  }catch(e){console.warn('History save failed',e);}
 }
 function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIST_MAX_DAYS);const cutStr=cutoff.toISOString().slice(0,10);Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)).forEach(k=>{if(k.replace(HIST_PREFIX,'')<cutStr)localStorage.removeItem(k);});}
 function histList(){return Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)).map(k=>k.replace(HIST_PREFIX,'')).sort().reverse();}
@@ -8932,9 +9019,17 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     if(sm&&typeof sm==='object'){STORAGE_MASTER=sm;}
   }catch(e){}
   console.log('FW26_FILTER_DATA.length after load:',FW26_FILTER_DATA.length);
+  // ★ 儲位數據 tab 整個移入儲區總覽底部插槽
+  try{
+    const _sd=document.getElementById('tab-slotdata');
+    const _slot=document.getElementById('sku-slotdata-slot');
+    if(_sd&&_slot&&_sd.parentNode!==_slot)_slot.appendChild(_sd);
+  }catch(e){console.warn('slotdata relocate failed:',e);}
+  try{fixTabsSticky();}catch(e){}
   try{initFW26();}catch(e){console.warn('initFW26 failed:',e);}
   try{histUpdateUI();}catch(e){console.warn('histUpdateUI failed:',e);}
   try{renderSKUTables();}catch(e){console.warn('renderSKUTables failed:',e);}
+  try{renderSlotData();}catch(e){console.warn('renderSlotData failed:',e);}
   try{renderFW26Stats();renderFW26CatTable();renderFW26Table();}catch(e){console.warn('renderFW26 failed:',e);}
   try{updateFW26LastUpdate();}catch(e){}
   console.log('renderFW26Stats called, FW26_FILTER_DATA.length=',FW26_FILTER_DATA.length);
@@ -8961,6 +9056,8 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 /* 儲位數據 TAB 全體列高放大 50% */
 #tab-slotdata table th { padding-top:7.5px!important; padding-bottom:7.5px!important; }
 #tab-slotdata table td { padding-top:6px!important;   padding-bottom:6px!important;   }
+/* ★ 儲位數據已併入儲區總覽底部：巢狀於 #tab-sku 內時強制顯示（覆蓋 .tab-panel{display:none}） */
+#tab-sku #tab-slotdata { display:block; }
 </style>
 <div class="tab-panel" id="tab-slotdata">
   <div style="padding:10px 18px 0;display:flex;justify-content:flex-end">
