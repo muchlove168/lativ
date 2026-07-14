@@ -965,7 +965,11 @@ async function handleUpload(event){
     // buildCache 完成後才能正確判定 XX狀態
     DB.forEach(r=>{ r.XX狀態 = getXXStatus(r); });
     await saveEPRData(dateLabel||new Date().toISOString().slice(0,10));
-    histSave(dateLabel||new Date().toISOString().slice(0,10),timeStr);
+    const _histKey=dateLabel||new Date().toISOString().slice(0,10);
+    const _histResult=histSave(_histKey,timeStr);
+    // ★ 同步存該日完整 ERP 報表（摘要有更新→覆寫；摘要保留舊的→僅補存缺漏）
+    try{await histSaveFullRows(_histKey,_histResult==='saved');}catch(e){console.warn('Full report save failed:',e);}
+    try{populateCompareHistSelect();}catch(e){}
     checkMonthlyAutoSave();
     ensureAislesFromDB();
     Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);
@@ -983,6 +987,7 @@ const IDB_NAME='lativ_report_db',IDB_VERSION=1,IDB_STORE='epr_data';
 function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(IDB_NAME,IDB_VERSION);req.onupgradeneeded=e=>{const db=e.target.result;if(!db.objectStoreNames.contains(IDB_STORE))db.createObjectStore(IDB_STORE);};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
 function idbPut(key,value){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbGet(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readonly');const req=tx.objectStore(IDB_STORE).get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>{db.close();reject(req.error);};}));}
+function idbDel(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbClear(){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).clear();tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbDumpAll(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly'),os=tx.objectStore(IDB_STORE),out={};var kr=os.getAllKeys();kr.onsuccess=function(){var keys=kr.result||[];var vr=os.getAll();vr.onsuccess=function(){var vals=vr.result||[];for(var i=0;i<keys.length;i++)out[keys[i]]=vals[i];db.close();resolve(out);};vr.onerror=function(){db.close();reject(vr.error);};};kr.onerror=function(){db.close();reject(kr.error);};});});}
 function idbRestoreAll(obj){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readwrite'),os=tx.objectStore(IDB_STORE);Object.keys(obj||{}).forEach(function(k){os.put(obj[k],k);});tx.oncomplete=function(){db.close();resolve();};tx.onerror=function(){db.close();reject(tx.error);};});});}
@@ -1678,6 +1683,7 @@ async function clearCompareData(){
 function renderSalesCompare(){
   const body=document.getElementById('compare-body');
   if(!body)return;
+  try{populateCompareHistSelect();}catch(e){}
 
   // 統計卡
   document.getElementById('compare-cur-count').textContent=DB.length?DB.length.toLocaleString():'—';
@@ -8769,34 +8775,119 @@ function editSeasonCell(td){
 const HIST_PREFIX='lativ_hist_';   // localStorage 歷史記錄 key 前綴
 const HIST_MAX_DAYS=90;             // 保留最近 90 天的歷史記錄
 
-// ★ 歷史記錄改為「每天保留第一筆（最早的）ERP 報表」：
-//   回顧歷史的用途是看當天一早未抓量最多的報表；日期一律以「檔名日期」為準
-//   （即使今天上傳 20260711 的檔案，也存進 2026-07-11 的紀錄，不會蓋到今天的）。
-//   規則：
-//   1. 該日期尚無紀錄 → 直接存。
-//   2. 新舊檔名都有時間戳（庫存查詢總表_YYYYMMDD_HHMMSS）→ 保留報表時間較早者。
-//   3. 任一方無時間戳（簡化檔名如 20260714）→ 保留「總未抓貨」較大者（早上的報表未抓量最多）。
+// ★ 歷史記錄規則（依 Gordon 需求）：
+//   1. 日期一律以「檔名日期」為準（完整檔名 庫存查詢總表_20260714_083649 或簡化檔名 20260714 皆可），
+//      讀到 20260714 就歸入 2026-07-14，即使是事後補傳也不會誤存到今天。
+//   2. 同一日期若已有紀錄 → 一律保留「總未抓貨」最大的那次匯入
+//      （當天一早的報表未抓量最多，之後現場出貨會陸續減少）。
 function histSave(dateKey,srcTime){
-  if(!DB.length)return;
+  if(!DB.length)return 'skip';
   const snapshot={date:dateKey,savedAt:new Date().toISOString(),srcTime:srcTime||'',rowCount:DB.length,totUngrab:CACHE.totUngrab,ssUngrab:CACHE.ssUngrab,fwUngrab:CACHE.fwUngrab,f1Sku:CACHE.f1Sku,f2Sku:CACHE.f2Sku,negAvail:CACHE.negAvail,highReserveCount:CACHE.highReserve.length,seasonStats:CACHE.seasonStats,aisleStats:CACHE.aisleStats,fw26arrived:DB.filter(r=>(r.商品編號||'').startsWith('74')||(r.商品編號||'').startsWith('75')).length};
   try{
     const prevRaw=localStorage.getItem(HIST_PREFIX+dateKey);
     if(prevRaw){
       let prev=null;try{prev=JSON.parse(prevRaw);}catch(e){}
-      if(prev){
-        const prevTime=String(prev.srcTime||'');
-        const newTime=String(srcTime||'');
-        let keepPrev;
-        if(prevTime&&newTime){
-          keepPrev=newTime>=prevTime;              // 兩者都有時間 → 早的贏
-        }else{
-          keepPrev=(prev.totUngrab||0)>=(snapshot.totUngrab||0); // 無法比時間 → 未抓量大的贏
-        }
-        if(keepPrev){histUpdateUI();return;}       // 保留既有的第一筆紀錄
-      }
+      // 未抓量沒有比較大 → 保留既有紀錄
+      if(prev&&(prev.totUngrab||0)>=(snapshot.totUngrab||0)){histUpdateUI();return 'kept';}
     }
     localStorage.setItem(HIST_PREFIX+dateKey,JSON.stringify(snapshot));histPrune();histUpdateUI();
-  }catch(e){console.warn('History save failed',e);}
+    return 'saved';
+  }catch(e){console.warn('History save failed',e);return 'skip';}
+}
+
+// ════════════════════════════════════════════════════════════
+// ★ 每日完整 ERP 報表儲存（IndexedDB）
+//   - 與摘要紀錄同步：同一天保留「總未抓貨最大」的那次匯入的完整資料
+//   - 存於 IDB key: hist_epr_YYYY-MM-DD（緊湊 array-of-arrays 格式）
+//   - 匯出整包（v2 完整鏡射 idbDumpAll）會自動包含 → 其他裝置匯入後可直接下載任一天報表
+//   - 用途：① 銷售比對直接挑系統已存日期 ② 單日 ERP 報表下載回電腦
+// ════════════════════════════════════════════════════════════
+const HIST_EPR_PREFIX='hist_epr_';
+const HIST_EPR_MAX_DAYS=40;   // 完整報表保留 40 天（摘要仍 90 天）；避免月底整包匯出檔過大
+const HIST_EPR_INDEX_KEY='lativ_hist_epr_dates';
+const HIST_EPR_COLS=['商品系列','商品編號','商品名稱','顏色','尺寸','儲位','倉位','包材','總採購量','總進貨量','未到量','未抓貨','可賣數量','保留數量','銷售庫存','倉庫庫存','架上數量','倉位總數量','商品材積','儲位材積','狀態'];
+
+function histEprDates(){try{const a=JSON.parse(localStorage.getItem(HIST_EPR_INDEX_KEY)||'[]');return Array.isArray(a)?a.sort().reverse():[];}catch(e){return[];}}
+function histEprSetDates(arr){try{localStorage.setItem(HIST_EPR_INDEX_KEY,JSON.stringify(arr));}catch(e){}}
+
+// replaced=true（摘要已更新）→ 一律覆寫完整報表
+// replaced=false（摘要保留舊的）→ 僅在該日期尚無完整報表時補存（backfill 舊紀錄）
+async function histSaveFullRows(dateKey,replaced){
+  if(!DB.length||!dateKey)return;
+  const dates=histEprDates();
+  if(!replaced&&dates.includes(dateKey))return;
+  const rows=DB.map(r=>HIST_EPR_COLS.map(c=>r[c]!==undefined?r[c]:''));
+  await idbPut(HIST_EPR_PREFIX+dateKey,{date:dateKey,cols:HIST_EPR_COLS,rows:rows});
+  if(!dates.includes(dateKey)){dates.push(dateKey);}
+  // 修剪超過保留天數的完整報表
+  const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIST_EPR_MAX_DAYS);
+  const cutStr=cutoff.toISOString().slice(0,10);
+  const keep=[],drop=[];
+  dates.forEach(d=>{(d<cutStr?drop:keep).push(d);});
+  histEprSetDates(keep.sort().reverse());
+  drop.forEach(d=>{idbDel(HIST_EPR_PREFIX+d).catch(()=>{});});
+}
+
+// 單日 ERP 報表下載回電腦（檔名沿用 ERP 格式，可直接再上傳回系統）
+async function histDownloadEPR(dateKey){
+  if(!dateKey)return;
+  showLoading('產生 '+dateKey+' ERP 報表中...');
+  try{
+    const data=await idbGet(HIST_EPR_PREFIX+dateKey);
+    if(!data||!data.rows||!data.rows.length){hideLoading();alert('系統內沒有 '+dateKey+' 的完整 ERP 報表\n（此功能上線後匯入的報表才有完整存檔）');return;}
+    const aoa=[data.cols,...data.rows];
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'庫存查詢總表');
+    XLSX.writeFile(wb,`庫存查詢總表_${dateKey.replace(/-/g,'')}.xlsx`,{bookSST:false});
+    hideLoading();
+  }catch(e){hideLoading();alert('下載失敗：'+e.message);}
+}
+
+// 銷售比對：直接載入系統已存日期的完整報表當作歷史報表
+async function compareLoadStored(dateKey){
+  if(!dateKey)return;
+  if(!DB||!DB.length){alert('請先在主頁面上傳當前的 ERP 報表，再選擇歷史日期進行比對。');return;}
+  showLoading('載入 '+dateKey+' 系統存檔中...');
+  try{
+    const data=await idbGet(HIST_EPR_PREFIX+dateKey);
+    if(!data||!data.rows||!data.rows.length){hideLoading();alert('系統內沒有 '+dateKey+' 的完整 ERP 報表');return;}
+    const ix={};data.cols.forEach((c,i)=>ix[c]=i);
+    const g=(a,c)=>ix[c]!==undefined?a[ix[c]]:'';
+    const rows=data.rows.map(a=>({
+      商品編號:String(g(a,'商品編號')||'').trim(),
+      商品名稱:g(a,'商品名稱')||'',
+      顏色:g(a,'顏色')||'',
+      尺寸:g(a,'尺寸')||'',
+      儲位:g(a,'儲位')||'',
+      銷售庫存:+g(a,'銷售庫存')||0,
+      倉庫庫存:+g(a,'倉庫庫存')||0,
+      未到量:+g(a,'未到量')||0,
+      未抓貨:+g(a,'未抓貨')||0,
+      可賣數量:+g(a,'可賣數量')||0,
+      保留數量:+g(a,'保留數量')||0,
+      總進貨量:+g(a,'總進貨量')||0,
+      總採購量:+g(a,'總採購量')||0,
+    })).filter(r=>r.商品編號);
+    COMPARE_OLD_DATA={date:dateKey,rows,fileName:'系統存檔 '+dateKey};
+    try{await idbPut('compare_old',COMPARE_OLD_DATA);}catch(e){}
+    document.getElementById('compare-status').textContent=`歷史報表：系統存檔 ${dateKey}（${rows.length.toLocaleString()} 筆）`;
+    document.getElementById('compare-clear-btn').style.display='inline-flex';
+    hideLoading();
+    renderSalesCompare();
+  }catch(e){hideLoading();alert('載入失敗：'+e.message);}
+}
+
+// 銷售比對：系統已存日期下拉選單
+function populateCompareHistSelect(){
+  const sel=document.getElementById('compare-hist-select');if(!sel)return;
+  const cur=sel.value;
+  const dates=histEprDates();
+  sel.innerHTML='<option value="">— 或選擇系統已存日期 —</option>';
+  dates.forEach(d=>{const o=document.createElement('option');o.value=d;o.textContent=d;sel.appendChild(o);});
+  if(cur&&dates.includes(cur))sel.value=cur;
+  sel.disabled=!dates.length;
+  sel.title=dates.length?('系統已存 '+dates.length+' 天完整報表'):'尚無完整報表存檔（此功能上線後匯入的報表才會存）';
 }
 function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIST_MAX_DAYS);const cutStr=cutoff.toISOString().slice(0,10);Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)).forEach(k=>{if(k.replace(HIST_PREFIX,'')<cutStr)localStorage.removeItem(k);});}
 function histList(){return Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)).map(k=>k.replace(HIST_PREFIX,'')).sort().reverse();}
@@ -8865,7 +8956,8 @@ async function exportAllData(){
     hideLoading();
 
     const sizeMB=(blob.size/1024/1024).toFixed(2);
-    alert(`✓ 匯出成功！\n\n檔名：lativ_backup_${today}.json\n大小：${sizeMB} MB\n\n包含內容：\n• EPR：${eprRows.length.toLocaleString()} 筆\n• FW26：${fw26Rows.length.toLocaleString()} 筆\n• 設定：${Object.keys(settings).length} 項\n• 歷史：${Object.keys(history).length} 天`);
+    const fullDays=Object.keys(idbAll).filter(k=>String(k).startsWith('hist_epr_')).length;
+    alert(`✓ 匯出成功！\n\n檔名：lativ_backup_${today}.json\n大小：${sizeMB} MB\n\n包含內容：\n• EPR：${eprRows.length.toLocaleString()} 筆\n• FW26：${fw26Rows.length.toLocaleString()} 筆\n• 設定：${Object.keys(settings).length} 項\n• 歷史摘要：${Object.keys(history).length} 天\n• 每日完整 ERP 報表：${fullDays} 天（匯入其他裝置後可直接下載任一天）`);
   }catch(err){
     hideLoading();
     alert('匯出失敗：'+err.message);
@@ -8963,7 +9055,7 @@ function histLoad(dateKey){
   if(!dateKey)return;
   try{const snap=JSON.parse(localStorage.getItem(HIST_PREFIX+dateKey));if(!snap){alert('找不到該日期的記錄');return;}
   const panel=document.getElementById('hist-panel');if(!panel)return;
-  panel.innerHTML=`<div style="display:flex;align-items:center;margin-bottom:8px"><strong>${snap.date}</strong><span style="font-size:11px;color:var(--text3);margin-left:8px">${(snap.rowCount||0).toLocaleString()} 筆</span><button onclick="document.getElementById('hist-panel').style.display='none'" style="margin-left:auto;border:none;background:none;cursor:pointer;color:var(--text3)">✕</button></div><table style="width:100%;font-size:12px;border-collapse:collapse"><tr><td style="padding:3px 6px;color:var(--text2)">總未抓貨</td><td style="text-align:right;font-weight:700">${num(snap.totUngrab)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">SS 未抓</td><td style="text-align:right">${num(snap.ssUngrab)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">FW 未抓</td><td style="text-align:right">${num(snap.fwUngrab)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">1F SKU</td><td style="text-align:right">${num(snap.f1Sku)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">2F SKU</td><td style="text-align:right">${num(snap.f2Sku)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">可賣&lt;0</td><td style="text-align:right;color:var(--red)">${num(snap.negAvail)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">保留&gt;6</td><td style="text-align:right;color:var(--yellow)">${num(snap.highReserveCount)}</td></tr></table>`;
+  panel.innerHTML=`<div style="display:flex;align-items:center;margin-bottom:8px"><strong>${snap.date}</strong><span style="font-size:11px;color:var(--text3);margin-left:8px">${(snap.rowCount||0).toLocaleString()} 筆</span><button onclick="document.getElementById('hist-panel').style.display='none'" style="margin-left:auto;border:none;background:none;cursor:pointer;color:var(--text3)">✕</button></div><table style="width:100%;font-size:12px;border-collapse:collapse"><tr><td style="padding:3px 6px;color:var(--text2)">總未抓貨</td><td style="text-align:right;font-weight:700">${num(snap.totUngrab)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">SS 未抓</td><td style="text-align:right">${num(snap.ssUngrab)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">FW 未抓</td><td style="text-align:right">${num(snap.fwUngrab)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">1F SKU</td><td style="text-align:right">${num(snap.f1Sku)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">2F SKU</td><td style="text-align:right">${num(snap.f2Sku)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">可賣&lt;0</td><td style="text-align:right;color:var(--red)">${num(snap.negAvail)}</td></tr><tr><td style="padding:3px 6px;color:var(--text2)">保留&gt;6</td><td style="text-align:right;color:var(--yellow)">${num(snap.highReserveCount)}</td></tr></table>${histEprDates().includes(dateKey)?`<button onclick="histDownloadEPR('${dateKey}')" style="margin-top:10px;width:100%;background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 0;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)">⬇ 下載當日 ERP 報表 (.xlsx)</button>`:`<div style="margin-top:10px;font-size:11px;color:var(--text3);text-align:center">此日期無完整報表存檔</div>`}`;
   panel.style.display='block';}catch(e){alert('載入失敗：'+e.message);}
 }
 </script>
@@ -9028,6 +9120,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   try{fixTabsSticky();}catch(e){}
   try{initFW26();}catch(e){console.warn('initFW26 failed:',e);}
   try{histUpdateUI();}catch(e){console.warn('histUpdateUI failed:',e);}
+  try{populateCompareHistSelect();}catch(e){}
   try{renderSKUTables();}catch(e){console.warn('renderSKUTables failed:',e);}
   try{renderSlotData();}catch(e){console.warn('renderSlotData failed:',e);}
   try{renderFW26Stats();renderFW26CatTable();renderFW26Table();}catch(e){console.warn('renderFW26 failed:',e);}
@@ -9255,6 +9348,10 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   <div style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
     <button class="upload-btn" onclick="document.getElementById('compare-file-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳歷史 ERP 報表（起始日）</button>
     <input type="file" id="compare-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleCompareUpload(event)">
+    <select id="compare-hist-select" onchange="if(this.value)compareLoadStored(this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--font);background:var(--surface);color:var(--text);cursor:pointer;max-width:200px">
+      <option value="">— 或選擇系統已存日期 —</option>
+    </select>
+    <button class="upload-btn" onclick="var d=document.getElementById('compare-hist-select').value;if(d)histDownloadEPR(d);else alert('請先在左側下拉選單選擇日期');" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="將選定日期的完整 ERP 報表下載回電腦 (.xlsx)">⬇ 下載該日報表</button>
     <span id="compare-status" style="font-size:12px;color:var(--text3)"></span>
     <span style="font-size:12px;color:var(--text3);margin-left:8px">→ 與當前 ERP 比對</span>
     <button class="upload-btn" onclick="clearCompareData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto;display:none" id="compare-clear-btn">✖ 清除歷史報表</button>
