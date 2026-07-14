@@ -9607,9 +9607,10 @@ const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B1
  C:['C11','C10','C09','C08','C07','C06','C05','C04','C03','C02','C01'],D:['D11','D10','D09'],
  E:['E10','E09','E08','E07','E06','E05','E04','E03','E02','E01'],F:['F02','F01']};
 let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false,RM_ADD=null;
-const RM_UNIT_CM_OVR={A02:35,E08:35,E09:35};   // 每號碼實體寬(cm)特例：5格/175 或 6格/210
+const RM_UNIT_CM_OVR={};   // 每號碼實體寬(cm)特例（2026-07-14 取消 A02/E08/E09=35：H架一架六格、架長仍175 → 每格=175/6≈29.17，與AB前段格線同步）
 const RM_LPOS={'C11回':177};                    // C11回 178-182 凸出走道外，177 對應對面 001                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
-const RM_CALIB_VER='v4_0705';
+const RM_CALIB_VER='v5_0714';
+function rmDSlots(lo){var a=[];for(var q=lo;q<lo+4;q++)a.push({q:q,lay:['D','D','D','D']});return a;} // 4格D材積儲位產生器（v5 E07出重繪用）
 // ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
 // ax=柱/截短「右緣」錨定位置（自走道口起算的號碼格數，實測換算）；未給 ax 者依自身號碼範圍推得。
 const RM_CALIB=[
@@ -9645,6 +9646,21 @@ const RM_CALIB=[
  {a:'E01',s:'出',m:{t:'柱',r:'026-029'},del:['ax']},
  {a:'E01',s:'出',m:{t:'柱',r:''},remove:1},
  {a:'E01',s:'出',m:{t:'架',r:'043-045'},del:['out'],set:{nt:'鐵力士短架(實體位於走道外側，圖面內嵌呈現)'}},
+ // ── 2026-07-14 v5（圖5）E07出 後走道後段依比例重繪：柱072-073＋074起5架×4格D材積＋截短094-110 ──
+ {a:'E07',s:'出',m:{t:'柱',r:'072-074'},set:{r:'072-073',br:'068-069',nt:'後段重繪(2026-07-14)'}},
+ {a:'E07',s:'出',m:{t:'架',r:'075-078'},repl:[
+   {t:'架',r:'074-077',L:146,br:'064-067',s:rmDSlots(74)},
+   {t:'架',r:'078-081',L:146,br:'060-063',s:rmDSlots(78)},
+   {t:'架',r:'082-085',L:146,br:'056-059',s:rmDSlots(82)},
+   {t:'架',r:'086-089',L:146,br:'052-055',s:rmDSlots(86)},
+   {t:'架',r:'090-093',L:146,br:'048-051',s:rmDSlots(90)}]},
+ {a:'E07',s:'出',m:{t:'架',r:'079-082'},remove:1},
+ {a:'E07',s:'出',m:{t:'架',r:'083-090'},remove:1},
+ {a:'E07',s:'出',m:{t:'柱',r:'085-088'},remove:1},
+ {a:'E07',s:'出',m:{t:'架',r:'091-094'},remove:1},
+ {a:'E07',s:'出',m:{t:'架',r:'095-100'},remove:1},
+ {a:'E07',s:'出',m:{t:'柱',r:'097-098'},remove:1},
+ {a:'E07',s:'出',m:{t:'截短',r:'101-110'},set:{r:'094-110',br:'031-047'}},
 ];
 function rmLpos(a,side){var k=RM_LPOS[a+side];return k!=null?k:rmAisleL(a);}
 function rmUnitCM(a){return RM_UNIT_CM_OVR[a]||175/rmUnitN(a);}
@@ -9748,6 +9764,7 @@ function rmAisleL(a){ // 走道設計長（號碼數）
   return L||108;
 }
 function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬，架寬=號碼跨距×格寬、柱=其號碼範圍格線位置(可用 ax 實測右緣)；缺號=留白；跨走道自然對齊
+  if(a==='E01'&&side==='出')withGap=false;   // 2026-07-14：E01小號面實體儲位位於後走道帶內（唯一允許），不做走道位移
   var bays=(RM.aisles[a]&&RM.aisles[a][side])||[];
   var unit=rmUnitCM(a),Lp=rmLpos(a,side),gapCM=9*175;
   var items=[],cumD=null,gapDone=false,gapX=null,total=0,prevLo=null,prevHi=null;
@@ -9773,7 +9790,14 @@ function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬�
         if(b.t==='柱'&&b.pw){x1=x0+b.pw*RM_STD_SLOT;}             // 手動柱寬優先
         else if(ge!=null){
           x1=Math.max(ge,x0+8);
-          if(withGap&&!gapDone&&x1>gapCM+0.5){gapDone=true;gapX=gapCM+RM_GAP_CM/2;gapW=RM_GAP_CM;} // 吸收段自身跨越後走道
+          if(withGap&&!gapDone&&x1>gapCM+0.5){                    // 2026-07-14：跨後走道的柱/截短 → 拆成走道帶前後兩段，走道帶淨空
+            gapDone=true;gapX=gapCM+RM_GAP_CM/2;
+            var w1=gapCM-x0;
+            if(w1>0.5)items.push({i:i,b:b,x:x0,w:w1,out:b.out?1:0,ov:0});
+            items.push({i:i,b:b,x:Math.max(x0,gapCM)+RM_GAP_CM,w:x1-Math.max(x0,gapCM),out:b.out?1:0,ov:0});
+            cumD=x1;total=x1+RM_GAP_CM;
+            return;
+          }
         }
         else {x1=x0+span*RM_STD_SLOT;}
       }else{
@@ -9785,6 +9809,23 @@ function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬�
     if(!overlay){cumD=x1;total=x1+sh+gapW;}
     if(!isAbs&&rg&&!b.out){prevLo=lo;prevHi=hi;}
   });
+  // 2026-07-14（圖1/圖2）：柱自動填滿與前後相鄰項目間的圖面空隙（不跨後走道帶；手動柱寬 pw 與疊置柱不動）
+  var band0=gapCM,band1=gapCM+RM_GAP_CM;
+  for(var j=0;j<items.length;j++){
+    var itj=items[j];
+    if(itj.b.t!=='柱'||itj.ov||itj.b.pw)continue;
+    var prevIt=null,nextIt=null,k;
+    for(k=j-1;k>=0;k--){if(!items[k].ov&&!items[k].out){prevIt=items[k];break;}}
+    for(k=j+1;k<items.length;k++){if(!items[k].ov&&!items[k].out){nextIt=items[k];break;}}
+    var L0=itj.x,R0=itj.x+itj.w;
+    if(prevIt){var pe=prevIt.x+prevIt.w;
+      if(withGap&&L0>=band1-0.5&&pe<=band0+0.5)pe=band1;
+      if(pe<L0)L0=pe;}
+    if(nextIt){var ns=nextIt.x;
+      if(withGap&&R0<=band0+0.5&&ns>=band1-0.5)ns=band0;
+      if(ns>R0)R0=ns;}
+    itj.x=L0;itj.w=R0-L0;
+  }
   return {unit:unit,items:items,total:total,gapX:gapX};
 }
 // ---------- 渲染 ----------
