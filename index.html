@@ -2782,6 +2782,7 @@ const PLN_SPEC = {
     {id:'7-density', status:'locked', impl:'runAgEngine PHASE A density(唯一路徑)', desc:'(v0.8 階段7)最小架數逐架填滿：AA彈性配置、純4碼孤立G；降A選色=款總和/色未到量最低。(v1.4 2026-07-15 Gordon P06手排案)AG密度=空欄由前往後整欄用滿：demoteN以升冪模擬走欄自算(A欄:溢出≥4格先給溢出、否則降一色整欄用滿;G欄:主碼組)、降A由前往後填滿A欄(不再一架一色分散/不為溢出保留前段A)、溢出碼(XXL)集中尾端最近A欄疊放→剩餘空欄連續供下批新品續用'},
     {id:'1.5-cleanup', status:'locked', impl:'runAgEngine 密度路徑唯一化', desc:'(v0.9 階段8)清舊：移除 useRoundRobin 關閉分支(legacy 逐架 fill)、poolCol/hanging3/queueIdx 等舊機制；PHASE D 與主路徑一律切組定層(entry.groups)，不再呼叫 plnGetTargetLayer；plnGetTargetLayer/PLN_SIZE_TO_LAYER 收斂為高/低庫存引擎 + §1.2 useGroupSplit-off 安全網專用'},
     {id:'1.4-proximity', status:'locked', impl:'runAgEngine PHASE A 統一 buildRacks + 以色就近溢出(密度) + physAdjConflict + 孤立G回收', desc:'(v1.3 階段13)新品 AG/CB XXL 溢出「密度+就近+分段非相鄰」：擺法統一架模型 buildRacks(AAGGGG/CBCCCC+短架)，ovfCols/mainCols；以「色」為組整組放(CB 架首C↔B 相鄰不可拆兩欄)，候選欄排序＝架距最近→能容整組者優先→密度(剩餘層少先填,湊滿不留半欄)→欄距；§1.3a 分段感知 physAdjConflict(跨架/跨儲位箱 col±1 允許)。★密度修正：沒有純4碼色認領的孤立G欄回收進主碼池(不再空整欄,如P06-122);溢出整組同欄(湊滿)。AG 降A已改前綴填滿(見 7-density v1.4)。實測：C05(249色,空)最遠5;P06(真實占用)半滿欄27→3格;全情境物理相鄰違規 0'},
+    {id:'new-atomic', status:'locked', impl:'plnRunNewEngine nToPick整色上限+agSorted ASC；runAgEngine 容量預選(_deferred)+整色回退+整款回傳', desc:'(2026-07-15 Gordon 圖1/圖2案)新品排入四修：①SKU數(nToPick)生效：以「色」為原子單位依佇列序取整色、超過N即停不拆色補位(42≠43)；②多目的走道改「空位少者先填」＋容量預選(整色累計≤走道空格,第一個放不下起全部整色遞延)→C05 43格吃同款前7色、其餘流C06,不再跳款亂色；③色原子鐵則：任一碼沒排進整色回退(清cells/moves/placed)改流下一走道,絕不拆色(跨走道5+1、C06-040-2案)；④§3.7-①部分主碼組僅限「純新部分碼色」,同色他碼已在儲位者(跨步驟拆色殘碼)改走溢出就近路徑,不開新主碼欄(043/044案)；款完成=全色排完才移出佇列'},
   ],
   // 落差清單：模式現行偏離規格之處 + 對齊方式（翻旗標 / 待重寫）。
   gaps: [
@@ -4657,6 +4658,7 @@ function plnRunNewEngine(config,initialCells){
   if(!skus.length){
     return {selected:[],capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:0};
   }
+  const _queueTotal0=skus.length; // UI「佇列 N」＝去重後總數（SKU數上限裁切前）
 
   // Step 2: 按款(5碼)分組, 大款優先
   const kuanMap={};
@@ -4669,6 +4671,32 @@ function plnRunNewEngine(config,initialCells){
   const kuans=Object.entries(kuanMap)
     .map(([k,v])=>({kc:k,n:v.skus.length,cat:v.cat,skus:v.skus}))
     .sort((a,b)=>(b.n-a.n)||(a.kc<b.kc?-1:1));
+
+  // ★ SKU數上限（Gordon 2026-07-15 圖2案：SKU數42卻排入43）：新品模式遵守情境配置的 SKU數(nToPick)。
+  //   以「色」為原子單位、依（款 n DESC→kc ASC→color7 ASC）佇列序取整色，累計超過 N 即停（不跳款跳色補位、
+  //   不足一色的殘額不拆色硬塞）：N=42、6碼色 → 取同款前 7 色共 42 個 SKU。未取的色不進本輪佇列，
+  //   由跨步驟去重自動流到下一 step。
+  if(config.nToPick>0&&config.nToPick<skus.length){
+    const keep=new Set(); let acc=0, stop=false;
+    for(const ku of kuans){
+      const cm={};
+      ku.skus.forEach(s=>{const c7=String(s.code||'').substring(0,7);(cm[c7]=cm[c7]||[]).push(s);});
+      for(const c7 of Object.keys(cm).sort()){
+        if(stop)break;
+        if(acc+cm[c7].length>config.nToPick){stop=true;break;}
+        acc+=cm[c7].length; cm[c7].forEach(s=>keep.add(String(s.code||'')));
+      }
+      if(stop)break;
+    }
+    if(keep.size<skus.length){
+      for(let i=skus.length-1;i>=0;i--){ if(!keep.has(String(skus[i].code||'')))skus.splice(i,1); }
+      kuans.length=0;
+      const km2={};
+      skus.forEach(s=>{const k=String(s.code||'').substring(0,5);if(!km2[k])km2[k]={skus:[],cat:s._cat||''};km2[k].skus.push(s);});
+      Object.entries(km2).map(([k,v])=>({kc:k,n:v.skus.length,cat:v.cat,skus:v.skus}))
+        .sort((a,b)=>(b.n-a.n)||(a.kc<b.kc?-1:1)).forEach(x=>kuans.push(x));
+    }
+  }
 
   // ── 通用工具 ──
   function isSize5(code,size){
@@ -4856,6 +4884,7 @@ function plnRunNewEngine(config,initialCells){
     kuansToPlace.forEach(ku=>{
       const cm={};
       ku.skus.forEach(s=>{
+        if(_placedCodes.has(String(s.code||'')))return; // ★ 前一走道/多輪已排入的碼不再進切組（防空欄被空佔）
         const c7=String(s.code||'').substring(0,7);
         if(!cm[c7])cm[c7]={all:[]};
         cm[c7].all.push(s);
@@ -4895,6 +4924,23 @@ function plnRunNewEngine(config,initialCells){
           colorName:plnColorNameOf({'商品名稱':(all[0]&&all[0].name)||''})});   // ★ 需求7: 顏色名稱(跨款排開用)
       });
     });
+
+    // ★ 容量預選（Gordon 2026-07-15 圖1/圖2案）：以「色」為原子單位，依佇列序（kc→color7）
+    //   整色累計塞入本走道空格數內；第一個放不下的色起「全部整色遞延」（不跳款跳色補位），
+    //   遞延色本輪完全不排，由外層多走道迴圈流到下一走道（或失敗回報）。
+    //   → 空位少的走道（如 C05 43 格）拿到「同款前 7 色」42 個 SKU，不再出現跳款、亂色、
+    //     降A爆量（佇列180硬塞43格→24色降級散排的圖2 step1 案）。
+    {
+      let freeCells=0;
+      Object.values(cells).forEach(cs=>{if(cs.aisle===aisle&&!cs.sku&&!cs.locked)freeCells++;});
+      const ordered=PLN_PRIM.queueOrder(colorEntries);
+      let acc=0, stop=false;
+      for(const e of ordered){
+        const n=(e.mainSkus?e.mainSkus.length:0)+(e.size5Skus?e.size5Skus.length:0);
+        if(stop||acc+n>freeCells){e._deferred=true;stop=true;continue;}
+        acc+=n;
+      }
+    }
 
     // ── 工具函式 ──
     function emptyLayers(c){
@@ -4963,9 +5009,9 @@ function plnRunNewEngine(config,initialCells){
         racks.push({idx:Math.floor(i/6),cols,aCols:aColsInRack,gCols:gColsInRack});
       }
 
-      // queue: 所有 entries 按 (kc, color7) ASC
+      // queue: 所有 entries 按 (kc, color7) ASC（容量預選遞延的色不進佇列）
       // §1.3b 佇列排序 kc→color7 → 委派單一來源 PLN_PRIM
-      const queue=PLN_PRIM.queueOrder(colorEntries.filter(e=>e.mainSkus.length>0));
+      const queue=PLN_PRIM.queueOrder(colorEntries.filter(e=>e.mainSkus.length>0&&!e._deferred));
 
       // ★ CB 型走道(如 CBCCCC)偵測 + 架首 C 集合 (Gordon 確認):
       //   小材積(B)欄若皆「孤立」(左右非小材積), 則每個 B 旁的「架首 C」(b-1) 應留給溢出對,
@@ -5170,7 +5216,12 @@ function plnRunNewEngine(config,initialCells){
         //     （例：1.3.4 碼 → 層1/3/4、層2留空）；映射無效或撞層時退回位置→層(1..k)。
         //   無全空主碼欄可用時不動作 → 整色維持原溢出 best-fit 打包路徑（吃殘格），與舊行為一致。
         {
-          const partials=PLN_PRIM.queueOrder(colorEntries.filter(e=>!e.placed&&!e.mainSkus.length&&e.size5Skus.length>=1&&e.size5Skus.length<=3));
+          // ★ 圖2 C06-040-2/043/044 案（Gordon 2026-07-15）：§3.7-① 僅適用「純新的部分碼色」（如 D10 補進）。
+          //   同色其他碼已在任何儲位上者（跨步驟/跨走道拆色殘碼）不得開新主碼欄，改走下方溢出就近路徑
+          //   （B/架首C/殘格），避免整欄被單碼卡層（040-2 卡整欄、043/044 吃掉主碼 C 欄）。
+          const _c7InCells=new Set();
+          Object.values(cells).forEach(cs=>{ if(cs.sku)_c7InCells.add(String(cs.sku).substring(0,7)); });
+          const partials=PLN_PRIM.queueOrder(colorEntries.filter(e=>!e._deferred&&!e.placed&&!e.mainSkus.length&&e.size5Skus.length>=1&&e.size5Skus.length<=3&&!_c7InCells.has(e.color7)));
           for(const e of partials){
             const col=nextCol(mainColPool,e.color7,e.colorName);
             if(col==null)break;
@@ -5211,6 +5262,7 @@ function plnRunNewEngine(config,initialCells){
           const rackOf=col=>{ const s=_segOf.get(col); return s?s.ri:-99; };
           const ovGroups=[];
           for(const e of colorEntries){
+            if(e._deferred)continue;                     // ★ 容量預選遞延的色整色不排（含溢出碼）
             if(!e.size5Skus.length)continue;
             if(e.groups.length>0&&!e.placed)continue;
             // 排除已排過的商品編號（防多輪重排 / 兩貨櫃同款重複）
@@ -5316,7 +5368,7 @@ function plnRunNewEngine(config,initialCells){
     // ════════════════════════════════════════════════════════════
     // PHASE D: 仍未排的款 (主碼 col 都用完) → 找剩餘空間排入 (需求5)
     // ════════════════════════════════════════════════════════════
-    const stillUnplaced=colorEntries.filter(e=>!e.placed&&e.mainSkus.length>0);
+    const stillUnplaced=colorEntries.filter(e=>!e.placed&&e.mainSkus.length>0&&!e._deferred);
     stillUnplaced.sort((a,b)=>a.avgPending-b.avgPending);
     for(const e of stillUnplaced){
       // §1.5（階段8）：新品定層一律用切組(位置→層) entry.groups，不再呼叫 plnGetTargetLayer。
@@ -5360,11 +5412,35 @@ function plnRunNewEngine(config,initialCells){
       }
     }
 
+    // ★ 色原子鐵則（Gordon 2026-07-15 圖2案）：任一碼沒排進的色「整色回退」——
+    //   清掉本輪已放的格（cells／_placedCodes／moves／placed 同步移除），整色改流下一走道或失敗回報。
+    //   不再拆色：杜絕「5碼在C05、第6碼在C06-040-2」「mains在C05、150/160殘碼吃C06主碼欄043/044」型拆法。
+    for(const e of colorEntries){
+      if(e._deferred)continue;
+      const codes=[...(e.mainSkus||[]),...(e.size5Skus||[])].map(s=>String(s.code||''));
+      if(!codes.length)continue;
+      const done=codes.filter(c=>_placedCodes.has(c)).length;
+      if(done===0||done===codes.length)continue;
+      const codeSet=new Set(codes);
+      for(let i=moves.length-1;i>=0;i--){
+        const m=moves[i];
+        if(m.phase!=='NEW_PRODUCT'||!codeSet.has(String(m.sku)))continue;
+        const cs=cells[m.dst];
+        if(cs&&String(cs.sku)===String(m.sku)){cs.sku=null;cs.info=null;cs.locked=false;}
+        _placedCodes.delete(String(m.sku));
+        moves.splice(i,1);
+      }
+      for(let i=placed.length-1;i>=0;i--){ if(codeSet.has(String(placed[i]['商品編號'])))placed.splice(i,1); }
+      e.placed=false; e._deferred=true;
+    }
+
     // ★ 純溢出色(n<4,無主碼組)的 e.placed 不由 putGroup 設；若其所有碼皆已排入，補標 placed，
     //   否則多輪 AG 會誤判它「未排入」而重跑（已由 _placedCodes 擋掉重排，但會空轉並可能進 nonAG fallback）。
     colorEntries.forEach(e=>{ const all=[...(e.mainSkus||[]),...(e.size5Skus||[])]; if(all.length&&all.every(s=>_placedCodes.has(String(s.code||''))))e.placed=true; });
-    const placedKcs=new Set(colorEntries.filter(e=>e.placed).map(e=>e.kc));
-    return kuansToPlace.filter(ku=>!placedKcs.has(ku.kc));
+    // ★ 整款完成才視為排完（Gordon 2026-07-15 圖1案）：仍有色未排（含容量預選/回退的 _deferred 整色）→
+    //   款留在佇列流到下一走道（原本「有任一色排入就整款移除」會讓 C05 排 7 色後其餘 3 色永遠不到 C06）。
+    const pendingKcs=new Set(colorEntries.filter(e=>!e.placed).map(e=>e.kc));
+    return kuansToPlace.filter(ku=>pendingKcs.has(ku.kc));
   }
 
   // ── 主流程 ──
@@ -5376,16 +5452,19 @@ function plnRunNewEngine(config,initialCells){
 
   // AG 走道: 讓所有款式都嘗試 AG 引擎 (多輪直到無進展)
   if(agAisles.length>0){
-    const agSorted=[...agAisles].sort((a,b)=>countEmptyInAisle(b)-countEmptyInAisle(a));
+    // ★ 走道順序（Gordon 2026-07-15 圖1案）：空儲位「少」的目的走道先填（容量預選取整色），
+    //   剩餘整色自然流到空位多的走道 → C05(43格) 先吃同款前 7 色，其餘進 C06；
+    //   原本空位多者先跑，C06(471) 一口氣吃完、C05 空位整批被跳過。
+    const agSorted=[...agAisles].sort((a,b)=>countEmptyInAisle(a)-countEmptyInAisle(b));
     // 最多 3 輪, 每輪把仍失敗的款再跑一次 (利用上輪排完後釋放的空間)
     for(let round=0;round<3&&remainKuans.length>0;round++){
       const beforeCount=remainKuans.length;
       for(const agAisle of agSorted){
         if(!remainKuans.length)break;
-        const prevPlacedKcs=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
         const stillFailed=runAgEngine(agAisle,remainKuans);
         const failedKcSet=new Set(stillFailed.map(k=>k.kc));
-        remainKuans=remainKuans.filter(ku=>!prevPlacedKcs.has(ku.kc)&&failedKcSet.has(ku.kc));
+        // ★ 整款完成才移出佇列（runAgEngine 回傳=仍有色未排的款）；部分排入的款繼續流到下一走道
+        remainKuans=remainKuans.filter(ku=>failedKcSet.has(ku.kc));
         const seen=new Set();
         remainKuans=remainKuans.filter(ku=>{if(seen.has(ku.kc))return false;seen.add(ku.kc);return true;});
       }
@@ -5395,12 +5474,12 @@ function plnRunNewEngine(config,initialCells){
   }
 
   // ═══ Fallback: 非AG走道 (D/H 擺法配件類) — §1.3f 色原子單位排入 (Gordon 2026-07-11) ═══
-  const placedKcsFinal=new Set(placed.map(p=>String(p['商品編號']).substring(0,5)));
+  // ★ 2026-07-15：改「色」粒度收殘——部分排入的款（如 74476 前 7 色已進 C05）只收「尚未排入的色」，
+  //   不再整款跳過（原本會漏報整款、後續色也進不了 nonAG fallback／失敗回報）。
   let pendingUnits=[];
   for(const ku of remainKuans){
-    if(placedKcsFinal.has(ku.kc))continue;
     const cm={};
-    ku.skus.forEach(s=>{const c=String(s.code||'').substring(0,7);(cm[c]=cm[c]||[]).push(s);});
+    ku.skus.forEach(s=>{const code=String(s.code||'');if(_placedCodes.has(code))return;const c=code.substring(0,7);(cm[c]=cm[c]||[]).push(s);});
     Object.keys(cm).sort().forEach(c7=>pendingUnits.push({kc:ku.kc,color7:c7,cat:ku.cat,skus:cm[c7]}));
   }
   for(const a of nonAgAisles){
@@ -5425,7 +5504,7 @@ function plnRunNewEngine(config,initialCells){
   }
   // §1.3f-④/⑤/容量不足: 能排幾色排幾色, 排不進的「色」逐一失敗回報
   pendingUnits.forEach(u=>failed.push({kc:u.color7,n:u.skus.length,reason:'NEW_NO_FIT_COLOR',cat:u.cat}));
-  return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:skus.length};
+  return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:_queueTotal0};
 }
 
 
