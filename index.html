@@ -9601,7 +9601,7 @@ const RM_BAYGAP_CM=4;         // 架與架間隙
 const RM_BLOCKS=[
  {id:'AB',mirror:true, aisles:['B10','B09','B08','B07','B06','B05','B04','B03','B02','B01','A10','A09','A08','A07','A06','A05','A04','A03','A02'],back:false},
  {id:'CDE',mirror:false,aisles:['C11','C10','C09','C08','C07','C06','C05','C04','C03','C02','C01','D11','D10','D09','E10','E09','E08','E07','E06','E05','E04','E03','E02','E01'],back:true},
- {id:'F',mirror:false,aisles:['F02','F01'],back:false}
+ {id:'F',mirror:true,aisles:['F02','F01'],back:false}   // 2026-07-15：F 區改鏡向，號碼邏輯對照 AB 區（001 在右、往左遞增）
 ];
 const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B10','B09','B08','B07','B06','B05','B04','B03','B02','B01'],
  C:['C11','C10','C09','C08','C07','C06','C05','C04','C03','C02','C01'],D:['D11','D10','D09'],
@@ -9843,6 +9843,7 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
   var geom=rmFaceGeom(a,side,withGap);
   geom.items.forEach(function(it){
     var bay=it.b,i=it.i;
+    if(bay.t==='截短')return;                        // 2026-07-15（圖3）：斜向截短不再繪製虛線框，圖面留白
     var py2=py+(it.out?Math.round(stripH*0.65):0);   // 走道外凸出架：往走道側偏移呈現
     var lx=it.x+(bay.dx||0);
     var xcm=mirror?(blockW-(lx+it.w)):lx;
@@ -9896,16 +9897,21 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
     if(sel)g+='<rect x="'+(x-1).toFixed(1)+'" y="'+(py2-1)+'" width="'+(w+2).toFixed(1)+'" height="'+(stripH+2)+'" fill="none" stroke="#111" stroke-width="1.8"/>';
     parts.push(g+'</g>');
   });
-  // 末端「＋」（遠離走道端）
+  // 末端「＋」（遠離走道端）：緊貼最後一個「可見」項目（截短已不繪製 → ＋改對齊實際架尾的空白處，圖4）
   var pw=13;
-  var endcm=mirror?(blockW-geom.total-pw/S):geom.total;
+  var visEnd=rmVisEnd(geom);
+  var endcm=mirror?(blockW-visEnd-pw/S):visEnd;
   var ex=px+endcm*S;
   parts.push('<g class="rm-add" data-a="'+a+'" data-s="'+side+'" style="cursor:pointer"><rect x="'+ex.toFixed(1)+'" y="'+py+'" width="'+pw+'" height="'+stripH+'" rx="2" fill="#ffffff" stroke="#88a" stroke-dasharray="2,2"/><text x="'+(ex+pw/2).toFixed(1)+'" y="'+(py+stripH/2+3)+'" font-size="9" fill="#569" text-anchor="middle">＋</text><title>'+a+' '+side+'面 末端新增一架</title></g>');
   return geom;
 }
+function rmVisEnd(geom){ // 可見內容右緣（cm，排除不繪製的截短）
+  var e=0;geom.items.forEach(function(it){if(it.b.t!=='截短')e=Math.max(e,it.x+(it.b.dx||0)+it.w);});
+  return e;
+}
 function rmBlockW(aisles,withGap){
   var w=0;
-  aisles.forEach(function(a){['出','回'].forEach(function(sd){w=Math.max(w,rmFaceGeom(a,sd,withGap).total);});});
+  aisles.forEach(function(a){['出','回'].forEach(function(sd){w=Math.max(w,rmVisEnd(rmFaceGeom(a,sd,withGap)));});});
   return w+20;
 }
 function rmBandSVG(a,px,py,S,mirror,blockW,stripH,withGap,labelSide,parts){
@@ -9927,19 +9933,20 @@ function renderRackMap(){
   var vis=rmVisibleAisles();
   if(!vis){ // ═ 全區一覽：AB(左，鏡向) | 走道 | CDE(右) ；F 在 AB 下方
     var abW=rmBlockW(RM_BLOCKS[0].aisles,false),cdeW=rmBlockW(RM_BLOCKS[1].aisles,true),fW=rmBlockW(RM_BLOCKS[2].aisles,false);
+    var lbW=Math.max(abW,fW);   // 2026-07-15（圖1）：AB 與 F 共用左區塊寬、右緣切齊 → 走道標籤同一直線
     var stripH=12,margin=8,lblW=38,corrW=46;
     var designW=1800;
-    var S=(designW-2*margin-2*lblW-corrW)/(abW+cdeW);RM_S=S;
-    var abPx=margin, corrX=margin+abW*S+lblW, cdePx=corrX+corrW+lblW;
+    var S=(designW-2*margin-2*lblW-corrW)/(lbW+cdeW);RM_S=S;
+    var abPx=margin, corrX=margin+lbW*S+lblW, cdePx=corrX+corrW+lblW;
     W=designW;
     var y1=26,y2=26;
     parts.push('<text x="'+abPx+'" y="16" font-size="12" font-weight="bold" fill="#333">A・B 區</text>');
     parts.push('<text x="'+cdePx+'" y="16" font-size="12" font-weight="bold" fill="#333">C・D・E 區</text>');
-    RM_BLOCKS[0].aisles.forEach(function(a){y1+=rmBandSVG(a,abPx,y1,S,true,abW,stripH,false,'right',parts)+7;});
-    // F 區在 AB 下方
+    RM_BLOCKS[0].aisles.forEach(function(a){y1+=rmBandSVG(a,abPx,y1,S,true,lbW,stripH,false,'right',parts)+7;});
+    // F 區在 AB 下方（2026-07-15 圖1/圖2：改鏡向、與 AB 共用區塊寬 → 標籤對齊、001 在右往左遞增）
     y1+=14;
     parts.push('<text x="'+abPx+'" y="'+y1+'" font-size="12" font-weight="bold" fill="#333">F 區（位置示意）</text>');y1+=8;
-    RM_BLOCKS[2].aisles.forEach(function(a){y1+=rmBandSVG(a,abPx,y1,S,false,fW,stripH,false,'right',parts)+7;});
+    RM_BLOCKS[2].aisles.forEach(function(a){y1+=rmBandSVG(a,abPx,y1,S,true,lbW,stripH,false,'right',parts)+7;});
     RM_BLOCKS[1].aisles.forEach(function(a){y2+=rmBandSVG(a,cdePx,y2,S,false,cdeW,stripH,true,'left',parts)+7;});
     H=Math.max(y1,y2)+10;
     // 中央走道
