@@ -2779,9 +2779,9 @@ const PLN_SPEC = {
     {id:'3.5c', status:'pending', desc:'溢出碼高未到量→大材積C精修（待Gordon定）'},
     {id:'3.7',  status:'locked',  desc:'(v0.8 階段7落地)pending不影響順序；1~3碼色當溢出由全走道best-fit打包；GLOBAL OVERFLOW 已實作'},
     {id:'1.2b-resid', status:'locked', desc:'(v0.8 階段7落地)殘run起點層2→best-fit打包以連續層配對，P06/C05 pairLayerViolations=0；6碼對落層12/34'},
-    {id:'7-density', status:'locked', impl:'runAgEngine PHASE A density(唯一路徑)', desc:'(v0.8 階段7)最小架數逐架填滿：AA彈性配置(溢出先吃A、剩餘放整色降A)、純4碼孤立G、降A色XXL非相鄰；降A選色=色未到量最低'},
+    {id:'7-density', status:'locked', impl:'runAgEngine PHASE A density(唯一路徑)', desc:'(v0.8 階段7)最小架數逐架填滿：AA彈性配置、純4碼孤立G；降A選色=款總和/色未到量最低。(v1.4 2026-07-15 Gordon P06手排案)AG密度=空欄由前往後整欄用滿：demoteN以升冪模擬走欄自算(A欄:溢出≥4格先給溢出、否則降一色整欄用滿;G欄:主碼組)、降A由前往後填滿A欄(不再一架一色分散/不為溢出保留前段A)、溢出碼(XXL)集中尾端最近A欄疊放→剩餘空欄連續供下批新品續用'},
     {id:'1.5-cleanup', status:'locked', impl:'runAgEngine 密度路徑唯一化', desc:'(v0.9 階段8)清舊：移除 useRoundRobin 關閉分支(legacy 逐架 fill)、poolCol/hanging3/queueIdx 等舊機制；PHASE D 與主路徑一律切組定層(entry.groups)，不再呼叫 plnGetTargetLayer；plnGetTargetLayer/PLN_SIZE_TO_LAYER 收斂為高/低庫存引擎 + §1.2 useGroupSplit-off 安全網專用'},
-    {id:'1.4-proximity', status:'locked', impl:'runAgEngine PHASE A 統一 buildRacks + 以色就近溢出(密度) + physAdjConflict + 孤立G回收', desc:'(v1.3 階段13)新品 AG/CB XXL 溢出「密度+就近+分段非相鄰」：擺法統一架模型 buildRacks(AAGGGG/CBCCCC+短架)，ovfCols/mainCols；以「色」為組整組放(CB 架首C↔B 相鄰不可拆兩欄)，候選欄排序＝架距最近→能容整組者優先→密度(剩餘層少先填,湊滿不留半欄)→欄距；§1.3a 分段感知 physAdjConflict(跨架/跨儲位箱 col±1 允許)。★密度修正：沒有純4碼色認領的孤立G欄回收進主碼池(不再空整欄,如P06-122);溢出整組同欄(湊滿)。AG 仍降A分散。實測：C05(249色,空)最遠5;P06(真實占用)半滿欄27→3格;全情境物理相鄰違規 0'},
+    {id:'1.4-proximity', status:'locked', impl:'runAgEngine PHASE A 統一 buildRacks + 以色就近溢出(密度) + physAdjConflict + 孤立G回收', desc:'(v1.3 階段13)新品 AG/CB XXL 溢出「密度+就近+分段非相鄰」：擺法統一架模型 buildRacks(AAGGGG/CBCCCC+短架)，ovfCols/mainCols；以「色」為組整組放(CB 架首C↔B 相鄰不可拆兩欄)，候選欄排序＝架距最近→能容整組者優先→密度(剩餘層少先填,湊滿不留半欄)→欄距；§1.3a 分段感知 physAdjConflict(跨架/跨儲位箱 col±1 允許)。★密度修正：沒有純4碼色認領的孤立G欄回收進主碼池(不再空整欄,如P06-122);溢出整組同欄(湊滿)。AG 降A已改前綴填滿(見 7-density v1.4)。實測：C05(249色,空)最遠5;P06(真實占用)半滿欄27→3格;全情境物理相鄰違規 0'},
   ],
   // 落差清單：模式現行偏離規格之處 + 對齊方式（翻旗標 / 待重寫）。
   gaps: [
@@ -5098,11 +5098,17 @@ function plnRunNewEngine(config,initialCells){
         for(const c of isolatedCols.slice(isoIdx)){ if(colFullyFree(c)&&!mainColPool.includes(c))mainColPool.push(c); }
         mainColPool.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
 
-        // ── §3.4a 降 A 數量：最小架數自算 ──
+        // ── §3.4a 降 A 數量 ──
         //   remaining = 尚未排入(未進孤立欄)的主碼色；totalCells = 主碼格 + 溢出格。
-        //   minRacks = ceil(totalCells / 每架24格) = 最小架數；footprint 前 minRacks 架(每架6欄)
-        //   中的大材積欄數 = gCap。demoteN = 主碼組數 − gCap（超出 G 容量者需降 A）。
-        //   以「架(6欄)」為粒度計 gCap，幾何無關：AAGGGG(每架4G)、CBCCCC(每架5C) 皆正確。
+        //   ★ AG 走道（§7-density v1.4，Gordon 2026-07-15 P06 手排案）：密度＝空欄由前往後「整欄」用滿。
+        //     升冪模擬走欄：A 欄→溢出量夠填整欄(≥4格)時先給溢出（溢出本來就優先吃小材積，維持原意），
+        //     否則降一色主碼組把該 A 欄整欄用掉（降 A 選色仍依 §3.4a 款總和/色未到量最低）；
+        //     G 欄→主碼組。主碼組用罄後，剩餘溢出碼(XXL)自然集中到「尾端」最近的小材積欄
+        //     → 剩餘空儲位連續、供下批新品續用（例：P06 留 011/012 整欄＋013-4）。
+        //     （舊法 gCap 取 minRacks*6 窗內大欄數 → A 欄一律保留給溢出、主碼跳過 A 欄往後架 G 欄排，
+        //      造成 P06-001-4／002 整欄卡在前段的碎裂案例。）
+        //   CB 走道維持原式：B/架首C 專供溢出對（50/60碼），主碼 footprint 以最小架數計 gCap，
+        //     demoteN = 主碼組數 − gCap（超出 C 容量者才降）。
         const remaining=queue.filter(e=>!e.placed&&e.groups.length>0);
         const mainGroupsTotal=remaining.reduce((s,e)=>s+e.groups.length,0);
         const overflowCells=remaining.reduce((s,e)=>s+e.size5Skus.length,0);
@@ -5110,11 +5116,24 @@ function plnRunNewEngine(config,initialCells){
         const footprintCols=[...allCols]
           .filter(c=>colFullyFree(c)&&!isolatedSet.has(c)&&!firstCset.has(c))
           .sort((a,b)=>a-b);
-        const RACK_CELLS=RACK*4; // 6 欄 × 4 層
-        const minRacks=Math.max(1,Math.ceil(totalCells/RACK_CELLS));
-        const minFootprint=footprintCols.slice(0,minRacks*RACK);
-        const gCap=minFootprint.filter(c=>isBigLayout(getColLayout(aisle,c))).length;
-        const demoteN=Math.max(0,mainGroupsTotal-gCap);
+        let demoteN;
+        if(!isCBaisle){
+          let mainsLeft=mainGroupsTotal, ovfLeft=overflowCells; demoteN=0;
+          for(const c of footprintCols){
+            if(mainsLeft<=0&&ovfLeft<=0)break;
+            if(isSmallLayout(getColLayout(aisle,c))){
+              if(ovfLeft>=4)ovfLeft-=4;                    // 溢出夠填整欄 → 前段 A 欄照舊給溢出
+              else if(mainsLeft>0){demoteN++;mainsLeft--;} // 否則降一色整欄用滿
+              else ovfLeft=0;                              // 殘餘溢出吃此 A 欄（尾端）
+            } else if(mainsLeft>0)mainsLeft--;             // G 欄 → 主碼組（用罄後留空，保整欄）
+          }
+        } else {
+          const RACK_CELLS=RACK*4; // 6 欄 × 4 層
+          const minRacks=Math.max(1,Math.ceil(totalCells/RACK_CELLS));
+          const minFootprint=footprintCols.slice(0,minRacks*RACK);
+          const gCap=minFootprint.filter(c=>isBigLayout(getColLayout(aisle,c))).length;
+          demoteN=Math.max(0,mainGroupsTotal-gCap);
+        }
         if(demoteN>0){
           remaining.forEach(e=>{e.overflowLen=e.size5Skus.length;});
           const byPending=PLN_PRIM.demoteOrder(remaining);
@@ -5175,18 +5194,11 @@ function plnRunNewEngine(config,initialCells){
             return false;
           };
           if(!isCBaisle){
-            // AG 降A分散：一正常架放一降A色；降A取「鄰主碼(G)的A欄」，留非鄰A欄給溢出
-            const demoteByRack=new Map(); let di=0;
-            const normalRis=racks.map((rk,ri)=>({rk,ri})).filter(x=>x.rk.ovfCols.filter(c=>colFullyFree(c)).length>=2).map(x=>x.ri);
-            for(const ri of normalRis){ if(di>=demoteColors.length)break; demoteByRack.set(ri,demoteColors[di++]); }
-            for(let ri=0;ri<racks.length&&di<demoteColors.length;ri++){ if(demoteByRack.has(ri))continue; if(racks[ri].ovfCols.some(c=>colFullyFree(c)))demoteByRack.set(ri,demoteColors[di++]); }
-            racks.forEach((rk,ri)=>{
-              const aFree=rk.ovfCols.filter(c=>colFullyFree(c)).sort((a,b)=>a-b);
-              const demote=demoteByRack.get(ri); if(!demote)return;
-              let demoteCol=aFree.find(c=>rk.mainCols.some(g=>physAdjacent(c,g))); if(demoteCol==null)demoteCol=aFree[aFree.length-1];
-              for(let k=0;k<demote.groups.length;k++){ const col=k===0?demoteCol:nextCol(smallColPool,demote.color7,demote.colorName); if(col==null)break; putGroup(demote,demote.groups[k],col); }
-              rk._demoteEntry=demote;
-            });
+            // ★ §7-density v1.4（Gordon 2026-07-15）：AG 降A改「由前往後填滿」——
+            //   降A色依 smallColPool 升冪逐欄放（nextCol 同款色/同顏色名稱 soft 避鄰照舊），
+            //   與主碼 G 欄共同把空欄前綴用滿；不再「一架一降A色」分散、也不再為溢出保留前段 A 欄
+            //   （溢出碼集中到前綴後的 A 欄 → 剩餘空欄連續）。
+            for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const col=nextCol(smallColPool,e.color7,e.colorName); if(col==null)break; putGroup(e,e.groups[k],col); } }
           } else {
             // CB 降A（罕見，CCCC 容量通常足）：smallColPool
             for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const sc=nextCol(smallColPool,e.color7,e.colorName); if(sc==null)break; putGroup(e,e.groups[k],sc); } }
@@ -5211,8 +5223,12 @@ function plnRunNewEngine(config,initialCells){
             let remain=g.items.slice(); const mr=rackOf(g.mc);
             while(remain.length){
               // ★ 需求7: 同顏色名稱衝突欄排最後 (soft — 僅剩衝突欄時仍可用, 彈性放行)
+              // ★ §7-density v1.4（Gordon 2026-07-15）：AG 溢出候選「小材積(A)優先」於架距——
+              //   XXL 集中 A 欄疊放，不吃短架/孤立 G 欄（整欄 G 留給下批主碼組，剩餘空欄連續）。
+              //   CB 走道不套用（架首C/B 對位規則照舊）。
               const cands=[...allOvf,...shortBackup].filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7))
                 .sort((a,b)=> ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
+                  || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
                   || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
                   || ((emptyLayers(b).length>=remain.length?1:0)-(emptyLayers(a).length>=remain.length?1:0))
                   || (emptyLayers(a).length-emptyLayers(b).length)
