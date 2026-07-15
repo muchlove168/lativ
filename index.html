@@ -6477,12 +6477,22 @@ function renderArrangeCompare(){
     // 未匹配清單
     unmatchedBody.innerHTML='';
     if(!unmatched.length){
-      unmatchedBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--green)">✓ 全部商品都已比對到 26FW 新品</td></tr>';
+      unmatchedBody.innerHTML='<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--green)">✓ 全部商品都已比對到 26FW 新品</td></tr>';
     }else{
+      // 2026-07-15：款號(前5碼) → ERP 報表中同款(不同色/不同碼)所在走道集合
+      const styleAisles={};
+      (typeof DB!=='undefined'&&DB||[]).forEach(dr=>{
+        const st=String(dr.商品編號||'').substring(0,5);if(!st)return;
+        const aisle=String(dr.儲位||'').split('-')[0].trim();if(!aisle)return;
+        if(!styleAisles[st])styleAisles[st]=new Set();
+        styleAisles[st].add(aisle);
+      });
       unmatched.forEach(r=>{
         const tr=document.createElement('tr');
         tr.style.borderBottom='1px solid var(--border)';
-        tr.innerHTML=`<td style="padding:4px 8px;font-family:monospace;color:var(--text2)">${r.code}</td><td style="padding:4px 8px">${r.name}</td><td style="padding:4px 8px;text-align:left">${r.size}</td>`;
+        const st=String(r.code||'').substring(0,5);
+        const aisles=styleAisles[st]?Array.from(styleAisles[st]).sort().join(','):'-';
+        tr.innerHTML=`<td style="padding:4px 8px;font-family:monospace;color:var(--text2)">${r.code}</td><td style="padding:4px 8px">${r.name}</td><td style="padding:4px 8px;text-align:left">${r.size}</td><td style="padding:4px 8px;text-align:left">${r.packaging||'-'}</td><td style="padding:4px 8px;text-align:left;font-family:monospace" title="款號 ${st} 於 ERP 報表中的走道">${aisles}</td>`;
         unmatchedBody.appendChild(tr);
       });
     }
@@ -9398,8 +9408,10 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品編號</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">尺寸</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品包材</th>
+            <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left" title="以款號(前5碼)比對 ERP 報表，同款不同色/不同碼所在的走道">同款走道</th>
           </tr></thead>
-          <tbody id="arrange-unmatched-body"><tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">—</td></tr></tbody>
+          <tbody id="arrange-unmatched-body"><tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text3)">—</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -9615,7 +9627,7 @@ let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSup
 const RM_UNIT_CM_OVR={};   // 每號碼實體寬(cm)特例（2026-07-14 取消 A02/E08/E09=35：H架一架六格、架長仍175 → 每格=175/6≈29.17，與AB前段格線同步）
 const RM_LPOS={'C11回':177};                    // C11回 178-182 凸出走道外，177 對應對面 001                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
 const RM_FACE_UNIT_OVR={'E09回':35,'C08出':35,'C08回':35,'C10出':35,'C11出':35};   // 2026-07-14 面別格寬特例：E09回為D架(5格/175cm)，格寬連續排列不留空格｜2026-07-15：C08兩面、C10出、C11出同為5格/架 → 比照E09回按比例填滿、缺號不留白
-const RM_CALIB_VER='v6_0714';
+const RM_CALIB_VER='v7_0715';
 function rmDSlots(lo){var a=[];for(var q=lo;q<lo+4;q++)a.push({q:q,lay:['D','D','D','D']});return a;} // 4格D材積儲位產生器（v5 E07出重繪用）
 // ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
 // ax=柱/截短「右緣」錨定位置（自走道口起算的號碼格數，實測換算）；未給 ax 者依自身號碼範圍推得。
@@ -9669,6 +9681,15 @@ const RM_CALIB=[
  {a:'E07',s:'出',m:{t:'截短',r:'101-110'},set:{r:'094-110',br:'031-047'}},
  // ── 2026-07-14 v6（圖6）E07出 柱072-073實寬3格（多一格），074-093儲架整段順移一格 ──
  {a:'E07',s:'出',m:{t:'柱',r:'072-073'},set:{pw:3,nt:'後段重繪(2026-07-14)｜柱實寬3格，074起儲架順移一格'}},
+ // ── 2026-07-15 v7 ──
+ // F01/F02回 095-097 實為走道（非柱），僅改顯示文字
+ {a:'F01',s:'回',m:{t:'柱',r:'095-097'},set:{pt:'走道',nt:'走道(2026-07-15)'}},
+ {a:'F02',s:'回',m:{t:'柱',r:'095-097'},set:{pt:'走道',nt:'走道(2026-07-15)'}},
+ // E01出 重排（圖3）：037-042 後新增柱（對面096-099）→ 043-045 鐵力士小架內嵌後走道帶（寬=帶寬）
+ // → 046-051 → 柱052-058 實寬8格（對面082-089）→ 059/060-065/066 依序貼齊
+ {a:'E01',s:'出',m:{t:'架',r:'037-042'},insAfter:{t:'柱',r:'',pw:3,nt:'牆側柱(單面)｜實測(回面096-099)'}},
+ {a:'E01',s:'出',m:{t:'架',r:'043-045'},set:{gw:1,nt:'鐵力士小架(實體位於後走道帶內，寬=後走道寬)'}},
+ {a:'E01',s:'出',m:{t:'柱',r:'052-058'},set:{pw:8,nt:'牆側柱(單面)｜實測(回面082-089，寬8格)'}},
 ];
 function rmLpos(a,side){var k=RM_LPOS[a+side];return k!=null?k:rmAisleL(a);}
 function rmUnitCM(a){return RM_UNIT_CM_OVR[a]||175/rmUnitN(a);}
@@ -9811,7 +9832,7 @@ function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬�
         }
         else {x1=x0+span*RM_STD_SLOT;}
       }else{
-        x1=(b.sq&&ge!=null&&ge>x0+2)?ge:(x0+span*(fovr||unit));   // sq=擠壓至格線終點（小材積短架）；fovr=面別覆寫格寬
+        x1=b.gw?(x0+RM_GAP_CM):((b.sq&&ge!=null&&ge>x0+2)?ge:(x0+span*(fovr||unit)));   // gw=架寬固定為後走道帶寬(2026-07-15 E01出043-045)；sq=擠壓至格線終點（小材積短架）；fovr=面別覆寫格寬
       }
     }
     var sh=(gapDone&&!gapW&&(gs!=null?gs:x0)>=gapCM-0.5)?RM_GAP_CM:0;  // 後走道位移
@@ -9825,8 +9846,9 @@ function rmFaceGeom(a,side,withGap){ // 格線定位(v4)：每格=固定格寬�
     var itj=items[j];
     if(itj.b.t!=='柱'||itj.ov||itj.b.pw)continue;
     var prevIt=null,nextIt=null,k;
-    for(k=j-1;k>=0;k--){if(!items[k].ov&&!items[k].out){prevIt=items[k];break;}}
-    for(k=j+1;k<items.length;k++){if(!items[k].ov&&!items[k].out){nextIt=items[k];break;}}
+    // 2026-07-15：截短已不繪製 → 柱填滿以「可見」鄰居為準（如 C11回 柱125-127 貼齊架131-135）
+    for(k=j-1;k>=0;k--){if(!items[k].ov&&!items[k].out&&items[k].b.t!=='截短'){prevIt=items[k];break;}}
+    for(k=j+1;k<items.length;k++){if(!items[k].ov&&!items[k].out&&items[k].b.t!=='截短'){nextIt=items[k];break;}}
     var L0=itj.x,R0=itj.x+itj.w;
     if(prevIt){var pe=prevIt.x+prevIt.w;
       if(withGap&&L0>=band1-0.5&&pe<=band0+0.5)pe=band1;
