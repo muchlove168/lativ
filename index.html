@@ -966,6 +966,7 @@ async function handleUpload(event){
         銷售庫存:+r['銷售庫存']||0,倉庫庫存:+r['倉庫庫存']||0,
         架上數量:+r['架上數量']||0,倉位總數量:+r['倉位總數量']||0,
         商品材積:+r['商品材積']||0,儲位材積:+r['儲位材積']||0,
+        貨到通知:r['貨到通知']!==undefined?r['貨到通知']:'',   // 2026-07-15：保留原始 ERP 欄位，供「下載該日報表」完整還原
         狀態:r['狀態']||'',季別:getSeasonFromCode(code)
       };
     });
@@ -8826,7 +8827,8 @@ function histSave(dateKey,srcTime){
 const HIST_EPR_PREFIX='hist_epr_';
 const HIST_EPR_MAX_DAYS=40;   // 完整報表保留 40 天（摘要仍 90 天）；避免月底整包匯出檔過大
 const HIST_EPR_INDEX_KEY='lativ_hist_epr_dates';
-const HIST_EPR_COLS=['商品系列','商品編號','商品名稱','顏色','尺寸','儲位','倉位','包材','總採購量','總進貨量','未到量','未抓貨','可賣數量','保留數量','銷售庫存','倉庫庫存','架上數量','倉位總數量','商品材積','儲位材積','狀態'];
+// 2026-07-15：欄位順序改為與原始 ERP 報表完全一致（含 貨到通知），下載該日報表可直接對照原始格式
+const HIST_EPR_COLS=['商品系列','商品編號','商品名稱','顏色','尺寸','儲位','倉位','總採購量','總進貨量','未到量','未抓貨','可賣數量','保留數量','銷售庫存','倉庫庫存','架上數量','倉位總數量','商品材積','儲位材積','包材','貨到通知','狀態'];
 
 function histEprDates(){try{const a=JSON.parse(localStorage.getItem(HIST_EPR_INDEX_KEY)||'[]');return Array.isArray(a)?a.sort().reverse():[];}catch(e){return[];}}
 function histEprSetDates(arr){try{localStorage.setItem(HIST_EPR_INDEX_KEY,JSON.stringify(arr));}catch(e){}}
@@ -8856,7 +8858,10 @@ async function histDownloadEPR(dateKey){
   try{
     const data=await idbGet(HIST_EPR_PREFIX+dateKey);
     if(!data||!data.rows||!data.rows.length){hideLoading();alert('系統內沒有 '+dateKey+' 的完整 ERP 報表\n（此功能上線後匯入的報表才有完整存檔）');return;}
-    const aoa=[data.cols,...data.rows];
+    // 2026-07-15：無論存檔時的欄位順序為何，一律重排成原始 ERP 報表欄位順序輸出（舊存檔缺少的欄位輸出空白）
+    const _ix={};(data.cols||[]).forEach((c,i)=>{_ix[c]=i;});
+    const _rows=data.rows.map(a=>HIST_EPR_COLS.map(c=>_ix[c]!==undefined?a[_ix[c]]:''));
+    const aoa=[HIST_EPR_COLS.slice(),..._rows];
     const ws=XLSX.utils.aoa_to_sheet(aoa);
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,ws,'庫存查詢總表');
@@ -9609,7 +9614,7 @@ const RM_ZONES={A:['A10','A09','A08','A07','A06','A05','A04','A03','A02'],B:['B1
 let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSuppressClick=false,RM_ADD=null;
 const RM_UNIT_CM_OVR={};   // 每號碼實體寬(cm)特例（2026-07-14 取消 A02/E08/E09=35：H架一架六格、架長仍175 → 每格=175/6≈29.17，與AB前段格線同步）
 const RM_LPOS={'C11回':177};                    // C11回 178-182 凸出走道外，177 對應對面 001                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
-const RM_FACE_UNIT_OVR={'E09回':35};            // 2026-07-14 面別格寬特例：E09回為D架(5格/175cm)，格寬與E10一致且連續排列（缺號215/209…不留空格；出面H架仍用175/6格線）
+const RM_FACE_UNIT_OVR={'E09回':35,'C08出':35,'C08回':35,'C10出':35,'C11出':35};   // 2026-07-14 面別格寬特例：E09回為D架(5格/175cm)，格寬連續排列不留空格｜2026-07-15：C08兩面、C10出、C11出同為5格/架 → 比照E09回按比例填滿、缺號不留白
 const RM_CALIB_VER='v6_0714';
 function rmDSlots(lo){var a=[];for(var q=lo;q<lo+4;q++)a.push({q:q,lay:['D','D','D','D']});return a;} // 4格D材積儲位產生器（v5 E07出重繪用）
 // ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
@@ -10314,9 +10319,10 @@ function rmRenderCompare(){
     if(Math.abs(real-c.vol)<=0.005){eq++;return;}
     var dir=real>c.vol?'變大':'變小';
     if(dir==='變大')bigger++;else smaller++;
-    anomalies.push({slot:id,sku:String(r['商品編號']||'').trim(),code:c.code,cfg:c.vol,real:real,rc:rmClosestCode(real),dir:dir});
+    anomalies.push({slot:id,sku:String(r['商品編號']||'').trim(),name:String(r['商品名稱']||''),code:c.code,cfg:c.vol,real:real,rc:rmClosestCode(real),dir:dir});
   });
-  anomalies.sort(function(u,v){if(u.dir!==v.dir)return u.dir==='變大'?-1:1;return Math.abs(v.real-v.cfg)-Math.abs(u.real-u.cfg);});
+  // 2026-07-15：襯衫類商品易滑落 → 儲位材積刻意由 G 改 P，屬預期異常 → 自動勾選「異常確認」
+  anomalies.forEach(function(x){if(RM_CMP_CHK[x.slot]===undefined)RM_CMP_CHK[x.slot]=x.name.indexOf('襯衫')>=0;});
   RM_CMP_ANOM=anomalies;
   var stat='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'+
     '<span>已比對儲位：<b>'+cmp+'</b></span>'+
@@ -10324,25 +10330,76 @@ function rmRenderCompare(){
     '<span style="color:#c0392b">不一致：<b>'+anomalies.length+'</b></span>'+
     '<span style="color:#c0392b">↑ 真實變大（需調整）：<b>'+bigger+'</b></span>'+
     '<span style="color:#a67c00">↓ 真實變小（可能刻意調降）：<b>'+smaller+'</b></span></div>';
-  var tbl;
   if(anomalies.length){
-    tbl='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555"><th style="padding:4px 6px;text-align:left">儲位</th><th style="padding:4px 6px;text-align:left">商品編號</th><th style="padding:4px 6px">儲架設定碼</th><th style="padding:4px 6px">設定材積</th><th style="padding:4px 6px">真實材積</th><th style="padding:4px 6px">最接近碼</th><th style="padding:4px 6px">方向</th></tr></thead><tbody>';
-    anomalies.forEach(function(x){
-      var col=x.dir==='變大'?'#c0392b':'#a67c00';
-      tbl+='<tr style="border-top:1px solid #eee"><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.slot)+'</td><td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.sku||'—')+'</td><td style="padding:3px 6px;text-align:center">'+x.code+'</td><td style="padding:3px 6px;text-align:right">'+x.cfg+'</td><td style="padding:3px 6px;text-align:right;font-weight:600">'+x.real+'</td><td style="padding:3px 6px;text-align:center">'+x.rc+'</td><td style="padding:3px 6px;text-align:center;color:'+col+';font-weight:600">'+(x.dir==='變大'?'↑ 變大':'↓ 變小')+'</td></tr>';
-    });
-    tbl+='</tbody></table></div>';
+    box.innerHTML=head+stat+'<div id="rm-cmp-tbl"></div>';
+    rmCmpDrawTable();
   }else{
-    tbl='<div style="color:#2c6e49;font-size:12.5px;padding:6px">✓ 所有已比對儲位的材積皆與儲架設定相符，無異常。</div>';
+    box.innerHTML=head+stat+'<div style="color:#2c6e49;font-size:12.5px;padding:6px">✓ 所有已比對儲位的材積皆與儲架設定相符，無異常。</div>';
   }
-  box.innerHTML=head+stat+tbl;
 }
 var RM_CMP_ANOM=[];
+var RM_CMP_CHK={};        // 異常確認勾選狀態（slot → true/false；襯衫類初次載入自動 true）
+var RM_CMP_SORT=1;        // 儲位排序方向：1=遞增、-1=遞減
+var RM_CMP_ORDER=[];      // 目前表格顯示順序（slot 清單，供 shift 區間勾選）
+var RM_CMP_LAST=null;     // 最後點擊的 slot（shift 區間錨點）
+// 2026-07-15 改版：欄序=商品編號→儲位(可排序)→原始儲位材積(碼/材積)→實際材積(碼/材積)→異常確認
+// 依儲位排序、已勾選（刻意異常）沉底；checkbox 支援 shift+點擊區間勾選
+function rmCmpSorted(){
+  return RM_CMP_ANOM.slice().sort(function(u,v){
+    var cu=RM_CMP_CHK[u.slot]?1:0,cv=RM_CMP_CHK[v.slot]?1:0;
+    if(cu!==cv)return cu-cv;                                   // 已確認的沉到最下面
+    return (u.slot<v.slot?-1:u.slot>v.slot?1:0)*RM_CMP_SORT;   // 依儲位排序
+  });
+}
+function rmCmpDrawTable(){
+  var el=document.getElementById('rm-cmp-tbl');if(!el)return;
+  var arr=rmCmpSorted();
+  RM_CMP_ORDER=arr.map(function(x){return x.slot;});
+  var nChk=arr.filter(function(x){return RM_CMP_CHK[x.slot];}).length;
+  var t='<div style="font-size:11.5px;color:#888;margin:2px 0 4px">已確認（刻意為之）：<b>'+nChk+'</b> / '+arr.length+'　<span style="color:#aaa">提示：可按住 Shift 點擊勾選一段區間</span></div>';
+  t+='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555">'+
+    '<th style="padding:4px 6px;text-align:left">商品編號</th>'+
+    '<th style="padding:4px 6px;text-align:left;cursor:pointer;user-select:none" onclick="rmCmpSortToggle()" title="點擊切換儲位排序方向">儲位 '+(RM_CMP_SORT===1?'▲':'▼')+'</th>'+
+    '<th style="padding:4px 6px">原始儲位材積</th>'+
+    '<th style="padding:4px 6px">實際材積</th>'+
+    '<th style="padding:4px 6px">異常確認</th></tr></thead><tbody>';
+  arr.forEach(function(x,i){
+    var chk=!!RM_CMP_CHK[x.slot];
+    var col=x.dir==='變大'?'#c0392b':'#a67c00';
+    var rowSt=chk?'border-top:1px solid #eee;background:#f6f6f6;color:#999':'border-top:1px solid #eee';
+    t+='<tr style="'+rowSt+'">'+
+      '<td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.sku||'—')+'</td>'+
+      '<td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.slot)+'</td>'+
+      '<td style="padding:3px 6px;text-align:center">'+rmEsc(x.code)+' / '+x.cfg+'</td>'+
+      '<td style="padding:3px 6px;text-align:center;font-weight:600;'+(chk?'':'color:'+col)+'">'+rmEsc(x.rc)+' / '+x.real+'</td>'+
+      '<td style="padding:3px 6px;text-align:center"><input type="checkbox" data-i="'+i+'" onclick="rmCmpChk(event,this)"'+(chk?' checked':'')+' style="cursor:pointer"></td></tr>';
+  });
+  t+='</tbody></table></div>';
+  el.innerHTML=t;
+}
+function rmCmpSortToggle(){RM_CMP_SORT=-RM_CMP_SORT;rmCmpDrawTable();}
+function rmCmpChk(e,el){
+  var i=parseInt(el.getAttribute('data-i'),10),st=el.checked;
+  var slot=RM_CMP_ORDER[i];
+  if(e.shiftKey&&RM_CMP_LAST!=null){
+    // shift+點擊：整段一起勾/取消。區間以「儲位排序」為準（勾選沉底不影響區間判定），
+    // 對應「一整段連續儲位需要勾選」的情境
+    var base=RM_CMP_ANOM.map(function(x){return x.slot;}).sort();
+    var p=base.indexOf(RM_CMP_LAST),q=base.indexOf(slot);
+    if(p<0)p=q;
+    var a=Math.min(p,q),b=Math.max(p,q);
+    for(var k=a;k<=b;k++)RM_CMP_CHK[base[k]]=st;
+  }else{
+    RM_CMP_CHK[slot]=st;
+  }
+  RM_CMP_LAST=slot;
+  rmCmpDrawTable();
+}
 function rmExportCompare(){
   if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
   if(!RM_CMP_ANOM||!RM_CMP_ANOM.length){alert('目前無異常可匯出');return;}
-  var rows=[['儲位','商品編號','儲架設定碼','設定材積','真實材積','最接近碼','方向']];
-  RM_CMP_ANOM.forEach(function(x){rows.push([x.slot,x.sku||'',x.code,x.cfg,x.real,x.rc,x.dir]);});
+  var rows=[['商品編號','儲位','原始儲位材積','實際材積','異常確認']];
+  rmCmpSorted().forEach(function(x){rows.push([x.sku||'',x.slot,x.code+' / '+x.cfg,x.rc+' / '+x.real,RM_CMP_CHK[x.slot]?'✔':'']);});
   var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'材積比對異常');
   XLSX.writeFile(wb,'儲架材積比對_異常清單.xlsx');
