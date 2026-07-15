@@ -5143,6 +5143,18 @@ function plnRunNewEngine(config,initialCells){
             putGroup(e,e.groups[k],col);
           }
         }
+        // ★ §3.7-①（2026-07-15 Gordon D10 實測案）：1~3碼色（無完整4碼主碼組、整色原歸溢出）→
+        //   主碼組放完後，優先嘗試「部分主碼組」：取一個全空主碼欄，碼依尺碼升冪放層1..k、上層留殘格
+        //   （例：D10 新品 3 碼色應入整欄空的 D10-165 層1-3，而非整色被溢出打包拆散塞 056-3/4、079-4 殘格）。
+        //   無全空主碼欄可用時不動作 → 整色維持原溢出 best-fit 打包路徑（吃殘格），與舊行為一致。
+        {
+          const partials=PLN_PRIM.queueOrder(colorEntries.filter(e=>!e.placed&&!e.mainSkus.length&&e.size5Skus.length>=1&&e.size5Skus.length<=3));
+          for(const e of partials){
+            const col=nextCol(mainColPool,e.color7,e.colorName);
+            if(col==null)break;
+            putGroup(e,e.size5Skus.map((s,i)=>({sku:s,layer:i+1})),col);
+          }
+        }
         // ═══ 統一就近溢出（AG/AAGGGG 與 CB/CBCCCC 皆走此路；§1.3a 分段感知非相鄰）═══
         //   ① 主碼已放（AG→G、CB→CCCC，避開架首C；見上）。降A：AG 分散到相鄰架A欄；CB 罕見→smallColPool。
         //   ② 溢出就近：逐架帶 carry——本架溢出先填本架 ovfCols(AG的AA / CB的架首C+B)，
