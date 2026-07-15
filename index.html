@@ -5144,15 +5144,21 @@ function plnRunNewEngine(config,initialCells){
           }
         }
         // ★ §3.7-①（2026-07-15 Gordon D10 實測案）：1~3碼色（無完整4碼主碼組、整色原歸溢出）→
-        //   主碼組放完後，優先嘗試「部分主碼組」：取一個全空主碼欄，碼依尺碼升冪放層1..k、上層留殘格
-        //   （例：D10 新品 3 碼色應入整欄空的 D10-165 層1-3，而非整色被溢出打包拆散塞 056-3/4、079-4 殘格）。
+        //   主碼組放完後，優先嘗試「部分主碼組」：取一個全空主碼欄（例：D10-165），
+        //   而非整色被溢出打包拆散塞 056-3/4、079-4 殘格。
+        //   ★ 層位（Gordon 同日裁示）：此類色多為「非全尺碼進倉」（先前進倉賣完＋儲位釋放後補進），
+        //     故層位依「尺碼對應層」(§1.2 安全網映射：10→1、20→2、30→3、40→4…)，缺碼層留殘格
+        //     （例：1.3.4 碼 → 層1/3/4、層2留空）；映射無效或撞層時退回位置→層(1..k)。
         //   無全空主碼欄可用時不動作 → 整色維持原溢出 best-fit 打包路徑（吃殘格），與舊行為一致。
         {
           const partials=PLN_PRIM.queueOrder(colorEntries.filter(e=>!e.placed&&!e.mainSkus.length&&e.size5Skus.length>=1&&e.size5Skus.length<=3));
           for(const e of partials){
             const col=nextCol(mainColPool,e.color7,e.colorName);
             if(col==null)break;
-            putGroup(e,e.size5Skus.map((s,i)=>({sku:s,layer:i+1})),col);
+            let grp=e.size5Skus.map(s=>({sku:s,layer:plnGetTargetLayer(s.code,s.size)}));
+            const Ls=grp.map(g=>g.layer);
+            if(Ls.some(l=>l==null||l<1||l>4)||new Set(Ls).size!==Ls.length)grp=e.size5Skus.map((s,i)=>({sku:s,layer:i+1}));
+            putGroup(e,grp,col);
           }
         }
         // ═══ 統一就近溢出（AG/AAGGGG 與 CB/CBCCCC 皆走此路；§1.3a 分段感知非相鄰）═══
@@ -9639,7 +9645,7 @@ let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSup
 const RM_UNIT_CM_OVR={};   // 每號碼實體寬(cm)特例（2026-07-14 取消 A02/E08/E09=35：H架一架六格、架長仍175 → 每格=175/6≈29.17，與AB前段格線同步）
 const RM_LPOS={'C11回':177};                    // C11回 178-182 凸出走道外，177 對應對面 001                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
 const RM_FACE_UNIT_OVR={'E09回':35,'C08出':35,'C08回':35,'C10出':35,'C11出':35};   // 2026-07-14 面別格寬特例：E09回為D架(5格/175cm)，格寬連續排列不留空格｜2026-07-15：C08兩面、C10出、C11出同為5格/架 → 比照E09回按比例填滿、缺號不留白
-const RM_CALIB_VER='v7_0715';
+const RM_CALIB_VER='v8_0715';
 function rmDSlots(lo){var a=[];for(var q=lo;q<lo+4;q++)a.push({q:q,lay:['D','D','D','D']});return a;} // 4格D材積儲位產生器（v5 E07出重繪用）
 // ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
 // ax=柱/截短「右緣」錨定位置（自走道口起算的號碼格數，實測換算）；未給 ax 者依自身號碼範圍推得。
@@ -9702,6 +9708,9 @@ const RM_CALIB=[
  {a:'E01',s:'出',m:{t:'架',r:'037-042'},insAfter:{t:'柱',r:'',pw:3,nt:'牆側柱(單面)｜實測(回面096-099)'}},
  {a:'E01',s:'出',m:{t:'架',r:'043-045'},set:{gw:1,nt:'鐵力士小架(實體位於後走道帶內，寬=後走道寬)'}},
  {a:'E01',s:'出',m:{t:'柱',r:'052-058'},set:{pw:8,nt:'牆側柱(單面)｜實測(回面082-089，寬8格)'}},
+ // ── 2026-07-15 v8 ── C11回 柱直接涵蓋 128-130 缺號段（對面 C11出 050-053 四格皆柱），並清除拖曳位移
+ {a:'C11',s:'回',m:{t:'截短',r:'128-130'},remove:1},
+ {a:'C11',s:'回',m:{t:'柱',r:'125-127'},set:{r:'125-130',ax:54,nt:'牆側柱(單面)｜對應對面050-053(右緣對齊出面053末端)'},del:['dx']},
 ];
 function rmLpos(a,side){var k=RM_LPOS[a+side];return k!=null?k:rmAisleL(a);}
 function rmUnitCM(a){return RM_UNIT_CM_OVR[a]||175/rmUnitN(a);}
@@ -10343,6 +10352,8 @@ function rmRenderCompare(){
   var head='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><span style="font-weight:700;font-size:14px;color:var(--accent,#6B4F35)">儲架材積 vs 真實儲位材積 比對</span>'+
     '<button onclick="rmRenderCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">重新比對</button>'+
     '<button onclick="rmExportCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">匯出異常</button>'+
+    '<button onclick="document.getElementById(\'rm-cmp-import\').click()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">匯入異常清單</button>'+
+    '<input type="file" id="rm-cmp-import" accept=".xlsx,.xls" style="display:none" onchange="rmImportCompare(event)">'+
     '<button onclick="rmResetLayout()" style="font-size:12px;cursor:pointer;border:1px solid #c0392b;color:#c0392b;border-radius:5px;padding:3px 10px;background:#fff">重置平面圖</button></div>';
   if(!db.length){box.innerHTML=head+'<div style="color:#888;font-size:12.5px;padding:6px">尚未載入 EPR 主報表，無法取得真實儲位材積。請先於「儲區總覽」上傳 EPR 主報表。</div>';RM_CMP_ANOM=[];return;}
   var anomalies=[],cmp=0,eq=0,bigger=0,smaller=0,seen={};
@@ -10361,9 +10372,7 @@ function rmRenderCompare(){
   var stat='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'+
     '<span>已比對儲位：<b>'+cmp+'</b></span>'+
     '<span style="color:#2c6e49">相符：<b>'+eq+'</b></span>'+
-    '<span style="color:#c0392b">不一致：<b>'+anomalies.length+'</b></span>'+
-    '<span style="color:#c0392b">↑ 真實變大（需調整）：<b>'+bigger+'</b></span>'+
-    '<span style="color:#a67c00">↓ 真實變小（可能刻意調降）：<b>'+smaller+'</b></span></div>';
+    '<span style="color:#c0392b">不一致：<b>'+anomalies.length+'</b></span></div>';
   if(anomalies.length){
     box.innerHTML=head+stat+'<div id="rm-cmp-tbl"></div>';
     rmCmpDrawTable();
@@ -10389,9 +10398,7 @@ function rmCmpDrawTable(){
   var el=document.getElementById('rm-cmp-tbl');if(!el)return;
   var arr=rmCmpSorted();
   RM_CMP_ORDER=arr.map(function(x){return x.slot;});
-  var nChk=arr.filter(function(x){return RM_CMP_CHK[x.slot];}).length;
-  var t='<div style="font-size:11.5px;color:#888;margin:2px 0 4px">已確認（刻意為之）：<b>'+nChk+'</b> / '+arr.length+'　<span style="color:#aaa">提示：可按住 Shift 點擊勾選一段區間</span></div>';
-  t+='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555">'+
+  var t='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555">'+
     '<th style="padding:4px 6px;text-align:left">商品編號</th>'+
     '<th style="padding:4px 6px;text-align:left;cursor:pointer;user-select:none" onclick="rmCmpSortToggle()" title="點擊切換儲位排序方向">儲位 '+(RM_CMP_SORT===1?'▲':'▼')+'</th>'+
     '<th style="padding:4px 6px">原始儲位材積</th>'+
@@ -10433,10 +10440,34 @@ function rmExportCompare(){
   if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
   if(!RM_CMP_ANOM||!RM_CMP_ANOM.length){alert('目前無異常可匯出');return;}
   var rows=[['商品編號','儲位','原始儲位材積','實際材積','異常確認']];
-  rmCmpSorted().forEach(function(x){rows.push([x.sku||'',x.slot,x.code+' / '+x.cfg,x.rc+' / '+x.real,RM_CMP_CHK[x.slot]?'✔':'']);});
+  rmCmpSorted().forEach(function(x){rows.push([x.sku||'',x.slot,x.code+' / '+x.cfg,x.rc+' / '+x.real,RM_CMP_CHK[x.slot]?'V':'']);});
   var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'材積比對異常');
   XLSX.writeFile(wb,'儲架材積比對_異常清單.xlsx');
+}
+// 2026-07-15：匯入異常清單 — 讀「儲位＋異常確認(V)」欄，同步更新表格 checkbox 勾選狀態
+async function rmImportCompare(event){
+  var file=event.target.files&&event.target.files[0];
+  event.target.value='';
+  if(!file)return;
+  if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
+  try{
+    var buf=await file.arrayBuffer();
+    var wb=XLSX.read(buf,{type:'array'});
+    var raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    if(!raw.length||raw[0]['儲位']===undefined||raw[0]['異常確認']===undefined){alert('格式不符：需含「儲位」與「異常確認」欄位（由「匯出異常」產生的清單）');return;}
+    var known={};(RM_CMP_ANOM||[]).forEach(function(x){known[x.slot]=1;});
+    var applied=0,checked=0,unknown=0;
+    raw.forEach(function(r){
+      var slot=String(r['儲位']||'').trim();if(!slot)return;
+      if(!known[slot]){unknown++;return;}
+      var v=String(r['異常確認']||'').trim().toUpperCase();
+      var on=(v==='V'||v==='✔');
+      RM_CMP_CHK[slot]=on;applied++;if(on)checked++;
+    });
+    rmCmpDrawTable();
+    alert('匯入完成：更新 '+applied+' 筆（勾選 '+checked+' 筆）'+(unknown?'；'+unknown+' 筆儲位不在目前異常清單中，已略過':''));
+  }catch(e){alert('匯入失敗：'+e.message);}
 }
 
 </script>
