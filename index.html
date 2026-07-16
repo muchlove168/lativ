@@ -1382,7 +1382,7 @@ function renderFWSkuTable(){
       // 儲區欄：外框的頂部、左、右；底部因 rowspan 跨多列，由最後一列的 borderBottom 補
       if(bLine){tdZone.style.borderTop=bLine;tdZone.style.borderLeft=bLine;tdZone.style.borderRight=bLine;tdZone.style.borderBottom=bLine;}
       const span=document.createElement('span');span.textContent=row.儲區||'—';span.style.cursor='pointer';span.title='點擊編輯儲區';
-      span.onclick=e=>{e.stopPropagation();const inp=document.createElement('input');inp.className='zone-input';inp.value=row.儲區;inp.onblur=()=>{const nz=inp.value.trim().toUpperCase();for(let k=idx;k<idx+rowspans[idx];k++)FW26_CATS[k].儲區=nz;renderFWSkuTable();};inp.onkeydown=e2=>{if(e2.key==='Enter')inp.blur();if(e2.key==='Escape')renderFWSkuTable();};tdZone.innerHTML='';tdZone.appendChild(inp);inp.focus();inp.select();};
+      span.onclick=e=>{e.stopPropagation();const inp=document.createElement('input');inp.className='zone-input';inp.value=row.儲區;inp.onblur=()=>{const nz=inp.value.trim().toUpperCase();for(let k=idx;k<idx+rowspans[idx];k++)FW26_CATS[k].儲區=nz;renderFWSkuTable();try{renderArrangeCompare();}catch(e){}};inp.onkeydown=e2=>{if(e2.key==='Enter')inp.blur();if(e2.key==='Escape')renderFWSkuTable();};tdZone.innerHTML='';tdZone.appendChild(inp);inp.focus();inp.select();};
       tdZone.appendChild(span);tr.appendChild(tdZone);
     }
     tr.draggable=true;
@@ -2062,7 +2062,12 @@ async function handleArrangeUpload(event){
     document.getElementById('arrange-status').textContent=`已載入 ${ARRANGE_DATA.length} 筆儲位安排資料（上傳日期：${_arrDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
+    // ★ 2026-07-16 Gordon：新的儲位安排報表 = ERP 最新待排清單 → 佇列重新比對 + planner 重繪
+    //   （原本只 renderArrangeCompare()，左側「新品-XXX (SKU: N)」永遠停在傳送當下的舊快照）
+    plannerInvalidateResult('儲位安排報表已重新上傳');
+    plannerSyncNewQueue('儲位安排報表重新上傳');
     renderArrangeCompare();
+    renderPlanner();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
 }
@@ -2102,7 +2107,11 @@ async function handleForecastUpload(event){
     document.getElementById('forecast-status').textContent=`已載入 ${FORECAST_DATA.length} 筆預告進貨資料（上傳日期：${_fcDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
+    // ★ 2026-07-16 Gordon：新的預告進貨表 → 已進倉/取消的款號要從待排新品佇列移除
+    plannerInvalidateResult('預告進貨表已重新上傳');
+    plannerSyncNewQueue('預告進貨表重新上傳');
     renderArrangeCompare();
+    renderPlanner();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
 }
@@ -2153,7 +2162,12 @@ async function clearArrangeData(){
   document.getElementById('arrange-status').textContent='';
   document.getElementById('forecast-status').textContent='';
   document.getElementById('arrange-clear-btn').style.display='none';
+  // ★ 2026-07-16 Gordon：來源資料都清了，儲位調整卻還留著「新品-XXX」虛擬來源可執行 → 一併清除
+  window.NEW_PRODUCT_QUEUE=[];
+  PLN_QUEUE_SYNC_NOTE=null;
+  plannerInvalidateResult('儲位安排／預告進貨資料已清除');
   renderArrangeCompare();
+  renderPlanner();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2242,9 +2256,13 @@ function forecastBuildSelectedSkus(selection){
     });
   });
   // 過濾 ARRANGE_DATA
+  // ★ 2026-07-16 Gordon：只留「待排」— ERP 儲位安排的「儲位」欄已填、或走道報表實況已在架上者
+  //   一律排除，否則「匯出待排新品」/「傳送至儲位調整」會把 ERP 已排好的 SKU 再排一次。
+  const _selPlacedIdx=plnBuildPlacedIndex();
   const rows=(ARRANGE_DATA||[]).filter(r=>{
     const st=String(r.code||'').substring(0,5);
-    return st in includeStyleCat;
+    if(!(st in includeStyleCat))return false;
+    return !plnIsPlacedCode(r.code,_selPlacedIdx);
   });
   // ★ 跨櫃 / ARRANGE_DATA 同 SKU 多筆 dedup: 保留首次出現的 row, 避免下游匯出/送 planner 重複
   //   觸發情境: 1) 不同貨櫃勾選了同一款 2) 匯出儲位安排表中同 SKU 被預分配到多個預計倉位
@@ -2389,7 +2407,12 @@ async function handlePlannerAisleUpload(event){
       try{await idbPut('aisle_report_rows',rows);}catch(err){}
       const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
       try{localStorage.setItem('planner_aisle_upload_date',today);}catch(err){}
+      // ★ 2026-07-16 Gordon：新走道報表 = 最新實況 → 待排新品佇列重新比對（已在架上的移除）
+      //   + 上次 Run 的結果依舊報表算出 → 作廢
+      plannerInvalidateResult('走道報表已重新上傳');
+      plannerSyncNewQueue('走道報表重新上傳');
       renderPlanner();
+      renderArrangeCompare();  // 預告進貨明細的「待排」判定也吃走道報表實況 → 一併重算
     }catch(err){alert('解析失敗：'+err.message);}
     event.target.value='';
   };
@@ -2429,6 +2452,8 @@ async function handlePlannerMasterUpload(event){
       try{await idbPut('storage_master_sheets',sheets);}catch(err){}
       const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
       try{localStorage.setItem('planner_master_upload_date',today);}catch(err){}
+      // ★ 2026-07-16 Gordon：儲位總表換掉 → 儲架幾何全變，上次 Run 的建議儲位不再成立 → 作廢
+      plannerInvalidateResult('儲位總表已重新上傳');
       renderPlanner();
       // ★ 2026-07-15 Gordon：新總表上傳 → ①同步重算儲架 tab 材積比對（異常確認記憶保留）
       //   ②與系統後端（儲架平面圖 RM_DATA 擺法碼）逐儲位比對，有異動 → 彈窗提醒交 Claude 寫入後端
@@ -2484,6 +2509,9 @@ async function handlePlannerOverflowUpload(event){
       const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
       try{localStorage.setItem('planner_overflow_upload_date',today);localStorage.setItem('planner_overflow_count',String(slots.length));}catch(err){}
       const occ=invRows.length,empty=slots.length-occ;
+      // ★ 2026-07-16 Gordon：溢位區報表也會改寫 AISLE_REPORT_DATA（實況占用）→ 同步待排新品
+      plannerInvalidateResult('溢位區報表已重新上傳');
+      plannerSyncNewQueue('溢位區 XX/TX 報表重新上傳');
       renderPlanner();
       console.log(`[溢位區] 載入 ${slots.length} 個 XX/TX 儲位（占用 ${occ} / 空 ${empty}）`);
     }catch(err){alert('解析失敗：'+err.message);}
@@ -2498,7 +2526,9 @@ async function clearPlannerOverflow(){
   try{await idbPut('storage_master_sheets',STORAGE_MASTER);}catch(e){}
   try{await idbPut('aisle_report_rows',AISLE_REPORT_DATA);}catch(e){}
   try{localStorage.removeItem('planner_overflow_upload_date');localStorage.removeItem('planner_overflow_count');}catch(e){}
+  plannerInvalidateResult('溢位區報表已清除');  // ★ 2026-07-16
   renderPlanner();
+  renderArrangeCompare();
 }
 
 async function clearPlannerAisle(){
@@ -2506,14 +2536,161 @@ async function clearPlannerAisle(){
   AISLE_REPORT_DATA=AISLE_REPORT_DATA.filter(r=>r._ovfUpload);  // 保留溢位區上傳的列
   try{await idbPut('aisle_report_rows',AISLE_REPORT_DATA);}catch(e){}
   try{localStorage.removeItem('planner_aisle_upload_date');}catch(e){}
+  plannerInvalidateResult('走道報表已清除');  // ★ 2026-07-16
   renderPlanner();
+  renderArrangeCompare();
 }
 async function clearPlannerMaster(){
   if(!confirm('確定清除儲位總表？'))return;
   STORAGE_MASTER={};
   try{await idbPut('storage_master_sheets',{});}catch(e){}
   try{localStorage.removeItem('planner_master_upload_date');}catch(e){}
+  plannerInvalidateResult('儲位總表已清除');  // ★ 2026-07-16
   renderPlanner();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ★★★ 待排新品同步層（Gordon 2026-07-16）★★★
+// ───────────────────────────────────────────────────────────────────────────
+// 問題根因：「待排新品」在三個地方各自存了一份快照，任何一份 ERP 報表重新上傳時
+//          都沒有回頭比對，導致「重新上傳新報表但未排新品數字不會變」：
+//   ① 預告進貨明細「SKU 數」＝ ARRANGE_DATA 該款號的列數，完全不看「儲位」欄有沒有值
+//      → ERP 已把該 SKU 排入儲位（儲位欄已填）仍被算成待排，重上傳數字原封不動。
+//   ② window.NEW_PRODUCT_QUEUE ＝ 按下「傳送至儲位調整」當下的快照，之後重新上傳
+//      走道報表／儲位安排／預告進貨都不重算 → 數量、未到量停在舊值；更嚴重的是
+//      已在架上的 SKU 會被新品引擎再排一次 → 同一 SKU 出現在兩個儲位。
+//   ③ PLN_LAST_RESULT ＝ 上一次 Run 的結果，來源報表換掉後仍留在畫面上、仍可匯出。
+// 解法：單一真實來源 plnBuildPlacedIndex()/plnIsPlacedCode()，並在「所有」資料來源
+//      異動點呼叫 plannerSyncNewQueue() + plannerInvalidateResult()。
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 已排入索引（單一真實來源）：
+//   erp  = ERP「匯出儲位安排」的「儲位」欄已有值 → ERP 認定已排入（權威）
+//   live = 走道報表／溢位區報表實況已占用該商品編號 → 實體已在架上
+// 兩者皆視為「已排入」，一律不再列入待排、不再送進新品引擎（避免同 SKU 排兩處）。
+function plnBuildPlacedIndex(){
+  const erpSlot={},liveSlot={};
+  (typeof ARRANGE_DATA!=='undefined'?ARRANGE_DATA||[]:[]).forEach(r=>{
+    const c=String(r.code||'').trim(),s=String(r.slot||'').trim();
+    if(c&&s&&!erpSlot[c])erpSlot[c]=s;
+  });
+  (typeof AISLE_REPORT_DATA!=='undefined'?AISLE_REPORT_DATA||[]:[]).forEach(r=>{
+    const c=String(r['商品編號']||'').trim(),s=String(r['儲位']||'').trim();
+    if(c&&s&&!liveSlot[c])liveSlot[c]=s;
+  });
+  return {erpSlot,liveSlot};
+}
+function plnIsPlacedCode(code,idx){
+  const c=String(code||'').trim();
+  if(!c)return null;
+  if(idx.erpSlot[c])return {slot:idx.erpSlot[c],src:'erp'};
+  if(idx.liveSlot[c])return {slot:idx.liveSlot[c],src:'live'};
+  return null;
+}
+
+// 上次同步結果（供情境配置頂端橫幅顯示；使用者可關閉）
+let PLN_QUEUE_SYNC_NOTE=null;
+// 執行結果失效原因（來源報表換掉 → 上次 Run 的建議不可信）
+let PLN_RESULT_STALE_NOTE=null;
+
+// 來源報表異動 → 上次 Run 的結果一律作廢（避免拿舊快照的建議去匯出）
+function plannerInvalidateResult(reason){
+  if(typeof PLN_LAST_RESULT==='undefined'||!PLN_LAST_RESULT)return false;
+  PLN_LAST_RESULT=null;
+  const rc=document.getElementById('planner-result-card');
+  if(rc)rc.style.display='none';
+  PLN_RESULT_STALE_NOTE=reason||'來源報表已更新';
+  return true;
+}
+
+// ★ 新品佇列重新比對：任何一份來源報表換掉後都要呼叫（呼叫點見各 handleXXXUpload）
+//   移出佇列的四種情況：
+//     a) ERP 儲位安排「儲位」欄已填 → ERP 已排入
+//     b) 走道報表實況已占用（ERP 尚未回填 → 屬衝突，橫幅另行標示）
+//     c) 已不在最新「匯出儲位安排」報表內 → ERP 已結案／取消
+//     d) 款號已不在最新「預告進貨表」內 → 該櫃已進倉／取消
+//   留下的 SKU 則以最新 ARRANGE_DATA 覆寫欄位（未到量／材積／預計倉位／包材／名稱／尺寸）。
+function plannerSyncNewQueue(reason){
+  const q=window.NEW_PRODUCT_QUEUE;
+  if(!q||!q.length){PLN_QUEUE_SYNC_NOTE=null;return null;}
+  const idx=plnBuildPlacedIndex();
+  const arrMap={};
+  (typeof ARRANGE_DATA!=='undefined'?ARRANGE_DATA||[]:[]).forEach(r=>{
+    const c=String(r.code||'').trim();if(c&&!arrMap[c])arrMap[c]=r;
+  });
+  const hasArrange=(typeof ARRANGE_DATA!=='undefined'?ARRANGE_DATA||[]:[]).length>0;
+  const fcStyles=new Set();
+  (typeof FORECAST_DATA!=='undefined'?FORECAST_DATA||[]:[]).forEach(r=>{
+    const s=String(r.style||'').substring(0,5);if(s)fcStyles.add(s);
+  });
+  const hasForecast=(typeof FORECAST_DATA!=='undefined'?FORECAST_DATA||[]:[]).length>0;
+
+  const rep={reason:reason||'',placedErp:[],placedLive:[],offArrange:[],offForecast:[],
+             updated:0,emptied:[],before:0,after:0,at:new Date().toLocaleTimeString('zh-TW')};
+  const next=[];
+  q.forEach(e=>{
+    const keep=[];
+    (e.skus||[]).forEach(s=>{
+      rep.before++;
+      const code=String(s.code||'').trim();
+      const p=plnIsPlacedCode(code,idx);
+      if(p){(p.src==='erp'?rep.placedErp:rep.placedLive).push({code,slot:p.slot,label:e.label});return;}
+      if(hasArrange&&!arrMap[code]){rep.offArrange.push({code,label:e.label});return;}
+      if(hasForecast&&code&&!fcStyles.has(code.substring(0,5))){rep.offForecast.push({code,label:e.label});return;}
+      const a=arrMap[code];
+      if(a){  // 欄位刷新：未到量等會隨每日 ERP 變動，佇列不可停在傳送當下的值
+        let ch=false;
+        ['name','size','packaging','plannedSlot','slot'].forEach(k=>{
+          if(String(s[k]||'')!==String(a[k]||'')){s[k]=a[k];ch=true;}
+        });
+        ['pending','volume'].forEach(k=>{
+          if(Number(s[k]||0)!==Number(a[k]||0)){s[k]=Number(a[k]||0);ch=true;}
+        });
+        if(ch)rep.updated++;
+      }
+      keep.push(s);rep.after++;
+    });
+    if(keep.length)next.push(Object.assign({},e,{skus:keep}));
+    else rep.emptied.push(e.label);
+  });
+  window.NEW_PRODUCT_QUEUE=next;
+  const removed=rep.placedErp.length+rep.placedLive.length+rep.offArrange.length+rep.offForecast.length;
+  const changed=removed>0||rep.updated>0||rep.emptied.length>0;
+  if(changed){
+    PLN_QUEUE_SYNC_NOTE=rep;
+    plannerInvalidateResult('待排新品佇列已依最新報表重新比對');
+    console.log('[待排新品同步]',reason,rep);
+  }
+  return changed?rep:null;
+}
+
+function plannerDismissSyncNote(){PLN_QUEUE_SYNC_NOTE=null;PLN_RESULT_STALE_NOTE=null;plannerRenderConfigUI();}
+
+// 情境配置頂端橫幅：把「這次上傳到底改了什麼」講清楚，不默默吞掉
+function plannerSyncNoteHtml(){
+  const out=[];
+  const rep=PLN_QUEUE_SYNC_NOTE;
+  if(rep){
+    const seg=[],tips=[];
+    const fmt=(arr,n)=>arr.slice(0,n).map(x=>x.code+(x.slot?'→'+x.slot:'')).join('、')+(arr.length>n?` …等 ${arr.length} 筆`:'');
+    if(rep.placedErp.length){seg.push(`ERP 已排入 <b>${rep.placedErp.length}</b> 筆`);tips.push('【ERP 已排入（儲位安排報表儲位欄已填）】\n'+fmt(rep.placedErp,20));}
+    if(rep.placedLive.length){seg.push(`<span style="color:#c0392b">實況已在架上 <b>${rep.placedLive.length}</b> 筆</span>`);tips.push('【⚠ 衝突：走道報表實況已占用，但 ERP 儲位安排的「儲位」欄仍空白】\n（已從待排移除，避免同一 SKU 被排到第二個儲位）\n'+fmt(rep.placedLive,20));}
+    if(rep.offArrange.length){seg.push(`已不在儲位安排報表 <b>${rep.offArrange.length}</b> 筆`);tips.push('【已不在最新「匯出儲位安排」報表】\n'+fmt(rep.offArrange,20));}
+    if(rep.offForecast.length){seg.push(`已不在預告進貨表 <b>${rep.offForecast.length}</b> 筆`);tips.push('【款號已不在最新「匯出預告進貨表」】\n'+fmt(rep.offForecast,20));}
+    if(rep.updated)seg.push(`欄位刷新 <b>${rep.updated}</b> 筆`);
+    if(rep.emptied.length)seg.push(`整類排完並移除：${rep.emptied.join('、')}`);
+    if(seg.length){
+      const t=String(tips.join('\n\n')).replace(/"/g,'&quot;');
+      out.push(`<div style="padding:6px 10px;margin-bottom:8px;background:rgba(120,76,150,0.10);border-left:3px solid #784c96;border-radius:3px;font-size:12px;color:var(--text2);display:flex;align-items:flex-start;gap:6px">
+        <span style="cursor:help" title="${t}">🔄 <b>待排新品已重新比對</b>（${rep.reason}｜${rep.before} → ${rep.after} 筆）：${seg.join('、')}<span style="color:var(--text3)">（滑鼠移上看明細）</span></span>
+        <button onclick="plannerDismissSyncNote()" style="margin-left:auto;background:transparent;border:none;color:var(--text3);cursor:pointer;font-size:13px;line-height:1" title="關閉">×</button>
+      </div>`);
+    }
+  }
+  if(PLN_RESULT_STALE_NOTE&&!rep){
+    out.push(`<div style="padding:6px 10px;margin-bottom:8px;background:rgba(212,160,23,0.10);border-left:3px solid #d4a017;border-radius:3px;font-size:12px;color:var(--text2)">⚠ ${PLN_RESULT_STALE_NOTE}，上次的執行結果已作廢，請重新「Run All Steps」</div>`);
+  }
+  return out.join('');
 }
 
 function renderPlanner(){
@@ -4651,12 +4828,20 @@ function plnRunNewEngine(config,initialCells){
   //   step2 不會重複排入、queueTotal/剩餘 SKU 數也正確反映（修正 step1 排光後 step2 仍顯示 60 的問題）。
   {
     const prePlaced=new Set();
-    Object.values(cells).forEach(cs=>{ if(cs.sku&&cs.info&&cs.info._isNewProduct)prePlaced.add(String(cs.sku)); });
-    const seen=new Set(); const dedup=[]; let dropped=0, consumed=0;
+    const occupiedCodes=new Set();  // ★ 2026-07-16: 走道報表實況已占用的商品編號（安全網）
+    Object.values(cells).forEach(cs=>{
+      if(!cs.sku)return;
+      if(cs.info&&cs.info._isNewProduct)prePlaced.add(String(cs.sku));
+      else occupiedCodes.add(String(cs.sku));
+    });
+    const seen=new Set(); const dedup=[]; let dropped=0, consumed=0, already=0;
     for(const s of skus){ const code=String(s.code||'');
       if(code&&prePlaced.has(code)){consumed++;_placedCodes.add(code);continue;}
+      // ★ 2026-07-16 Gordon 安全網：佇列同步 (plannerSyncNewQueue) 已會移除這些 SKU；
+      //   萬一同步沒跑到（例如舊佇列殘留），這裡再擋一次 → 絕不把已在架上的 SKU 排到第二個儲位。
+      if(code&&occupiedCodes.has(code)){already++;_placedCodes.add(code);continue;}
       if(code&&seen.has(code)){dropped++;continue;} if(code)seen.add(code); dedup.push(s); }
-    if(dropped>0||consumed>0){ skus.length=0; skus.push(...dedup); if(typeof console!=='undefined')console.log(`[新品排入] 去重：移除 ${dropped} 筆重複商品編號、${consumed} 筆前面步驟已排入的 SKU`); }
+    if(dropped>0||consumed>0||already>0){ skus.length=0; skus.push(...dedup); if(typeof console!=='undefined')console.log(`[新品排入] 去重：移除 ${dropped} 筆重複商品編號、${consumed} 筆前面步驟已排入的 SKU、${already} 筆走道報表顯示已在架上的 SKU`); }
   }
   if(!skus.length){
     return {selected:[],capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,queueTotal:0};
@@ -5530,6 +5715,7 @@ function plannerResetConfig(){
   if(!confirm('確定要清除已傳送的新品安排，並還原情境配置至初始狀態嗎？')){return;}
   // 清除新品佇列
   window.NEW_PRODUCT_QUEUE=[];
+  PLN_QUEUE_SYNC_NOTE=null;PLN_RESULT_STALE_NOTE=null;  // ★ 2026-07-16
   // 重設步驟數
   PLN_STEPS_COUNT=1;
   // 清除執行結果
@@ -5566,6 +5752,7 @@ function plannerRenderConfigUI(){
   const hasNewQueue=(window.NEW_PRODUCT_QUEUE&&window.NEW_PRODUCT_QUEUE.length>0);
   const singleAisleNotice=aisles.length===1?`<div style="padding:6px 10px;margin-bottom:8px;background:rgba(120,76,150,0.08);border-left:3px solid #784c96;border-radius:3px;font-size:12px;color:var(--text2)">⚠ 走道報表僅偵測到 1 個走道 (${aisles[0]})，建議選擇「${hasNewQueue?'新品':'整理'}」模式（若目的走道空格已連續充足，新品模式會直接排入，無需額外整理步驟）</div>`:'';
   body.innerHTML=`
+    ${plannerSyncNoteHtml()}
     ${singleAisleNotice}
     <div id="pln-steps-wrap" style="display:flex;flex-direction:column;gap:10px"></div>
     <div style="display:flex;align-items:center;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border)">
@@ -5884,9 +6071,11 @@ function plannerRefreshStepCounts(){
       if(s2)s2.textContent=String(emptyCnt[a]);
     });
     // ★ 2026-07-10: 新品虛擬來源顯示「此 step 進入時的剩餘 SKU 數」(扣掉前面 step 已排入的)
+    // ★ 2026-07-16: 改為扣掉「cells 內任何已占用該商品編號的儲位」— 除了前面 step 排入的
+    //   (_isNewProduct)，也含新走道報表顯示已在架上的，數字才跟得上重新上傳的報表。
     if(window.NEW_PRODUCT_QUEUE&&window.NEW_PRODUCT_QUEUE.length){
       const placedNew=new Set();
-      Object.values(cells).forEach(cs=>{ if(cs.sku&&cs.info&&cs.info._isNewProduct)placedNew.add(String(cs.sku)); });
+      Object.values(cells).forEach(cs=>{ if(cs.sku)placedNew.add(String(cs.sku)); });
       window.NEW_PRODUCT_QUEUE.forEach(e=>{
         const span=stepEl.querySelector(`.newq-count[data-aisle="${e.label}"]`);
         if(span)span.textContent=String(e.skus.filter(s=>!placedNew.has(String(s.code||''))).length);
@@ -6538,12 +6727,17 @@ function renderArrangeCompare(){
     const catStats={};
     const unmatched=[];
     let matchedCount=0;
+    // ★ 2026-07-16 Gordon：「待安排」必須看已排入狀態，否則重上傳新報表數字永遠不動
+    const _pIdx=plnBuildPlacedIndex();
+    let _placedTotal=0;
 
     ARRANGE_DATA.forEach(r=>{
+      const _placed=!!plnIsPlacedCode(r.code,_pIdx);
+      if(_placed)_placedTotal++;
       const cat=fw26Lookup[r.code];
       if(cat){
-        if(!catStats[cat])catStats[cat]={skuCount:0};
-        catStats[cat].skuCount++;
+        if(!catStats[cat])catStats[cat]={skuCount:0,placedCount:0};
+        if(_placed)catStats[cat].placedCount++;else catStats[cat].skuCount++;
         matchedCount++;
       }else{
         unmatched.push(r);
@@ -6553,12 +6747,16 @@ function renderArrangeCompare(){
     // ★ 全部未匹配都列入（不限 74/75），讓使用者能看見所有需手動處理的品項
     const newSeasonUnmatched=unmatched;
 
-    document.getElementById('arrange-total').textContent=ARRANGE_DATA.length.toLocaleString();
+    // ★ 2026-07-16：本欄標題為「儲位待安排總筆數」→ 顯示待排（扣掉已排入），總數放 tooltip
+    const _totalEl=document.getElementById('arrange-total');
+    _totalEl.textContent=(ARRANGE_DATA.length-_placedTotal).toLocaleString();
+    _totalEl.parentElement.title=`報表總筆數 ${ARRANGE_DATA.length.toLocaleString()}｜已排入 ${_placedTotal.toLocaleString()}（ERP 儲位欄已填，或走道報表實況已在架上）｜待排 ${(ARRANGE_DATA.length-_placedTotal).toLocaleString()}`;
     document.getElementById('arrange-matched').textContent=matchedCount.toLocaleString();
     document.getElementById('arrange-unmatched').textContent=unmatched.length.toLocaleString();
 
     // 類別表格
     catBody.innerHTML='';
+    let _umPendForTotal=0;  // ★ 2026-07-16: 未匹配的待排數（供合計）
     const sorted=Object.entries(catStats).sort((a,b)=>b[1].skuCount-a[1].skuCount);
     if(!sorted.length && !newSeasonUnmatched.length){
       catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未比對到 26FW 新品（請先確認已上傳 26FW 報表）</td></tr>';
@@ -6574,20 +6772,27 @@ function renderArrangeCompare(){
         }else{
           zoneTd=`<td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--accent)">${zone}</td>`;
         }
-        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td><td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}</td>`+zoneTd;
+        // ★ 2026-07-16：SKU 數 = 待排；已排入另以灰字標註，避免看起來「數字沒動」
+        const _pl=s.placedCount?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上 → 不列入待排">(已排 ${s.placedCount})</span>`:'';
+        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td><td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}${_pl}</td>`+zoneTd;
         catBody.appendChild(tr);
       });
       // ★ 新增「未匹配」列（僅 74/75 開頭）
+      // ★ 2026-07-16: 與其他列一致 → 顯示待排數，已排入另標，合計才不會混算
       if(newSeasonUnmatched.length){
         const styles=[...new Set(newSeasonUnmatched.map(r=>String(r.code||'').substring(0,5)))];
+        const _umPlaced=newSeasonUnmatched.filter(r=>plnIsPlacedCode(r.code,_pIdx)).length;
+        const _umPend=newSeasonUnmatched.length-_umPlaced;
+        const _umPl=_umPlaced?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 或走道報表顯示已排入 → 不列入待排">(已排 ${_umPlaced})</span>`:'';
         const tr=document.createElement('tr');
         tr.style.borderBottom='1px solid var(--border)';
         tr.style.background='rgba(192,57,43,0.04)';
         tr.title='款號：'+styles.join(', ');
-        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600;color:var(--red)">未匹配</td><td style="padding:6px 10px;text-align:right;color:var(--red)">${newSeasonUnmatched.length.toLocaleString()}</td><td style="padding:6px 10px;text-align:center;color:var(--text3)">—</td>`;
+        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600;color:var(--red)">未匹配</td><td style="padding:6px 10px;text-align:right;color:var(--red)">${_umPend.toLocaleString()}${_umPl}</td><td style="padding:6px 10px;text-align:center;color:var(--text3)">—</td>`;
         catBody.appendChild(tr);
+        _umPendForTotal=_umPend;
       }
-      const totalSku=sorted.reduce((a,[,s])=>a+s.skuCount,0)+newSeasonUnmatched.length;
+      const totalSku=sorted.reduce((a,[,s])=>a+s.skuCount,0)+_umPendForTotal;
       const trTotal=document.createElement('tr');
       trTotal.style.background='var(--surface2)';
       trTotal.innerHTML=`<td style="padding:8px 10px;text-align:left;font-weight:700;border-top:2px solid var(--accent)">合計</td><td style="padding:8px 10px;text-align:right;font-weight:700;border-top:2px solid var(--accent)">${totalSku.toLocaleString()}</td><td style="padding:8px 10px;border-top:2px solid var(--accent)"></td>`;
@@ -6639,13 +6844,17 @@ function renderArrangeCompare(){
     if(typeof FW26_CATS!=='undefined'&&FW26_CATS.length){
       FW26_CATS.forEach(c=>{if(c.類別)catZoneLookup[c.類別]=c.儲區||'';});
     }
-    // ★ 從儲位安排建立：款號 (前5碼) → { skuCount, plannedSlots:Set }
+    // ★ 從儲位安排建立：款號 (前5碼) → { skuCount(待排), placedCount(已排入), plannedSlots:Set }
+    //   2026-07-16 Gordon：原本 skuCount 直接 ++（不看「儲位」欄），所以 ERP 已把某些待排新品
+    //   排入儲位後重新上傳報表，這裡的 SKU 數完全不會變。改為以 plnIsPlacedCode() 分流。
     const arrangeByStyle={};
+    const _fcPlacedIdx=plnBuildPlacedIndex();
     (ARRANGE_DATA||[]).forEach(ar=>{
       const style=String(ar.code||'').substring(0,5);
       if(!style)return;
-      if(!arrangeByStyle[style])arrangeByStyle[style]={skuCount:0,plannedSlots:new Set()};
-      arrangeByStyle[style].skuCount++;
+      if(!arrangeByStyle[style])arrangeByStyle[style]={skuCount:0,placedCount:0,plannedSlots:new Set()};
+      if(plnIsPlacedCode(ar.code,_fcPlacedIdx))arrangeByStyle[style].placedCount++;
+      else arrangeByStyle[style].skuCount++;
       if(ar.plannedSlot)arrangeByStyle[style].plannedSlots.add(ar.plannedSlot);
     });
 
@@ -6731,17 +6940,20 @@ function renderArrangeCompare(){
         _seenGrpStyles.add(style);
         const cat=styleToCat[style];
         const arr=arrangeByStyle[style];
-        const skuNum=arr?arr.skuCount:0;
+        const skuNum=arr?arr.skuCount:0;            // 待排
+        const placedNum=arr?arr.placedCount:0;      // 已排入（ERP 或實況）
 
         if(cat){
-          if(!catStats[cat])catStats[cat]={skuCount:0,plannedSlots:new Set(),styles:new Set()};
+          if(!catStats[cat])catStats[cat]={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set()};
           catStats[cat].skuCount+=skuNum;
+          catStats[cat].placedCount+=placedNum;
           catStats[cat].styles.add(style);
           if(arr)arr.plannedSlots.forEach(s=>catStats[cat].plannedSlots.add(s));
         }else{
           // 不在 26FW 名單：全部歸為「未匹配」（含 73 等其他季別前綴）
-          if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};
+          if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};
           catStats['未匹配'].skuCount+=skuNum;
+          catStats['未匹配'].placedCount+=placedNum;
           catStats['未匹配'].unmatchedStyles.add(style);
           catStats['未匹配'].styles.add(style);
           if(arr)arr.plannedSlots.forEach(s=>catStats['未匹配'].plannedSlots.add(s));
@@ -6754,8 +6966,10 @@ function renderArrangeCompare(){
       const arrivalNotify=(grp.arrivalNotifyTotal>0)?grp.arrivalNotifyTotal.toLocaleString():'—';
       // ★ 檢查該櫃是否有任一類別需要安排儲位 (全部都是再次進倉 → 隱藏整櫃 checkbox)
       // ★ 判斷：cat==='未匹配' 且 skuCount===0 → 「再次進倉」類別
-      const isCatReEntry=(cat,s)=>(cat==='未匹配'&&(s.skuCount||0)===0);
-      // ★ 待安排新品判定：該類別 SKU 數 > 0 才有待安排新品（才顯示 checkbox）
+      //   ★ 2026-07-16：改用「待排 + 已排入」總數判定，否則整類都被 ERP 排完後會被誤標成「再次進倉」
+      const isCatReEntry=(cat,s)=>(cat==='未匹配'&&((s.skuCount||0)+(s.placedCount||0))===0);
+      // ★ 待安排新品判定：該類別「待排」SKU 數 > 0 才有待安排新品（才顯示 checkbox）
+      //   2026-07-16：已被 ERP 排入的不再算待排 → checkbox 自動消失，不會再送進儲位調整重排一次
       const catHasPending=(s)=>(s.skuCount||0)>0;
       const hasAnyArrange=catEntries.some(([cat,s])=>catHasPending(s));
 
@@ -6820,10 +7034,12 @@ function renderArrangeCompare(){
         const _catEsc=String(cat).replace(/"/g,'&quot;');
         const cbHtml=catHasPending(s)?`<input type="checkbox" class="forecast-cb-category" data-key="${_gkEsc}" data-cat="${_catEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer;margin-right:4px">`:'';
         html+=`<td style="padding:4px 8px;text-align:center;border-right:1px solid var(--border);${catColor}" title="${catTitle}">${cbHtml}<span style="cursor:default">${displayCat}</span></td>`;
-        // SKU 數欄位：含跨櫃重複提醒
+        // SKU 數欄位：顯示「待排」；已排入另以灰字標註（2026-07-16）＋跨櫃重複提醒
+        const _pendTxt=s.skuCount?String(s.skuCount):(s.placedCount?'0':'—');
+        const _placedTxt=s.placedCount?`<span style="color:var(--text3);font-size:9px;margin-left:3px;cursor:help" title="已排入 ${s.placedCount} 筆（ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上）→ 不列入待排新品">(已排 ${s.placedCount})</span>`:'';
         const skuCell=dupAlert
-          ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${s.skuCount||'—'}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
-          : `${s.skuCount||'—'}`;
+          ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${_pendTxt}${_placedTxt}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
+          : `${_pendTxt}${_placedTxt}`;
         html+=`<td style="padding:4px 8px;text-align:right;border-right:1px solid var(--border)">${skuCell}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-weight:600;color:var(--accent);border-right:1px solid var(--border)">${zone}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2);border-right:1px solid var(--border)">${slots}</td>`;
@@ -6891,6 +7107,12 @@ async function handleFW26Upload(event){
     initFW26();
     DIRTY.fw26=true;
     renderFW26Stats();renderFW26CatTable();renderFW26Table();
+    // ★ 2026-07-16 Gordon（同類問題）：26FW 名單就是「商品編號→類別」的來源，換掉之後
+    //   儲位安排 tab 的類別統計／未匹配清單／預告進貨明細的類別分組全都會變，
+    //   但原本完全沒重繪 → 要切走 tab 再切回來才更新。這裡一併同步。
+    plannerSyncNewQueue('26FW 新品名單重新上傳');
+    renderArrangeCompare();
+    renderPlanner();
     hideLoading();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
@@ -7070,6 +7292,7 @@ function editScheduleZone(td, cat){
     FW26_CATS.forEach(c=>{if(c.類別===cat)c.儲區=nz;});
     renderFW26CatTable();
     renderFW26ScheduleTable(); // 重繪 modal
+    try{renderArrangeCompare();}catch(e){}  // ★ 2026-07-16: 預告進貨明細的「儲區」欄吃 FW26_CATS → 一併重繪
   };
   inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape'){renderFW26ScheduleTable();}};
   td.innerHTML='';td.appendChild(inp);inp.focus();inp.select();
