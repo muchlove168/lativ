@@ -2062,10 +2062,10 @@ async function handleArrangeUpload(event){
     document.getElementById('arrange-status').textContent=`已載入 ${ARRANGE_DATA.length} 筆儲位安排資料（上傳日期：${_arrDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
-    // ★ 2026-07-16 Gordon：新的儲位安排報表 = ERP 最新待排清單 → 佇列重新比對 + planner 重繪
-    //   （原本只 renderArrangeCompare()，左側「新品-XXX (SKU: N)」永遠停在傳送當下的舊快照）
-    plannerInvalidateResult('儲位安排報表已重新上傳');
-    plannerSyncNewQueue('儲位安排報表重新上傳');
+    // ★ 2026-07-16 Gordon：新的儲位安排報表 = 新一輪作業循環
+    //   ① 走道報表／溢位區報表／情境配置／新品佇列全部清空（都是上一輪的占用快照，已失效）
+    //   ② 預告進貨明細的「待排新品」改由新報表的「儲位」欄重算 → 已被 ERP 排入的自動歸零
+    await plannerResetOnNewArrangeReport();
     renderArrangeCompare();
     renderPlanner();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
@@ -2164,7 +2164,7 @@ async function clearArrangeData(){
   document.getElementById('arrange-clear-btn').style.display='none';
   // ★ 2026-07-16 Gordon：來源資料都清了，儲位調整卻還留著「新品-XXX」虛擬來源可執行 → 一併清除
   window.NEW_PRODUCT_QUEUE=[];
-  PLN_QUEUE_SYNC_NOTE=null;
+  PLN_QUEUE_SYNC_NOTE=null;PLN_RESET_NOTE=null;
   plannerInvalidateResult('儲位安排／預告進貨資料已清除');
   renderArrangeCompare();
   renderPlanner();
@@ -2408,7 +2408,8 @@ async function handlePlannerAisleUpload(event){
       const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
       try{localStorage.setItem('planner_aisle_upload_date',today);}catch(err){}
       // ★ 2026-07-16 Gordon：新走道報表 = 最新實況 → 待排新品佇列重新比對（已在架上的移除）
-      //   + 上次 Run 的結果依舊報表算出 → 作廢
+      //   + 上次 Run 的結果依舊報表算出 → 作廢；「新一輪請重新上傳走道報表」的提示到此完成 → 收掉
+      PLN_RESET_NOTE=null;
       plannerInvalidateResult('走道報表已重新上傳');
       plannerSyncNewQueue('走道報表重新上傳');
       renderPlanner();
@@ -2592,6 +2593,39 @@ function plnIsPlacedCode(code,idx){
 let PLN_QUEUE_SYNC_NOTE=null;
 // 執行結果失效原因（來源報表換掉 → 上次 Run 的建議不可信）
 let PLN_RESULT_STALE_NOTE=null;
+// 新一輪作業循環的重置紀錄
+let PLN_RESET_NOTE=null;
+
+// ★ 2026-07-16 Gordon：一份新的「匯出儲位安排」報表 ＝ 一個新的作業循環開始。
+//   使用者的實際流程：上傳三份報表 → Run All Steps → 把建議拿到 ERP 執行（新品被排進儲位）
+//   → 隔天/稍後重新下載 ERP 報表再上傳，想看更新後的儲位狀況。
+//   此時手上的「走道報表」與「溢位區報表」都是【上一輪那個時間點的占用快照】，倉庫實況已被
+//   自己剛剛的執行改掉 → 再拿它去 Run 會算出錯誤的儲位建議，而那會被真的執行到現場貨架上。
+//   → 一律清空並強制重新上傳；情境配置與新品佇列一併重置。
+//   儲位總表（貨架母表，不是占用快照）保留，不需重上傳。
+async function plannerResetOnNewArrangeReport(){
+  const hadAisle=(AISLE_REPORT_DATA||[]).filter(r=>!r._ovfUpload).length>0;
+  const hadOvf=!!(STORAGE_MASTER&&STORAGE_MASTER[PLN_OVERFLOW_SHEET_KEY]);
+  const hadQueue=!!(window.NEW_PRODUCT_QUEUE&&window.NEW_PRODUCT_QUEUE.length);
+  const hadResult=!!PLN_LAST_RESULT;
+  AISLE_REPORT_DATA=[];
+  if(hadOvf)delete STORAGE_MASTER[PLN_OVERFLOW_SHEET_KEY];
+  window.NEW_PRODUCT_QUEUE=[];
+  PLN_STEPS_COUNT=1;
+  PLN_LAST_RESULT=null;
+  PLN_QUEUE_SYNC_NOTE=null;PLN_RESULT_STALE_NOTE=null;
+  const rc=document.getElementById('planner-result-card');if(rc)rc.style.display='none';
+  try{await idbPut('aisle_report_rows',[]);}catch(e){}
+  if(hadOvf){try{await idbPut('storage_master_sheets',STORAGE_MASTER);}catch(e){}}
+  try{
+    localStorage.removeItem('planner_aisle_upload_date');
+    localStorage.removeItem('planner_overflow_upload_date');
+    localStorage.removeItem('planner_overflow_count');
+  }catch(e){}
+  PLN_RESET_NOTE=(hadAisle||hadOvf||hadQueue||hadResult)?{aisle:hadAisle,ovf:hadOvf,queue:hadQueue,result:hadResult}:null;
+  if(PLN_RESET_NOTE)console.log('[新一輪作業循環] 已清空走道報表/溢位區/情境配置：',PLN_RESET_NOTE);
+  return PLN_RESET_NOTE;
+}
 
 // 來源報表異動 → 上次 Run 的結果一律作廢（避免拿舊快照的建議去匯出）
 function plannerInvalidateResult(reason){
@@ -2664,11 +2698,25 @@ function plannerSyncNewQueue(reason){
   return changed?rep:null;
 }
 
-function plannerDismissSyncNote(){PLN_QUEUE_SYNC_NOTE=null;PLN_RESULT_STALE_NOTE=null;plannerRenderConfigUI();}
+function plannerDismissSyncNote(){PLN_QUEUE_SYNC_NOTE=null;PLN_RESULT_STALE_NOTE=null;PLN_RESET_NOTE=null;plannerRenderConfigUI();}
 
 // 情境配置頂端橫幅：把「這次上傳到底改了什麼」講清楚，不默默吞掉
 function plannerSyncNoteHtml(){
   const out=[];
+  // ★ 新一輪作業循環的重置提示（最優先、最顯眼；不可關閉直到重新上傳走道報表）
+  if(PLN_RESET_NOTE){
+    const cleared=[];
+    if(PLN_RESET_NOTE.aisle)cleared.push('走道報表');
+    if(PLN_RESET_NOTE.ovf)cleared.push('溢位區 XX/TX 報表');
+    if(PLN_RESET_NOTE.queue)cleared.push('新品佇列');
+    if(PLN_RESET_NOTE.result)cleared.push('上次執行結果');
+    out.push(`<div style="padding:8px 10px;margin-bottom:8px;background:rgba(192,57,43,0.08);border-left:3px solid var(--red);border-radius:3px;font-size:12px;color:var(--text2);line-height:1.6">
+      <b style="color:var(--red)">🔁 已載入新的「匯出儲位安排」報表 → 開始新一輪</b><br>
+      已清空：<b>${cleared.join('、')||'（無）'}</b>　（儲位總表為貨架母表，已保留）<br>
+      <span style="color:var(--text3)">原因：上一輪的建議已在 ERP 執行、倉庫實況已變動，手上的走道報表／溢位區報表是【上一輪那個時間點的占用快照】，再拿來 Run 會算出錯誤的儲位建議。</span><br>
+      <b>請重新上傳最新的走道報表</b>，再從右側「預告進貨明細」重新勾選並傳送待排新品。
+    </div>`);
+  }
   const rep=PLN_QUEUE_SYNC_NOTE;
   if(rep){
     const seg=[],tips=[];
@@ -5729,7 +5777,9 @@ function plannerResetConfig(){
 function plannerRenderConfigUI(){
   const body=document.getElementById('planner-config-body');
   if(!AISLE_REPORT_DATA.length||!Object.keys(STORAGE_MASTER||{}).length){
-    body.innerHTML='<div style="padding:24px;text-align:center;color:var(--text3)">請先上傳走道報表 + 儲位總表</div>';
+    // ★ 2026-07-16: 走道報表被「新一輪」清空後會走到這裡 → 橫幅必須跟著顯示，否則使用者只看到
+    //   「請先上傳走道報表」而不知道為什麼自己剛上傳的報表不見了。
+    body.innerHTML=plannerSyncNoteHtml()+'<div style="padding:24px;text-align:center;color:var(--text3)">請先上傳走道報表 + 儲位總表</div>';
     document.getElementById('planner-result-card').style.display='none';
     return;
   }
