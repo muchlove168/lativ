@@ -997,6 +997,14 @@ async function handleUpload(event){
     Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);
     renderAll();
     updateRelocStats();
+    // ★★★ 2026-07-16 Gordon：renderAll() 完全沒有碰儲位調整/新品安排 tab
+    //   → 上傳新的 EPR 報表後，待排新品數字、情境配置、走道報表全都停在舊狀態（「都沒有變動」）。
+    //   新的庫存查詢總表 = 新一輪作業循環：
+    //     ① 走道報表／溢位區報表／情境配置／新品佇列全部清空（都是上一輪的占用快照，已失效）
+    //     ② 預告進貨明細的「待排新品」依新報表的「儲位」欄重算 → 已被 ERP 排入的自動扣掉
+    await plannerResetOnNewErpReport();
+    renderArrangeCompare();
+    renderPlanner();
     hideLoading();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
@@ -2062,10 +2070,10 @@ async function handleArrangeUpload(event){
     document.getElementById('arrange-status').textContent=`已載入 ${ARRANGE_DATA.length} 筆儲位安排資料（上傳日期：${_arrDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
-    // ★ 2026-07-16 Gordon：新的儲位安排報表 = 新一輪作業循環
-    //   ① 走道報表／溢位區報表／情境配置／新品佇列全部清空（都是上一輪的占用快照，已失效）
-    //   ② 預告進貨明細的「待排新品」改由新報表的「儲位」欄重算 → 已被 ERP 排入的自動歸零
-    await plannerResetOnNewArrangeReport();
+    // ★ 2026-07-16 Gordon：儲位安排報表只是換一份待排清單，不是新一輪（新一輪由 EPR 報表觸發）
+    //   → 佇列重新比對 + planner 重繪即可，不清走道報表
+    plannerInvalidateResult('儲位安排報表已重新上傳');
+    plannerSyncNewQueue('儲位安排報表重新上傳');
     renderArrangeCompare();
     renderPlanner();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
@@ -2565,19 +2573,30 @@ async function clearPlannerMaster(){
 //      異動點呼叫 plannerSyncNewQueue() + plannerInvalidateResult()。
 // ═══════════════════════════════════════════════════════════════════════════
 
-// 已排入索引（單一真實來源）：
-//   erp  = ERP「匯出儲位安排」的「儲位」欄已有值 → ERP 認定已排入（權威）
-//   live = 走道報表／溢位區報表實況已占用該商品編號 → 實體已在架上
+// 已排入索引（單一真實來源）—— 2026-07-16 修正：訊號來源錯了，重做。
+//   ★ erp  = 【庫存查詢總表 / EPR 主報表 = DB】的「儲位」欄有值 → ERP 說這個商品編號已在儲位（權威）
+//            這才是 Gordon 圖3 查 744760250 → C05-175-3 看到的那個欄位。
+//     （原本誤用「匯出儲位安排」的 slot 欄 → 該欄 380 筆裡 377 筆是空的、3 筆是 'Z' 這種非儲位值，
+//       所以永遠判不出「已排入」，數字自然不會動。現改為只採用真實儲位格式的值。）
+//     live = 走道報表／溢位區報表實況已占用該商品編號
 // 兩者皆視為「已排入」，一律不再列入待排、不再送進新品引擎（避免同 SKU 排兩處）。
+function plnIsRealSlot(s){return !!plnParseCell(String(s||'').trim());}
 function plnBuildPlacedIndex(){
   const erpSlot={},liveSlot={};
+  // ① 庫存查詢總表（EPR 主報表）— 權威
+  (typeof DB!=='undefined'?DB||[]:[]).forEach(r=>{
+    const c=String(r.商品編號||'').trim(),s=String(r.儲位||'').trim();
+    if(c&&plnIsRealSlot(s)&&!erpSlot[c])erpSlot[c]=s;
+  });
+  // ② 匯出儲位安排自己的「儲位」欄（ERP 偶爾會回填；非儲位格式如 'Z' 一律忽略）
   (typeof ARRANGE_DATA!=='undefined'?ARRANGE_DATA||[]:[]).forEach(r=>{
     const c=String(r.code||'').trim(),s=String(r.slot||'').trim();
-    if(c&&s&&!erpSlot[c])erpSlot[c]=s;
+    if(c&&plnIsRealSlot(s)&&!erpSlot[c])erpSlot[c]=s;
   });
+  // ③ 走道報表／溢位區報表實況
   (typeof AISLE_REPORT_DATA!=='undefined'?AISLE_REPORT_DATA||[]:[]).forEach(r=>{
     const c=String(r['商品編號']||'').trim(),s=String(r['儲位']||'').trim();
-    if(c&&s&&!liveSlot[c])liveSlot[c]=s;
+    if(c&&plnIsRealSlot(s)&&!erpSlot[c]&&!liveSlot[c])liveSlot[c]=s;
   });
   return {erpSlot,liveSlot};
 }
@@ -2596,14 +2615,15 @@ let PLN_RESULT_STALE_NOTE=null;
 // 新一輪作業循環的重置紀錄
 let PLN_RESET_NOTE=null;
 
-// ★ 2026-07-16 Gordon：一份新的「匯出儲位安排」報表 ＝ 一個新的作業循環開始。
-//   使用者的實際流程：上傳三份報表 → Run All Steps → 把建議拿到 ERP 執行（新品被排進儲位）
-//   → 隔天/稍後重新下載 ERP 報表再上傳，想看更新後的儲位狀況。
+// ★ 2026-07-16 Gordon：一份新的【EPR 報表 / 庫存查詢總表】＝ 一個新的作業循環開始。
+//   實際流程：一早上傳庫存查詢總表 + 匯出儲位安排 + 匯出預告進貨表 + 走道報表(C056)
+//   → Run All Steps → 把建議拿到公司 ERP 執行（新品被排進儲位）
+//   → 重新下載一份新的庫存查詢總表再上傳，想看更新後的儲位狀況。
 //   此時手上的「走道報表」與「溢位區報表」都是【上一輪那個時間點的占用快照】，倉庫實況已被
 //   自己剛剛的執行改掉 → 再拿它去 Run 會算出錯誤的儲位建議，而那會被真的執行到現場貨架上。
 //   → 一律清空並強制重新上傳；情境配置與新品佇列一併重置。
 //   儲位總表（貨架母表，不是占用快照）保留，不需重上傳。
-async function plannerResetOnNewArrangeReport(){
+async function plannerResetOnNewErpReport(){
   const hadAisle=(AISLE_REPORT_DATA||[]).filter(r=>!r._ovfUpload).length>0;
   const hadOvf=!!(STORAGE_MASTER&&STORAGE_MASTER[PLN_OVERFLOW_SHEET_KEY]);
   const hadQueue=!!(window.NEW_PRODUCT_QUEUE&&window.NEW_PRODUCT_QUEUE.length);
@@ -2711,9 +2731,9 @@ function plannerSyncNoteHtml(){
     if(PLN_RESET_NOTE.queue)cleared.push('新品佇列');
     if(PLN_RESET_NOTE.result)cleared.push('上次執行結果');
     out.push(`<div style="padding:8px 10px;margin-bottom:8px;background:rgba(192,57,43,0.08);border-left:3px solid var(--red);border-radius:3px;font-size:12px;color:var(--text2);line-height:1.6">
-      <b style="color:var(--red)">🔁 已載入新的「匯出儲位安排」報表 → 開始新一輪</b><br>
+      <b style="color:var(--red)">🔁 已載入新的 EPR 報表（庫存查詢總表）→ 開始新一輪</b><br>
       已清空：<b>${cleared.join('、')||'（無）'}</b>　（儲位總表為貨架母表，已保留）<br>
-      <span style="color:var(--text3)">原因：上一輪的建議已在 ERP 執行、倉庫實況已變動，手上的走道報表／溢位區報表是【上一輪那個時間點的占用快照】，再拿來 Run 會算出錯誤的儲位建議。</span><br>
+      <span style="color:var(--text3)">原因：上一輪的建議已在公司 ERP 執行、倉庫實況已變動，手上的走道報表／溢位區報表是【上一輪那個時間點的占用快照】，再拿來 Run 會算出錯誤的儲位建議。</span><br>
       <b>請重新上傳最新的走道報表</b>，再從右側「預告進貨明細」重新勾選並傳送待排新品。
     </div>`);
   }
