@@ -9341,7 +9341,7 @@ function rollupDayMap(data){
     const code=String(g(a,'商品編號')||'').trim();if(!code)continue;
     m.set(code,{stock:+g(a,'銷售庫存')||0,pend:+g(a,'未到量')||0,shelf:+g(a,'架上數量')||0,
       slot:String(g(a,'儲位')||''),pvol:+g(a,'商品材積')||0,svol:+g(a,'儲位材積')||0,
-      pack:String(g(a,'包材')||''),catCode:code});
+      pack:String(g(a,'包材')||''),series:String(g(a,'商品系列')||''),name:String(g(a,'商品名稱')||''),catCode:code});
   }
   return m;
 }
@@ -9351,14 +9351,48 @@ function rollupToStyle(day){
   day.forEach((v,code)=>{
     const k=code.slice(0,7);
     let e=m.get(k);
-    if(!e){e={stock:0,pend:0,shelf:0,slot:v.slot,pvol:0,svol:0,pack:'',catCode:code,_maxStock:-1};m.set(k,e);}
+    if(!e){e={stock:0,pend:0,shelf:0,slot:v.slot,pvol:0,svol:0,pack:'',series:'',name:'',catCode:code,_maxStock:-1};m.set(k,e);}
     e.stock+=v.stock;e.pend+=v.pend;e.shelf+=v.shelf;
     if(v.stock>e._maxStock){e._maxStock=v.stock;e.slot=v.slot;}
     if(v.pvol>e.pvol)e.pvol=v.pvol;
     if(v.svol>e.svol)e.svol=v.svol;
     if(!e.pack&&v.pack)e.pack=v.pack;
+    if(!e.series&&v.series)e.series=v.series;
+    if(!e.name&&v.name)e.name=v.name;
   });
   return m;
+}
+
+// ★ 類別推導（2026-07-17 Gordon：「類別用推導的，這沒那麼重要」）
+//   優先序：① 26FW 名單直接命中（系統內權威）
+//           ② 包材規則 — 配件只看包材（Gordon 確認的 16 種配件包材）＋
+//              Bra袋→BRA、襪子夾鏈袋→襪子、免洗內褲袋→免洗內褲、
+//              滑齒→看商品名稱分 羽絨/西裝外套/機能外套（滑齒為共用包材，不能單獨判羽絨）、
+//              鞋盒→鞋子、皮帶盒→皮帶、商務襯衫袋→商務襯衫、套裝大袋→套裝大袋
+//           ③ 都沒中 → 直接用「商品系列」欄當類別
+//   推導值可能與季別清單的正式類別名有出入（正規化表是之後的事），先求可用
+const ROLLUP_ACC_PACKS=['Baby套裝組夾鏈袋','一般夾鍊袋','女內褲袋','包屁衣袋','男內褲袋','迷你OPP袋','童&Baby袋','新無痕內褲袋','新-發熱一般袋','新-發熱小褲袋','新-發熱極暖袋','新二入內衣袋','三入圍兜夾鏈袋'];
+function rollupDeriveCat(v){
+  const lk=(window.EMBEDDED_FW26_LOOKUP||{})[v.catCode];
+  if(lk)return lk;
+  const p=v.pack||'',nm=v.name||'';
+  if(p){
+    if(p.indexOf('Bra袋')>=0)return 'BRA';
+    if(p.indexOf('襪子夾鏈袋')===0)return '襪子';
+    if(p.indexOf('免洗內褲袋')===0)return '免洗內褲';
+    if(p.indexOf('滑齒')===0){
+      if(nm.indexOf('西裝')>=0)return '西裝外套';
+      if(nm.indexOf('機能外套')>=0)return '機能外套';
+      return '羽絨';   // 滑齒 986 筆中 962 為羽絨，其餘由商品名稱攔下
+    }
+    if(p==='男鞋盒'||p==='女鞋盒')return '鞋子';
+    if(p==='皮帶盒')return '皮帶';
+    if(p==='商務襯衫袋')return '商務襯衫';
+    if(p==='套裝大袋')return '套裝大袋';
+    if(p.indexOf('涼感袋')===0||p.indexOf('童內褲袋')===0)return '配件';
+    if(ROLLUP_ACC_PACKS.indexOf(p)>=0)return '配件';
+  }
+  return v.series||'';
 }
 
 // 建立單一期別的彙總並寫入 IndexedDB
@@ -9390,7 +9424,6 @@ async function rollupBuildPeriod(level,idbKey,periodKey,dates,anchorDate){
     prev=day;
   }
   if(!acc.size)return null;
-  const lookup=window.EMBEDDED_FW26_LOOKUP||{};
   const codes=Array.from(acc.keys()).sort();
   const payload={codes:codes,sold:[],endStock:[],availDays:[],slot:[],pending:[],shelf:[],prodVol:[],slotVol:[],pack:[],cat:[]};
   codes.forEach(k=>{
@@ -9398,12 +9431,12 @@ async function rollupBuildPeriod(level,idbKey,periodKey,dates,anchorDate){
     payload.sold.push(e.sold);payload.endStock.push(v.stock);payload.availDays.push(e.avail);
     payload.slot.push(v.slot);payload.pending.push(v.pend);payload.shelf.push(v.shelf);
     payload.prodVol.push(v.pvol);payload.slotVol.push(v.svol);payload.pack.push(v.pack);
-    payload.cat.push(lookup[v.catCode]||'');
+    payload.cat.push(rollupDeriveCat(v));
   });
   const first=dates[0],last=dates[dates.length-1];
   const daysCovered=anchorDate?rollupDayDiff(anchorDate,last):(dates.length>=2?rollupDayDiff(first,last):0);
   const gz=await rollupGzip(JSON.stringify(payload));
-  const env={v:1,level:level,period:periodKey,builtAt:new Date().toISOString(),
+  const env={v:2,level:level,period:periodKey,builtAt:new Date().toISOString(),
     anchorDate:anchorDate||'',dates:dates,daysCovered:daysCovered,nCodes:codes.length,
     b64:gz.b64||null,json:gz.json!==undefined?gz.json:null};
   await idbPut(idbKey,env);
@@ -9445,7 +9478,12 @@ async function rollupBackfillMissing(){
   if(!all.length)return;
   let keys=[];
   try{keys=(await idbKeys()).map(String);}catch(e){}
-  const have=new Set(keys.filter(k=>k.indexOf('rollup_')===0));
+  // v<2 的舊彙總視同缺少 → 重建（v2 起類別改為推導制）
+  const have=new Set();
+  for(const k of keys.filter(k=>k.indexOf('rollup_')===0)){
+    let env=null;try{env=await idbGet(k);}catch(e){}
+    if(env&&(env.v||0)>=2)have.add(k);
+  }
   const wkGroups={},moGroups={};
   all.forEach(d=>{
     const wk=rollupISOWeek(d),mo=rollupMonthKey(d);
