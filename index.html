@@ -9736,8 +9736,14 @@ function ph1Render(){
   const tb=document.getElementById('ph1-body');if(!tb)return;
   if(!PH1_RESULT){tb.innerHTML='<tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr>';return;}
   const view=document.getElementById('ph1-view').value;
-  const list=(ph1SkuViews(PH1_RESULT.skuRows||[])[view]||[]).slice();
-  // 排序
+  const full=(ph1SkuViews(PH1_RESULT.skuRows||[])[view]||[]).slice();
+  // ★ 2026-07-18 Gordon：先取「日均前 X 筆」再排序呈現 — 拉下1F取日均最高前X（買氣好→拉下），
+  //   推上2F取日均最低前X（賣不動→推上）；全部視圖取日均最高前X
+  const limEl=document.getElementById('ph1-limit-n');
+  const lim=Math.max(1,parseInt(limEl&&limEl.value)||100);
+  full.sort(view==='push'?((a,b)=>(a.daily-b.daily)||(b.ss-a.ss)):((a,b)=>(b.daily-a.daily)||(b.sold-a.sold)));
+  const list=full.slice(0,lim);
+  // 再依表頭排序（預設儲位升冪）
   const k=PH1_SORT.key,dir=PH1_SORT.asc?1:-1;
   const strKeys={code:1,slot:1,pack:1};
   list.sort((a,b)=>strKeys[k]?String(a[k]||'').localeCompare(String(b[k]||''))*dir:((+a[k]||0)-(+b[k]||0))*dir);
@@ -9746,14 +9752,11 @@ function ph1Render(){
     const el=document.getElementById('ph1-sort-'+c);if(!el)return;
     el.textContent=PH1_SORT.key===c?(PH1_SORT.asc?'▲':'▼'):'';
   });
-  // 顯示筆數
-  const limEl=document.getElementById('ph1-limit-n');
-  const lim=Math.max(1,parseInt(limEl&&limEl.value)||100);
   const cnt=document.getElementById('ph1-count-info');
-  if(cnt)cnt.textContent='顯示 '+Math.min(lim,list.length).toLocaleString()+' / '+list.length.toLocaleString()+' 筆';
+  if(cnt)cnt.textContent=(view==='push'?'日均最低前 ':'日均最高前 ')+list.length.toLocaleString()+' 筆 / 共 '+full.length.toLocaleString()+' 筆';
   const td='padding:4px 6px;border-bottom:1px solid var(--border);';
   let html='';
-  list.slice(0,lim).forEach(r=>{
+  list.forEach(r=>{
     const bg=r.gate?'background:rgba(240,200,60,0.20)':'';
     html+='<tr style="'+bg+'">'
       +'<td style="'+td+'font-family:monospace">'+r.code+'</td>'
@@ -10514,7 +10517,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
           <tbody id="ph1-body"><tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr></tbody>
         </table>
       </div>
-      <div style="padding:6px 12px 10px;font-size:11px;color:var(--text3)">單 SKU 呈現：拉下1F＝現在 2F 的過季 SKU、推上2F＝現在 1F 的過季 SKU。點表頭排序（預設儲位升冪）；黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類（不列入推上2F）。鎖定款不顯示：盒類/滑齒袋/商務襯衫＝鎖2F；配件類/寢具＝鎖1F。本表只出排名，不會改任何儲位。</div>
+      <div style="padding:6px 12px 10px;font-size:11px;color:var(--text3)">單 SKU 呈現，筆數＝取「日均前 X」：拉下1F＝2F 過季 SKU 取日均<b>最高</b>前 X、推上2F＝1F 過季 SKU 取日均<b>最低</b>前 X，再依表頭排序呈現（預設儲位升冪）。黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類（不列入推上2F）。鎖定款不顯示：盒類/滑齒袋/商務襯衫＝鎖2F；配件類/寢具＝鎖1F。本表只出排名，不會改任何儲位。</div>
     </div>
   </div>
 </div>
