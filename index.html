@@ -9505,6 +9505,165 @@ async function rollupBackfillMissing(){
   try{rollupUpdateStatusUI();}catch(e){}
 }
 
+// ═══ 銷售比對 階段1：過季款色 1F/2F 調換排名（規格 v0.2 §L1/L3）═══
+// 只出排名，不動任何儲位。資料源：hist_epr_*（40 天日報表）逐日配對。
+// 公式：cumsold=總採購量−未到量−銷售庫存；日銷量=max(0,Δcumsold)；
+//       有效天=配對起日庫存>0（跨快照缺漏日以間隔天數修正）；
+//       真實日均=Σ款色銷量÷有效天；每格效率=日均÷占格數；
+//       趨勢係數=近7日日均÷前21日日均（資料不足=1）；1F分數=每格效率×趨勢係數。
+// ★ 配件類廣義定義（Gordon 2026-07-18）：ROLLUP_ACC_PACKS＋Bra袋/內褲袋/襪子/免洗內褲/內衣袋/圍兜/包屁衣/鞋盒/皮帶盒 → 一律只在 1F，不列入推上2F。
+// 離線驗證 2026-07-18：3 日快照（07/14-16）與 Python 原型逐款一致（款色 2,495、總銷量 86,264、拉下 1,211、推上 820）。
+const PH1_ACC_RE=/Bra袋|內褲袋|襪子|免洗內褲|內衣袋|圍兜|包屁衣|鞋盒|皮帶盒/;
+function ph1IsAcc(pack){pack=String(pack||'');return ROLLUP_ACC_PACKS.indexOf(pack)>=0||PH1_ACC_RE.test(pack);}
+function ph1Floor(slot){const c=String(slot||'').charAt(0);return 'ABCDEF'.indexOf(c)>=0?'1F':'PLM'.indexOf(c)>=0?'2F':(c==='X'||c==='T')?'溢位':'?';}
+function ph1Seg(code){const p=String(code).slice(0,2);return (p==='72'||p==='73')?'26SS':(p==='74'||p==='75')?'26FW':'過季';}
+function ph1DayMap(data){
+  const ix={};(data.cols||[]).forEach((c,i)=>{ix[c]=i;});
+  const g=(a,c)=>ix[c]!==undefined?a[ix[c]]:'';
+  const m=new Map();
+  for(const a of data.rows){
+    const code=String(g(a,'商品編號')||'').trim();
+    if(code.length!==9)continue;
+    m.set(code,{buy:+g(a,'總採購量')||0,pend:+g(a,'未到量')||0,stock:+g(a,'銷售庫存')||0,
+      slot:String(g(a,'儲位')||''),pack:String(g(a,'包材')||''),series:String(g(a,'商品系列')||''),name:String(g(a,'商品名稱')||'')});
+  }
+  return m;
+}
+// 核心：dates（升冪）＋loadDay(d)→{cols,rows}|null。回傳 {rows:[款色...], meta}
+async function ph1ComputeFrom(dates,loadDay){
+  dates=dates.slice().sort();
+  if(dates.length<2)throw new Error('需要至少 2 天系統已存日報表');
+  const lastDate=dates[dates.length-1];
+  const acc=new Map();let prev=null,prevDate=null,totSold=0,usedDates=[];
+  for(const d of dates){
+    let data=null;try{data=await loadDay(d);}catch(e){}
+    if(!data||!data.rows||!data.rows.length)continue;
+    const day=ph1DayMap(data);usedDates.push(d);
+    if(prev){
+      const gap=rollupDayDiff(prevDate,d);
+      const backEnd=rollupDayDiff(d,lastDate);
+      day.forEach((v,k)=>{
+        const p=prev.get(k);if(!p)return;
+        let e=acc.get(k);if(!e){e={sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,last:null};acc.set(k,e);}
+        const s=(v.buy-v.pend-v.stock)-(p.buy-p.pend-p.stock);
+        const sold=s>0?s:0,av=(p.stock>0)?gap:0;
+        e.sold+=sold;e.availD+=av;totSold+=sold;
+        if(backEnd<7){e.s7+=sold;e.a7+=av;}
+        else if(backEnd<28){e.s21+=sold;e.a21+=av;}
+      });
+    }
+    day.forEach((v,k)=>{let e=acc.get(k);if(!e){e={sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,last:null};acc.set(k,e);}e.last=v;});
+    prev=day;prevDate=d;
+  }
+  // 款色彙總（L1：只取過季）
+  const fams=new Map();
+  acc.forEach((e,code)=>{
+    if(!e.last||ph1Seg(code)!=='過季')return;
+    const f=code.slice(0,7);
+    let fm=fams.get(f);
+    if(!fm){fm={fam:f,name:e.last.name,series:e.last.series,pack:'',nSku:0,slots:0,sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,ss:0,pend:0,f1:0,f2:0,fx:0,gate:false,acc:false};fams.set(f,fm);}
+    fm.nSku++;fm.sold+=e.sold;fm.s7+=e.s7;fm.s21+=e.s21;
+    if(e.availD>fm.availD)fm.availD=e.availD;
+    if(e.a7>fm.a7)fm.a7=e.a7;
+    if(e.a21>fm.a21)fm.a21=e.a21;
+    fm.ss+=e.last.stock;fm.pend+=e.last.pend;
+    if(e.last.slot){fm.slots++;const fl=ph1Floor(e.last.slot);if(fl==='1F')fm.f1++;else if(fl==='2F')fm.f2++;else if(fl==='溢位')fm.fx++;}
+    if(!fm.pack&&e.last.pack)fm.pack=e.last.pack;
+    if(ph1IsAcc(e.last.pack))fm.acc=true;
+    const thr=ph1IsAcc(e.last.pack)?70:40;
+    if(e.last.stock<thr&&(e.last.pend||0)>0)fm.gate=true;
+  });
+  const rows=[];
+  fams.forEach(fm=>{
+    if(!fm.slots)return;
+    const avail=Math.max(fm.availD,1);
+    fm.daily=fm.sold/avail;
+    fm.eff=fm.daily/fm.slots;
+    const d7=fm.s7/Math.max(fm.a7,1),d21=fm.s21/Math.max(fm.a21,1);
+    fm.trend=(fm.a21>0&&d21>0)?(d7/d21):1;
+    fm.score=fm.eff*fm.trend;
+    rows.push(fm);
+  });
+  return {rows:rows,meta:{dates:usedDates,days:usedDates.length,totSold:totSold,
+    daily:usedDates.length>1?Math.round(totSold/rollupDayDiff(usedDates[0],usedDates[usedDates.length-1])):0}};
+}
+// 三視圖排序（拉下1F：分數高→低；推上2F：分數低→高＋排除配件；全部：分數高→低）
+function ph1Views(rows){
+  return {
+    pull:rows.filter(r=>r.f2>0).slice().sort((a,b)=>(b.score-a.score)||(b.sold-a.sold)),
+    push:rows.filter(r=>r.f1>0&&!r.acc).slice().sort((a,b)=>(a.score-b.score)||(b.ss-a.ss)),
+    all:rows.slice().sort((a,b)=>(b.score-a.score)||(b.sold-a.sold))
+  };
+}
+// ── 階段1 UI ──
+let PH1_RESULT=null;
+async function ph1Run(){
+  const st=document.getElementById('ph1-status'),btn=document.getElementById('ph1-run-btn');
+  try{
+    btn.disabled=true;st.textContent='計算中…';
+    const dates=histEprDates().slice().sort();
+    PH1_RESULT=await ph1ComputeFrom(dates,d=>idbGet(HIST_EPR_PREFIX+d));
+    const m=PH1_RESULT.meta;
+    st.textContent=m.dates[0]+' ~ '+m.dates[m.dates.length-1]+'（'+m.days+' 天）・過季款色 '+PH1_RESULT.rows.length+'・全SKU估計日均 '+m.daily.toLocaleString()+' 件';
+    const ex=document.getElementById('ph1-export-btn');if(ex)ex.style.display='';
+    ph1Render();
+  }catch(e){st.textContent='⚠ '+(e&&e.message?e.message:e);}
+  finally{btn.disabled=false;}
+}
+function ph1Render(){
+  const tb=document.getElementById('ph1-body');if(!tb)return;
+  const lv=document.getElementById('ph1-limit-val');if(lv)lv.textContent=document.getElementById('ph1-limit').value;
+  if(!PH1_RESULT){tb.innerHTML='<tr><td colspan="17" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr>';return;}
+  const view=document.getElementById('ph1-view').value;
+  const list=ph1Views(PH1_RESULT.rows)[view]||[];
+  const lim=+document.getElementById('ph1-limit').value||200;
+  const mk=view==='pull'?'f2':view==='push'?'f1':null;
+  const td='padding:4px 6px;border-bottom:1px solid var(--border);';
+  let cum=0,html='';
+  list.forEach((r,i)=>{
+    let bg='';
+    if(r.gate)bg='background:rgba(240,200,60,0.20)';
+    else if(mk){cum+=r[mk];if(cum<=lim)bg='background:rgba(45,122,74,0.10)';}
+    html+='<tr style="'+bg+'">'
+      +'<td style="'+td+'text-align:right;color:var(--text3)">'+(i+1)+'</td>'
+      +'<td style="'+td+'font-family:monospace">'+r.fam+'</td>'
+      +'<td style="'+td+'">'+r.name+'</td>'
+      +'<td style="'+td+'">'+r.series+'</td>'
+      +'<td style="'+td+'">'+r.pack+(r.acc?' <span style="color:var(--red);font-weight:700">配</span>':'')+'</td>'
+      +'<td style="'+td+'text-align:right">'+r.nSku+'</td>'
+      +'<td style="'+td+'text-align:right">'+r.slots+'</td>'
+      +'<td style="'+td+'text-align:right">'+r.sold+'</td>'
+      +'<td style="'+td+'text-align:right">'+Math.max(r.availD,1)+'</td>'
+      +'<td style="'+td+'text-align:right">'+r.daily.toFixed(2)+'</td>'
+      +'<td style="'+td+'text-align:right;font-weight:700">'+r.eff.toFixed(4)+'</td>'
+      +'<td style="'+td+'text-align:right">'+r.trend.toFixed(2)+'</td>'
+      +'<td style="'+td+'text-align:right;font-weight:700">'+r.score.toFixed(4)+'</td>'
+      +'<td style="'+td+'text-align:right">'+r.ss.toLocaleString()+'</td>'
+      +'<td style="'+td+'text-align:right">'+r.pend.toLocaleString()+'</td>'
+      +'<td style="'+td+'text-align:center">'+r.f1+'/'+r.f2+(r.fx?'/'+r.fx:'')+'</td>'
+      +'<td style="'+td+'text-align:center">'+(r.gate?'★':'')+'</td>'
+      +'</tr>';
+  });
+  tb.innerHTML=html||'<tr><td colspan="17" style="padding:32px;text-align:center;color:var(--text3)">此視圖無資料</td></tr>';
+}
+function ph1Export(){
+  if(!PH1_RESULT){alert('請先計算排名');return;}
+  const V=ph1Views(PH1_RESULT.rows),lim=+document.getElementById('ph1-limit').value||200;
+  const HDR=['款色','商品名稱','商品系列','包材','SKU數','占格數','期間銷量','有效天','日均','每格效率','趨勢係數','1F分數','庫存','未到量','1F','2F','溢位','守門','配件類','切線內'];
+  const wb=XLSX.utils.book_new();
+  [['拉下1F候選','pull','f2'],['推上2F候選','push','f1'],['全部過季款色','all',null]].forEach(function(cfg){
+    const k=cfg[1],mk=cfg[2];let cum=0;
+    const aoa=[HDR].concat(V[k].map(function(r){
+      let cut='';
+      if(!r.gate&&mk){cum+=r[mk];if(cum<=lim)cut='●';}
+      return [r.fam,r.name,r.series,r.pack,r.nSku,r.slots,r.sold,Math.max(r.availD,1),+r.daily.toFixed(2),+r.eff.toFixed(4),+r.trend.toFixed(2),+r.score.toFixed(4),r.ss,r.pend,r.f1,r.f2,r.fx,r.gate?'★':'',r.acc?'配':'',cut];
+    }));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),cfg[0]);
+  });
+  const last=PH1_RESULT.meta.dates[PH1_RESULT.meta.dates.length-1]||'';
+  XLSX.writeFile(wb,'銷售比對_過季款色排名_'+last.replace(/-/g,'')+'.xlsx');
+}
+
 // 銷售比對 tab 的彙總狀態列
 async function rollupUpdateStatusUI(){
   const el=document.getElementById('rollup-status');if(!el)return;
@@ -10185,6 +10344,49 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
           <tbody id="compare-body"><tr><td colspan="11" style="padding:32px;text-align:center;color:var(--text3)">尚未上傳歷史 ERP 報表</td></tr></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- 階段1：過季款色 1F/2F 調換排名 -->
+    <div class="card" id="ph1-card" style="margin-top:14px">
+      <div class="card-title" style="gap:8px;flex-wrap:wrap">
+        <span class="dot"></span>過季款色排名（1F/2F 調換・階段1）
+        <button id="ph1-run-btn" onclick="ph1Run()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)">▶ 計算排名</button>
+        <select id="ph1-view" onchange="ph1Render()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:12px;font-family:var(--font)">
+          <option value="pull" selected>拉下1F候選（分數高→低）</option>
+          <option value="push">推上2F候選（分數低→高・排除配件）</option>
+          <option value="all">全部過季款色</option>
+        </select>
+        <span style="font-size:11px;color:var(--text3)">一輪 SKU 數</span>
+        <input type="range" id="ph1-limit" min="50" max="400" step="10" value="200" oninput="ph1Render()" style="width:120px;vertical-align:middle">
+        <span id="ph1-limit-val" style="font-weight:700;font-size:12px;min-width:28px;display:inline-block">200</span>
+        <button id="ph1-export-btn" onclick="ph1Export()" style="display:none;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:var(--font)">⬇ 匯出 xlsx</button>
+        <span id="ph1-status" style="font-size:11px;color:var(--text3)"></span>
+      </div>
+      <div style="max-height:60vh;min-height:200px;overflow:auto">
+        <table id="tbl-ph1" style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">#</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">款色</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">系列</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">包材</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">SKU</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">占格</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">期間銷量</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">有效天</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">日均</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08)">每格效率</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">趨勢</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08)">1F分數</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">庫存</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">未到</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:center">1F/2F</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:center">守門</th>
+          </tr></thead>
+          <tbody id="ph1-body"><tr><td colspan="17" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr></tbody>
+        </table>
+      </div>
+      <div style="padding:6px 12px 10px;font-size:11px;color:var(--text3)">綠底＝累計搬移 ≤ 一輪上限（Gordon：一輪 100–200 SKU，有空間再下一輪）；黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類（只在1F，一律不列入推上2F）。本表只出排名，不會改任何儲位。</div>
     </div>
   </div>
 </div>
