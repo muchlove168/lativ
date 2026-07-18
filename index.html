@@ -9511,10 +9511,18 @@ async function rollupBackfillMissing(){
 //       有效天=配對起日庫存>0（跨快照缺漏日以間隔天數修正）；
 //       真實日均=Σ款色銷量÷有效天；每格效率=日均÷占格數；
 //       趨勢係數=近7日日均÷前21日日均（資料不足=1）；1F分數=每格效率×趨勢係數。
-// ★ 配件類廣義定義（Gordon 2026-07-18）：ROLLUP_ACC_PACKS＋Bra袋/內褲袋/襪子/免洗內褲/內衣袋/圍兜/包屁衣/鞋盒/皮帶盒 → 一律只在 1F，不列入推上2F。
+// ★ 配件類廣義定義（Gordon 2026-07-18）：ROLLUP_ACC_PACKS＋Bra袋/內褲袋/襪子/免洗內褲/內衣袋/圍兜/包屁衣 → 一律只在 1F，不列入推上2F。
+// ★ 鎖定規則（Gordon 2026-07-18）：盒類(鞋盒/皮帶盒)、滑齒袋(羽絨/西裝/機能外套)、商務襯衫 → 鎖2F；
+//   配件類(廣義)、寢具(商品系列) → 鎖1F。鎖定款不進任何排名視圖，只在狀態列顯示排除數。
 // 離線驗證 2026-07-18：3 日快照（07/14-16）與 Python 原型逐款一致（款色 2,495、總銷量 86,264、拉下 1,211、推上 820）。
-const PH1_ACC_RE=/Bra袋|內褲袋|襪子|免洗內褲|內衣袋|圍兜|包屁衣|鞋盒|皮帶盒/;
+const PH1_ACC_RE=/Bra袋|內褲袋|襪子|免洗內褲|內衣袋|圍兜|包屁衣/;
 function ph1IsAcc(pack){pack=String(pack||'');return ROLLUP_ACC_PACKS.indexOf(pack)>=0||PH1_ACC_RE.test(pack);}
+function ph1LockOf(pack,series){
+  pack=String(pack||'');series=String(series||'');
+  if(pack.indexOf('滑齒')===0||pack.indexOf('鞋盒')>=0||pack==='皮帶盒'||pack==='商務襯衫袋')return '2F';
+  if(ph1IsAcc(pack)||series==='寢具')return '1F';
+  return '';
+}
 function ph1Floor(slot){const c=String(slot||'').charAt(0);return 'ABCDEF'.indexOf(c)>=0?'1F':'PLM'.indexOf(c)>=0?'2F':(c==='X'||c==='T')?'溢位':'?';}
 function ph1Seg(code){const p=String(code).slice(0,2);return (p==='72'||p==='73')?'26SS':(p==='74'||p==='75')?'26FW':'過季';}
 function ph1DayMap(data){
@@ -9561,15 +9569,17 @@ async function ph1ComputeFrom(dates,loadDay){
     if(!e.last||ph1Seg(code)!=='過季')return;
     const f=code.slice(0,7);
     let fm=fams.get(f);
-    if(!fm){fm={fam:f,name:e.last.name,series:e.last.series,pack:'',nSku:0,slots:0,sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,ss:0,pend:0,f1:0,f2:0,fx:0,gate:false,acc:false};fams.set(f,fm);}
+    if(!fm){fm={fam:f,name:e.last.name,series:e.last.series,pack:'',nSku:0,slots:0,sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,ss:0,pend:0,f1:0,f2:0,fx:0,gate:false,acc:false,lock:'',slotList:[]};fams.set(f,fm);}
     fm.nSku++;fm.sold+=e.sold;fm.s7+=e.s7;fm.s21+=e.s21;
     if(e.availD>fm.availD)fm.availD=e.availD;
     if(e.a7>fm.a7)fm.a7=e.a7;
     if(e.a21>fm.a21)fm.a21=e.a21;
     fm.ss+=e.last.stock;fm.pend+=e.last.pend;
-    if(e.last.slot){fm.slots++;const fl=ph1Floor(e.last.slot);if(fl==='1F')fm.f1++;else if(fl==='2F')fm.f2++;else if(fl==='溢位')fm.fx++;}
+    if(e.last.slot){fm.slots++;fm.slotList.push(e.last.slot);const fl=ph1Floor(e.last.slot);if(fl==='1F')fm.f1++;else if(fl==='2F')fm.f2++;else if(fl==='溢位')fm.fx++;}
     if(!fm.pack&&e.last.pack)fm.pack=e.last.pack;
     if(ph1IsAcc(e.last.pack))fm.acc=true;
+    const lk=ph1LockOf(e.last.pack,e.last.series);
+    if(lk==='2F')fm.lock='2F';else if(lk==='1F'&&fm.lock!=='2F')fm.lock='1F';
     const thr=ph1IsAcc(e.last.pack)?70:40;
     if(e.last.stock<thr&&(e.last.pend||0)>0)fm.gate=true;
   });
@@ -9587,12 +9597,13 @@ async function ph1ComputeFrom(dates,loadDay){
   return {rows:rows,meta:{dates:usedDates,days:usedDates.length,totSold:totSold,
     daily:usedDates.length>1?Math.round(totSold/rollupDayDiff(usedDates[0],usedDates[usedDates.length-1])):0}};
 }
-// 三視圖排序（拉下1F：分數高→低；推上2F：分數低→高＋排除配件；全部：分數高→低）
+// 三視圖排序（拉下1F：分數高→低；推上2F：分數低→高；全部：分數高→低）。鎖定款（lock）不進任何視圖。
 function ph1Views(rows){
+  const act=rows.filter(r=>!r.lock);
   return {
-    pull:rows.filter(r=>r.f2>0).slice().sort((a,b)=>(b.score-a.score)||(b.sold-a.sold)),
-    push:rows.filter(r=>r.f1>0&&!r.acc).slice().sort((a,b)=>(a.score-b.score)||(b.ss-a.ss)),
-    all:rows.slice().sort((a,b)=>(b.score-a.score)||(b.sold-a.sold))
+    pull:act.filter(r=>r.f2>0).slice().sort((a,b)=>(b.score-a.score)||(b.sold-a.sold)),
+    push:act.filter(r=>r.f1>0&&!r.acc).slice().sort((a,b)=>(a.score-b.score)||(b.ss-a.ss)),
+    all:act.slice().sort((a,b)=>(b.score-a.score)||(b.sold-a.sold))
   };
 }
 // ── 階段1 UI ──
@@ -9604,7 +9615,8 @@ async function ph1Run(){
     const dates=histEprDates().slice().sort();
     PH1_RESULT=await ph1ComputeFrom(dates,d=>idbGet(HIST_EPR_PREFIX+d));
     const m=PH1_RESULT.meta;
-    st.textContent=m.dates[0]+' ~ '+m.dates[m.dates.length-1]+'（'+m.days+' 天）・過季款色 '+PH1_RESULT.rows.length+'・全SKU估計日均 '+m.daily.toLocaleString()+' 件';
+    const lk1=PH1_RESULT.rows.filter(r=>r.lock==='1F').length,lk2=PH1_RESULT.rows.filter(r=>r.lock==='2F').length;
+    st.textContent=m.dates[0]+' ~ '+m.dates[m.dates.length-1]+'（'+m.days+' 天）・過季款色 '+(PH1_RESULT.rows.length-lk1-lk2)+'（鎖定排除 '+(lk1+lk2)+'：鎖1F '+lk1+'・鎖2F '+lk2+'）・全SKU估計日均 '+m.daily.toLocaleString()+' 件';
     const ex=document.getElementById('ph1-export-btn');if(ex)ex.style.display='';
     ph1Render();
   }catch(e){st.textContent='⚠ '+(e&&e.message?e.message:e);}
@@ -9613,7 +9625,7 @@ async function ph1Run(){
 function ph1Render(){
   const tb=document.getElementById('ph1-body');if(!tb)return;
   const lv=document.getElementById('ph1-limit-val');if(lv)lv.textContent=document.getElementById('ph1-limit').value;
-  if(!PH1_RESULT){tb.innerHTML='<tr><td colspan="17" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr>';return;}
+  if(!PH1_RESULT){tb.innerHTML='<tr><td colspan="18" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr>';return;}
   const view=document.getElementById('ph1-view').value;
   const list=ph1Views(PH1_RESULT.rows)[view]||[];
   const lim=+document.getElementById('ph1-limit').value||200;
@@ -9630,6 +9642,7 @@ function ph1Render(){
       +'<td style="'+td+'">'+r.name+'</td>'
       +'<td style="'+td+'">'+r.series+'</td>'
       +'<td style="'+td+'">'+r.pack+(r.acc?' <span style="color:var(--red);font-weight:700">配</span>':'')+'</td>'
+      +'<td style="'+td+'font-family:monospace;font-size:10px;max-width:180px;word-break:break-all">'+r.slotList.join(', ')+'</td>'
       +'<td style="'+td+'text-align:right">'+r.nSku+'</td>'
       +'<td style="'+td+'text-align:right">'+r.slots+'</td>'
       +'<td style="'+td+'text-align:right">'+r.sold+'</td>'
@@ -9644,19 +9657,19 @@ function ph1Render(){
       +'<td style="'+td+'text-align:center">'+(r.gate?'★':'')+'</td>'
       +'</tr>';
   });
-  tb.innerHTML=html||'<tr><td colspan="17" style="padding:32px;text-align:center;color:var(--text3)">此視圖無資料</td></tr>';
+  tb.innerHTML=html||'<tr><td colspan="18" style="padding:32px;text-align:center;color:var(--text3)">此視圖無資料</td></tr>';
 }
 function ph1Export(){
   if(!PH1_RESULT){alert('請先計算排名');return;}
   const V=ph1Views(PH1_RESULT.rows),lim=+document.getElementById('ph1-limit').value||200;
-  const HDR=['款色','商品名稱','商品系列','包材','SKU數','占格數','期間銷量','有效天','日均','每格效率','趨勢係數','1F分數','庫存','未到量','1F','2F','溢位','守門','配件類','切線內'];
+  const HDR=['款色','商品名稱','商品系列','包材','儲位','SKU數','占格數','期間銷量','有效天','日均','每格效率','趨勢係數','1F分數','庫存','未到量','1F','2F','溢位','守門','配件類','切線內'];
   const wb=XLSX.utils.book_new();
   [['拉下1F候選','pull','f2'],['推上2F候選','push','f1'],['全部過季款色','all',null]].forEach(function(cfg){
     const k=cfg[1],mk=cfg[2];let cum=0;
     const aoa=[HDR].concat(V[k].map(function(r){
       let cut='';
       if(!r.gate&&mk){cum+=r[mk];if(cum<=lim)cut='●';}
-      return [r.fam,r.name,r.series,r.pack,r.nSku,r.slots,r.sold,Math.max(r.availD,1),+r.daily.toFixed(2),+r.eff.toFixed(4),+r.trend.toFixed(2),+r.score.toFixed(4),r.ss,r.pend,r.f1,r.f2,r.fx,r.gate?'★':'',r.acc?'配':'',cut];
+      return [r.fam,r.name,r.series,r.pack,r.slotList.join(', '),r.nSku,r.slots,r.sold,Math.max(r.availD,1),+r.daily.toFixed(2),+r.eff.toFixed(4),+r.trend.toFixed(2),+r.score.toFixed(4),r.ss,r.pend,r.f1,r.f2,r.fx,r.gate?'★':'',r.acc?'配':'',cut];
     }));
     XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),cfg[0]);
   });
@@ -10370,6 +10383,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">系列</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">包材</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">儲位</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">SKU</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">占格</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">期間銷量</th>
@@ -10383,10 +10397,10 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:center">1F/2F</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:center">守門</th>
           </tr></thead>
-          <tbody id="ph1-body"><tr><td colspan="17" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr></tbody>
+          <tbody id="ph1-body"><tr><td colspan="18" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr></tbody>
         </table>
       </div>
-      <div style="padding:6px 12px 10px;font-size:11px;color:var(--text3)">綠底＝累計搬移 ≤ 一輪上限（Gordon：一輪 100–200 SKU，有空間再下一輪）；黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類（只在1F，一律不列入推上2F）。本表只出排名，不會改任何儲位。</div>
+      <div style="padding:6px 12px 10px;font-size:11px;color:var(--text3)">綠底＝累計搬移 ≤ 一輪上限（Gordon：一輪 100–200 SKU，有空間再下一輪）；黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類。鎖定款不顯示：盒類(鞋盒/皮帶盒)・滑齒袋(羽絨/西裝/機能外套)・商務襯衫＝鎖2F；配件類・寢具＝鎖1F（排除數見狀態列）。本表只出排名，不會改任何儲位。</div>
     </div>
   </div>
 </div>
