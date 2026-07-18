@@ -262,7 +262,7 @@
             <thead><tr>
               <th style="text-align:left !important">走道</th><th>可用儲位</th><th>已用</th><th>空儲位</th>
               <th>低庫存≤<span id="thr-g1" onclick="editThreshold('g1')" class="editable threshold-label" style="padding:0 2px;font-weight:700">3</span></th>
-              <th>新品比</th>
+              <th title="新品SKU數 ÷ 已用儲位（佔格視角）">新品SKU比</th>
             </tr></thead><tbody></tbody>
           </table>
         </div>
@@ -271,7 +271,7 @@
             <thead><tr>
               <th style="text-align:left !important">走道</th><th>可用儲位</th><th>已用</th><th>空儲位</th>
               <th>低庫存≤<span id="thr-g2" onclick="editThreshold('g2')" class="editable threshold-label" style="padding:0 2px;font-weight:700">3</span></th>
-              <th>新品比</th>
+              <th title="新品SKU數 ÷ 已用儲位（佔格視角）">新品SKU比</th>
             </tr></thead><tbody></tbody>
           </table>
         </div>
@@ -280,7 +280,7 @@
             <thead><tr>
               <th style="text-align:left !important">走道</th><th>可用儲位</th><th>已用</th><th>空儲位</th>
               <th>低庫存≤<span id="thr-g3" onclick="editThreshold('g3')" class="editable threshold-label" style="padding:0 2px;font-weight:700">3</span></th>
-              <th>新品比</th>
+              <th title="新品SKU數 ÷ 已用儲位（佔格視角）">新品SKU比</th>
             </tr></thead><tbody></tbody>
           </table>
         </div>
@@ -304,13 +304,16 @@
       </div>
     </div>
     <div class="sku-side-panel">
+      <!-- ★ R2（2026-07-18 重整）：進倉統計表移至 26FW tab，此處僅留摘要 -->
       <div class="card" style="margin-bottom:8px">
-        <div class="card-title" style="font-size:11px"><span class="dot"></span>26FW 新品 SKU 進倉統計</div>
-        <div class="tbl-wrap"><table id="tbl-fw26-cat"><thead><tr><th>類別</th><th>總SKU</th><th>已進倉</th><th>未進倉</th><th>儲區</th></tr></thead><tbody></tbody></table></div>
+        <div class="card-title" style="font-size:11px"><span class="dot"></span>26FW 新品進倉</div>
+        <div id="fw26-mini-summary" onclick="switchTab('fw26')" title="點擊前往 26FW 新品 tab" style="cursor:pointer;padding:8px 10px;font-size:12px;color:var(--text2)">—</div>
       </div>
+      <!-- ★ R3-E（2026-07-18 重整）：「各季別 SKU 統計」併入每日銷售 tab 季別總表（tbl-season-sales 加 SKU數 欄），
+           此卡片移除；renderSeasonSKUTable 因 tbody 不存在自動 no-op，函式保留未動 -->
       <div class="card">
-        <div class="card-title" style="font-size:11px"><span class="dot"></span>各季別 SKU 統計</div>
-        <div class="tbl-wrap"><table id="tbl-season-sku"><thead><tr><th colspan="2">季別</th><th>SKU數</th></tr></thead><tbody></tbody></table></div>
+        <div class="card-title" style="font-size:11px"><span class="dot"></span>季別 SKU</div>
+        <div id="season-mini-summary" onclick="switchTab('sales')" title="點擊前往每日銷售 tab 看季別總表" style="cursor:pointer;padding:8px 10px;font-size:12px;color:var(--text2)">詳見每日銷售 tab「季別總表」→</div>
       </div>
     </div>
   </div>
@@ -361,18 +364,18 @@
 <div class="tab-panel" id="tab-sales">
   <div class="sales-five-layout">
     <div class="sales-zone-block">
-      <table class="sales-tbl" id="stbl-ABF"><thead><tr><th>走道</th><th>未抓貨</th><th>均銷比</th><th>新品%</th></tr></thead><tbody></tbody></table>
+      <table class="sales-tbl" id="stbl-ABF"><thead><tr><th>走道</th><th>未抓貨</th><th>均銷比</th><th title="新品未抓貨 ÷ 總未抓貨（銷量視角）">新品銷%</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="sales-zone-block">
-      <table class="sales-tbl" id="stbl-CDE"><thead><tr><th>走道</th><th>未抓貨</th><th>均銷比</th><th>新品%</th></tr></thead><tbody></tbody></table>
+      <table class="sales-tbl" id="stbl-CDE"><thead><tr><th>走道</th><th>未抓貨</th><th>均銷比</th><th title="新品未抓貨 ÷ 總未抓貨（銷量視角）">新品銷%</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="sales-zone-block">
-      <table class="sales-tbl" id="stbl-PLM"><thead><tr><th>走道</th><th>未抓貨</th><th>均銷比</th><th>新品%</th></tr></thead><tbody></tbody></table>
+      <table class="sales-tbl" id="stbl-PLM"><thead><tr><th>走道</th><th>未抓貨</th><th>均銷比</th><th title="新品未抓貨 ÷ 總未抓貨（銷量視角）">新品銷%</th></tr></thead><tbody></tbody></table>
     </div>
     <div class="sales-summary-panel">
       <div class="card">
         <div class="card-title"><span class="dot"></span>區域彙總 <span id="sales-total-ungrab-badge" style="margin-left:auto;font-size:12px;font-weight:700;color:var(--text)">—</span></div>
-        <div class="tbl-wrap"><table class="summary-tbl" id="tbl-region"><thead><tr><th>區域</th><th>未抓貨</th><th>新品%</th><th>區域%</th></tr></thead><tbody></tbody></table></div>
+        <div class="tbl-wrap"><table class="summary-tbl" id="tbl-region"><thead><tr><th>區域</th><th>未抓貨</th><th title="新品未抓貨 ÷ 總未抓貨（銷量視角）">新品銷%</th><th>區域%</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
         <div class="stats-panel"><div class="sp-title" style="border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:6px">SS/FW 銷售量</div><div class="sp-row2"><div class="sp-cell"><div class="sp-label">SS</div><div class="sp-val" id="sp-ss-vol">—</div></div><div class="sp-cell"><div class="sp-label">FW</div><div class="sp-val" id="sp-fw-vol">—</div></div></div></div>
@@ -390,8 +393,8 @@
     </div>
     <div class="sales-summary-panel">
       <div class="card">
-        <div class="card-title"><span class="dot"></span>季別統計</div>
-        <div class="tbl-wrap"><table class="summary-tbl" id="tbl-season-sales"><thead><tr><th>季別</th><th>銷售庫存</th><th>當日未抓</th></tr></thead><tbody></tbody></table></div>
+        <div class="card-title"><span class="dot"></span>季別總表</div>
+        <div class="tbl-wrap"><table class="summary-tbl" id="tbl-season-sales"><thead><tr><th>季別</th><th>SKU數</th><th>銷售庫存</th><th>當日未抓</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div class="stats-panel" style="padding-bottom:6px">
         <div class="sp-title">各季進貨統計</div>
@@ -464,10 +467,10 @@
       <!-- 區間進倉統計 -->
       <div id="fw26-period-stats" style="display:none"></div>
     </div>
-    <!-- 右：依類別分析（可拖曳排序） -->
+    <!-- 右：依類別分析（★ R2 合併版：原儲區總覽「26FW 新品 SKU 進倉統計」移入，含進倉率＋儲區，可拖曳排序、儲區可點擊編輯） -->
     <div class="card">
-      <div class="card-title" style="font-size:11px"><span class="dot"></span>依類別分析</div>
-      <div class="tbl-wrap"><table id="tbl-fw-cat"><thead><tr><th>類別</th><th>總SKU</th><th>已進倉</th><th>未進倉</th><th>進倉率</th></tr></thead><tbody></tbody></table></div>
+      <div class="card-title" style="font-size:11px"><span class="dot"></span>依類別分析（拖曳排序・儲區可編輯）</div>
+      <div class="tbl-wrap"><table id="tbl-fw26-cat"><thead><tr><th>類別</th><th>總SKU</th><th>已進倉</th><th>未進倉</th><th>進倉率</th><th>儲區</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 </div>
@@ -718,16 +721,17 @@ let AISLE_CONFIG = {
     {走道:'B06',可用:372},{走道:'B05',可用:372},{走道:'B04',可用:432},{走道:'B03',可用:432},
     {走道:'B02',可用:432},{走道:'B01',可用:400},{走道:'A10',可用:400},{走道:'A09',可用:432},
     {走道:'A08',可用:432},{走道:'A07',可用:432},{走道:'A06',可用:400},{走道:'A05',可用:400},
-    {走道:'A04',可用:432},{走道:'A03',可用:418},{走道:'A02',可用:423},{走道:'A01',可用:0},
+    {走道:'A04',可用:432},{走道:'A03',可用:418},{走道:'A02',可用:483},{走道:'A01',可用:0},
     {走道:'F01',可用:400},{走道:'F02',可用:217}
   ],
   g2:[
     {走道:'C11',可用:340},{走道:'C10',可用:396},{走道:'C09',可用:396},{走道:'C08',可用:380},
-    {走道:'C07',可用:452},{走道:'C06',可用:432},{走道:'C05',可用:456},{走道:'C04',可用:540},
-    {走道:'C03',可用:564},{走道:'C02',可用:648},{走道:'C01',可用:672},{走道:'D11',可用:612},
+    {走道:'C07',可用:496},{走道:'C06',可用:472},{走道:'C05',可用:504},{走道:'C04',可用:592},
+    {走道:'C03',可用:616},{走道:'C02',可用:648},{走道:'C01',可用:672},{走道:'D11',可用:612},
     {走道:'D10',可用:652},{走道:'D09',可用:760},{走道:'D08',可用:784},{走道:'D07',可用:824},
-    {走道:'D06',可用:856},{走道:'E07',可用:788},{走道:'E06',可用:508},{走道:'E05',可用:560},
-    {走道:'E04',可用:560},{走道:'E03',可用:560},{走道:'E02',可用:560},{走道:'E01',可用:398}
+    {走道:'D06',可用:856},{走道:'E10',可用:652},{走道:'E09',可用:756},{走道:'E08',可用:856},
+    {走道:'E07',可用:668},{走道:'E06',可用:508},{走道:'E05',可用:560},
+    {走道:'E04',可用:560},{走道:'E03',可用:560},{走道:'E02',可用:560},{走道:'E01',可用:458}
   ],
   g3:[
     {走道:'P02',可用:212},{走道:'P03',可用:672},{走道:'P04',可用:672},{走道:'P05',可用:612},
@@ -1045,6 +1049,7 @@ async function clearAllData(){
     // 只清除 EPR 相關資料，保留 fw26_rows
     await idbPut('epr_rows',[]);
     await idbPut('epr_date','');
+    await idbPut('xx_shared_report',null);   // ★ R1：共用 XX/TX 報表一併清除
   }catch(e){}
   XX_DB=[];ZZ_DB=[];DB=[];CACHE={};
   document.getElementById('data-status').textContent='尚未載入';
@@ -1072,6 +1077,42 @@ function loadAisleConfig(){
     const parsed=JSON.parse(saved);
     ['g1','g2','g3','g4'].forEach(g=>{if(!parsed[g])return;parsed[g].forEach(sr=>{const ex=AISLE_CONFIG[g].find(r=>r.走道===sr.走道);if(!ex)AISLE_CONFIG[g].push(sr);else ex['可用']=sr['可用'];});});
   }catch(e){}
+}
+// ★ R4（2026-07-18 重整）：走道格數單一真相 — 1F 走道可用儲位由儲架平面圖 RM_DATA 推導（Gordon 裁決：平面圖為準）。
+//   2F（P/M/L）與平面圖沒有的走道維持手動值。editAvail 手動改 RM 覆蓋走道 → 進 override 表（輸入 -1 清除覆寫回自動）。
+//   離線驗證 2026-07-18：45 條 1F 走道推導值與新 config 全數一致（含修正 A02/C03-C07/E01/E07、新增 E08-E10）。
+function rmAvailOverrides(){try{return JSON.parse(localStorage.getItem('lativ_aisle_avail_override')||'{}');}catch(e){return{};}}
+function rmAvailOverrideSet(aisle,val){
+  const o=rmAvailOverrides();
+  if(val===null)delete o[aisle];else o[aisle]=val;
+  try{localStorage.setItem('lativ_aisle_avail_override',JSON.stringify(o));}catch(e){}
+}
+function rmDeriveAisleAvail(){
+  if(typeof RM_DATA==='undefined'||!RM_DATA||!RM_DATA.aisles)return{};
+  const out={};
+  for(const a in RM_DATA.aisles){
+    let n=0;
+    for(const sd in RM_DATA.aisles[a])(RM_DATA.aisles[a][sd]||[]).forEach(b=>{
+      if(b.t!=='架'&&b.t!=='待確認')return;
+      (b.s||[]).forEach(x=>{const lay=String(x).split(':')[1]||'';n+=(lay.match(/[A-Z0-9]/g)||[]).length;});
+    });
+    out[a]=n;
+  }
+  return out;
+}
+function applyRmDerivedAvail(){
+  const derived=rmDeriveAisleAvail();
+  if(!Object.keys(derived).length)return;
+  const ovr=rmAvailOverrides();
+  let changed=0;
+  for(const a in derived){
+    if(a in ovr)continue;                       // 手動覆寫優先
+    const g=ZONE_GROUP_MAP[a.charAt(0)];if(!g||!AISLE_CONFIG[g])continue;
+    const ex=AISLE_CONFIG[g].find(r=>r.走道===a);
+    if(!ex){AISLE_CONFIG[g].push({走道:a,可用:derived[a]});changed++;}
+    else if(ex['可用']!==derived[a]){ex['可用']=derived[a];changed++;}
+  }
+  if(changed){saveAisleConfig();console.log('[R4] 走道可用儲位由平面圖推導更新',changed,'條');}
 }
 // ★ 依 ERP 報表自動補登儲區總覽中缺少的走道（可用儲位預設 0，沿用 可用-已用<0 的反色警示）
 const ZONE_GROUP_MAP={B:'g1',A:'g1',F:'g1',C:'g2',D:'g2',E:'g2',P:'g3',M:'g3',L:'g4'};
@@ -1133,7 +1174,16 @@ function editAvail(groupId,aisleName,td){
   const all=[...AISLE_CONFIG.g1,...AISLE_CONFIG.g2,...AISLE_CONFIG.g3,...AISLE_CONFIG.g4];
   const config=all.find(r=>r['走道']===aisleName);if(!config)return;
   const input=document.createElement('input');input.type='number';input.className='inline-edit';input.value=config['可用'];
-  input.onblur=()=>{config['可用']=parseInt(input.value)||0;saveAisleConfig();renderSKUTables();};
+  input.title='此走道若在儲架平面圖內，手動值會記為覆寫；輸入 -1 清除覆寫、回到平面圖自動推導';
+  input.onblur=()=>{
+    const v=parseInt(input.value);
+    const derived=rmDeriveAisleAvail();
+    if(aisleName in derived){                 // ★ R4：RM 覆蓋走道 → 覆寫表
+      if(v===-1||isNaN(v)){rmAvailOverrideSet(aisleName,null);config['可用']=derived[aisleName];}
+      else{rmAvailOverrideSet(aisleName,v);config['可用']=v;}
+    }else{config['可用']=v||0;}
+    saveAisleConfig();renderSKUTables();
+  };
   input.onkeydown=e=>{if(e.key==='Enter')input.blur();if(e.key==='Escape')renderSKUTables();};
   td.innerHTML='';td.appendChild(input);input.focus();input.select();
 }
@@ -1315,7 +1365,7 @@ function renderSKUTables(){
   }
   const z34=[...z3,...zoneLettersForGroup('g4',['L'])];
   setHeaderTooltips('tbl-g34-merged',r3.zoneTotals,z34,THRESHOLDS['g3']);
-  renderSKUStats();renderFWSkuTable();if(DB.length>0)renderSeasonSKUTable();
+  renderSKUStats();renderFWSkuTable();renderFW26MiniSummary();if(DB.length>0)renderSeasonSKUTable();
 }
 function renderSKUStats(){
   let a1f=0,u1f=0,a2f=0,u2f=0;
@@ -1388,6 +1438,9 @@ function renderFWSkuTable(){
     const tdSku=document.createElement('td');tdSku.className='num';tdSku.textContent=num(row.SKU);applyZoneBorder(tdSku,first,last,false,false);tr.appendChild(tdSku);
     const tdArr=document.createElement('td');tdArr.className='num good';tdArr.textContent=row.arrived!==null?num(row.arrived):'—';applyZoneBorder(tdArr,first,last,false,false);tr.appendChild(tdArr);
     const tdPend=document.createElement('td');tdPend.className='num warn';tdPend.textContent=row.pending!==null?num(row.pending):'—';applyZoneBorder(tdPend,first,last,false,false);tr.appendChild(tdPend);
+    // ★ R2：進倉率欄（原 tbl-fw-cat 併入）
+    const rate=(row.arrived!==null&&row.SKU>0)?row.arrived/row.SKU:null;
+    const tdRate=document.createElement('td');tdRate.className='num '+(rate===null?'':rate>=0.9?'good':rate>=0.5?'warn':'bad');tdRate.textContent=rate!==null?pct(rate):'—';applyZoneBorder(tdRate,first,last,false,false);tr.appendChild(tdRate);
     if(rowspans[idx]>0){
       const tdZone=document.createElement('td');tdZone.className='zone-cell';tdZone.rowSpan=rowspans[idx];
       // 儲區欄：外框的頂部、左、右；底部因 rowspan 跨多列，由最後一列的 borderBottom 補
@@ -1487,18 +1540,30 @@ function renderRegionTable(){
   ['A','B','C','D','E','F','L','M','P'].forEach(reg=>{const st=CACHE.regionStats[reg]||{ungrab:0,newUG:0};const tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:600">'+reg+'</td><td class="num">'+num(st.ungrab)+'</td><td class="pct">'+(st.ungrab>0?pct(st.newUG/st.ungrab):'—')+'</td><td class="pct">'+(tot>0?pct(st.ungrab/tot):'—')+'</td>';tbody.appendChild(tr);});
   const tr=document.createElement('tr');tr.className='total-row';tr.innerHTML='<td>Total</td><td class="num">'+num(tot)+'</td><td></td><td></td>';tbody.appendChild(tr);
 }
+// ★ R3-E（2026-07-18 重整）：季別總表 — 原儲區總覽「各季別 SKU 統計」併入本表（新增 SKU數 欄），該側欄卡片已移除
 function renderSeasonSalesTable(){
   const tbody=document.querySelector('#tbl-season-sales tbody');if(!tbody)return;tbody.innerHTML='';
-  let grandStock=0,grandUngrab=0;
+  let grandStock=0,grandUngrab=0,grandSku=0;
   const seasonGroups=[{label:'26FW',pfxs:['74','75']},{label:'26SS',pfxs:['72','73']},{label:'25FW',pfxs:['70','71']},{label:'25SS',pfxs:['68','69']},{label:'24FW',pfxs:['66','67']},{label:'24SS',pfxs:['64','65']},{label:'23SS',pfxs:['62','63']}];
+  // SKU 數：依前綴歸季；比最新一季前綴更大者（如 76xx）併入最新一季（同原 renderSeasonSKUTable 邏輯）
+  const skuCounts={};
+  const newestMax=Math.max(...seasonGroups[0].pfxs.map(p=>parseInt(p)));
+  DB.forEach(r=>{
+    const n=parseInt(String(r.商品編號||'').substring(0,2));if(isNaN(n))return;
+    let lab=null;
+    for(const sg of seasonGroups){if(sg.pfxs.indexOf(String(n))>=0){lab=sg.label;break;}}
+    if(!lab&&n>newestMax)lab=seasonGroups[0].label;
+    if(lab)skuCounts[lab]=(skuCounts[lab]||0)+1;
+  });
   seasonGroups.forEach(sg=>{
     let stock=0,ungrab=0;sg.pfxs.forEach(pfx=>{const st=CACHE.seasonStats[pfx]||{stock:0,ungrab:0};stock+=st.stock;ungrab+=st.ungrab;});
-    if(!stock&&!ungrab)return;const is26SS=sg.label==='26SS';if(!is26SS){grandStock+=stock;grandUngrab+=ungrab;}
-    const tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:500">'+sg.label+'</td><td class="num">'+num(stock)+'</td><td class="num">'+(ungrab>0?num(ungrab):'—')+'</td>';tbody.appendChild(tr);
+    const skuN=skuCounts[sg.label]||0;
+    if(!stock&&!ungrab&&!skuN)return;const is26SS=sg.label==='26SS';if(!is26SS){grandStock+=stock;grandUngrab+=ungrab;grandSku+=skuN;}
+    const tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:500">'+sg.label+'</td><td class="num">'+(skuN?num(skuN):'—')+'</td><td class="num">'+num(stock)+'</td><td class="num">'+(ungrab>0?num(ungrab):'—')+'</td>';tbody.appendChild(tr);
   });
-  const trT=document.createElement('tr');trT.className='total-row';trT.innerHTML='<td>Total</td><td class="num">'+num(grandStock)+'</td><td class="num">'+num(grandUngrab)+'</td>';tbody.appendChild(trT);
+  const trT=document.createElement('tr');trT.className='total-row';trT.innerHTML='<td>Total</td><td class="num">'+num(grandSku)+'</td><td class="num">'+num(grandStock)+'</td><td class="num">'+num(grandUngrab)+'</td>';tbody.appendChild(trT);
   const trNoPos=document.createElement('tr');trNoPos.style.background='rgba(107,79,53,0.04)';
-  trNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26SS未進倉</td><td class="num editable" id="td-ss26-nopos" ondblclick="editSS26NoPos(this)" style="color:var(--text3)">'+num(SS26_NO_POS_STOCK)+'</td><td style="color:var(--text3)">—</td>';
+  trNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26SS未進倉</td><td style="color:var(--text3)">—</td><td class="num editable" id="td-ss26-nopos" ondblclick="editSS26NoPos(this)" style="color:var(--text3)">'+num(SS26_NO_POS_STOCK)+'</td><td style="color:var(--text3)">—</td>';
   tbody.appendChild(trNoPos);
 }
 function editSS26NoPos(td){
@@ -2499,37 +2564,45 @@ async function handlePlannerOverflowUpload(event){
         const v=validateReportFormat(raw,['商品編號','商品名稱','儲位','銷售庫存','架上數量'],'溢位區 XX/TX EPR 報表');
         if(!v.ok){alert(v.msg);event.target.value='';return;}
       }
-      // 既有 master 的 擺法 查表（若 儲位總表 已含 XX/TX 擺法則沿用）
-      const existingLayout={};
-      Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(s=>{if(s&&s.slot&&s.layout)existingLayout[s.slot]=s.layout;}));
-      const slots=[];const invRows=[];const seenSlot=new Set();
-      raw.forEach(r=>{
-        const slot=String(r['儲位']||'').trim();
-        if(!slot||!(slot.startsWith('XX-')||slot.startsWith('TX-')))return;
-        if(!seenSlot.has(slot)){slots.push({slot,layout:existingLayout[slot]||''});seenSlot.add(slot);}
-        const sku=String(r['商品編號']||'').trim();
-        if(sku)invRows.push({  // 占用列 → 走道報表（欄位逐欄比照儲位釋放 handleXXUpload）
-          '商品編號':sku,'商品名稱':r['商品名稱']||'','顏色':r['顏色']||'','尺寸':r['尺寸']||'',
-          '儲位':slot,'未抓貨':+r['未抓貨']||0,'銷售庫存':+r['銷售庫存']||0,'架上數量':+r['架上數量']||0,
-          '未到量':0,'商品材積':+r['商品材積']||0,_ovfUpload:true});  // 未到量：XX/TX 報表無此欄→0（§1.7 候選取自目的走道列，非此 XX/TX 占用列，不受影響）
-      });
-      if(!slots.length){alert('溢位區報表未偵測到 XX-/TX- 儲位（請確認為儲位釋放 tab 的同一份 XX/TX 報表）');event.target.value='';return;}
-      STORAGE_MASTER[PLN_OVERFLOW_SHEET_KEY]=slots;
-      AISLE_REPORT_DATA=AISLE_REPORT_DATA.filter(r=>!r._ovfUpload).concat(invRows);
-      try{await idbPut('storage_master_sheets',STORAGE_MASTER);}catch(err){}
-      try{await idbPut('aisle_report_rows',AISLE_REPORT_DATA);}catch(err){}
-      const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
-      try{localStorage.setItem('planner_overflow_upload_date',today);localStorage.setItem('planner_overflow_count',String(slots.length));}catch(err){}
-      const occ=invRows.length,empty=slots.length-occ;
-      // ★ 2026-07-16 Gordon：溢位區報表也會改寫 AISLE_REPORT_DATA（實況占用）→ 同步待排新品
-      plannerInvalidateResult('溢位區報表已重新上傳');
-      plannerSyncNewQueue('溢位區 XX/TX 報表重新上傳');
-      renderPlanner();
-      console.log(`[溢位區] 載入 ${slots.length} 個 XX/TX 儲位（占用 ${occ} / 空 ${empty}）`);
+      const ok=await plannerApplyOverflowRaw(raw);
+      if(!ok){alert('溢位區報表未偵測到 XX-/TX- 儲位（請確認為儲位釋放 tab 的同一份 XX/TX 報表）');event.target.value='';return;}
+      await xxSharedSave(raw);           // ★ R1（2026-07-18 重整）：共用存檔 → 儲位釋放 tab 同步生效
+      try{xxApplyRaw(raw);}catch(err){console.warn('儲位釋放同步失敗:',err);}
     }catch(err){alert('解析失敗：'+err.message);}
     event.target.value='';
   };
   reader.readAsArrayBuffer(file);
+}
+// ★ R1（2026-07-18 重整）：溢位區套用核心 — 本 tab 上傳與儲位釋放 tab 上傳共用
+async function plannerApplyOverflowRaw(raw){
+  // 既有 master 的 擺法 查表（若 儲位總表 已含 XX/TX 擺法則沿用）
+  const existingLayout={};
+  Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(s=>{if(s&&s.slot&&s.layout)existingLayout[s.slot]=s.layout;}));
+  const slots=[];const invRows=[];const seenSlot=new Set();
+  raw.forEach(r=>{
+    const slot=String(r['儲位']||'').trim();
+    if(!slot||!(slot.startsWith('XX-')||slot.startsWith('TX-')))return;
+    if(!seenSlot.has(slot)){slots.push({slot,layout:existingLayout[slot]||''});seenSlot.add(slot);}
+    const sku=String(r['商品編號']||'').trim();
+    if(sku)invRows.push({  // 占用列 → 走道報表（欄位逐欄比照儲位釋放 handleXXUpload）
+      '商品編號':sku,'商品名稱':r['商品名稱']||'','顏色':r['顏色']||'','尺寸':r['尺寸']||'',
+      '儲位':slot,'未抓貨':+r['未抓貨']||0,'銷售庫存':+r['銷售庫存']||0,'架上數量':+r['架上數量']||0,
+      '未到量':0,'商品材積':+r['商品材積']||0,_ovfUpload:true});  // 未到量：XX/TX 報表無此欄→0（§1.7 候選取自目的走道列，非此 XX/TX 占用列，不受影響）
+  });
+  if(!slots.length)return false;
+  STORAGE_MASTER[PLN_OVERFLOW_SHEET_KEY]=slots;
+  AISLE_REPORT_DATA=AISLE_REPORT_DATA.filter(r=>!r._ovfUpload).concat(invRows);
+  try{await idbPut('storage_master_sheets',STORAGE_MASTER);}catch(err){}
+  try{await idbPut('aisle_report_rows',AISLE_REPORT_DATA);}catch(err){}
+  const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+  try{localStorage.setItem('planner_overflow_upload_date',today);localStorage.setItem('planner_overflow_count',String(slots.length));}catch(err){}
+  const occ=invRows.length,empty=slots.length-occ;
+  // ★ 2026-07-16 Gordon：溢位區報表也會改寫 AISLE_REPORT_DATA（實況占用）→ 同步待排新品
+  plannerInvalidateResult('溢位區報表已重新上傳');
+  plannerSyncNewQueue('溢位區 XX/TX 報表重新上傳');
+  renderPlanner();
+  console.log(`[溢位區] 載入 ${slots.length} 個 XX/TX 儲位（占用 ${occ} / 空 ${empty}）`);
+  return true;
 }
 async function clearPlannerOverflow(){
   if(!confirm('確定清除溢位區 XX/TX 報表？'))return;
@@ -7382,42 +7455,19 @@ function sortFW26(col){
 
 function renderFW26Stats(){const total=FW26_FILTER_DATA.length;const arrivedSet=new Set(DB.map(d=>d.商品編號));const arrived=FW26_FILTER_DATA.filter(r=>arrivedSet.has(r[0])).length;const pending=total-arrived;document.getElementById('fw-total').textContent=num(total);document.getElementById('fw-arrived').textContent=num(arrived);document.getElementById('fw-pending').textContent=num(pending);document.getElementById('fw-rate').textContent=total>0?pct(arrived/total):'—';}
 
+// ★ R2（2026-07-18 重整）：原「依類別分析」(tbl-fw-cat) 已併入 tbl-fw26-cat（移至 26FW tab，含進倉率＋儲區）。
+//   本函式保留原名相容所有呼叫點：改為渲染合併表＋儲區總覽側欄一行摘要。
 function renderFW26CatTable(){
+  renderFWSkuTable();
+  renderFW26MiniSummary();
+}
+function renderFW26MiniSummary(){
+  const el=document.getElementById('fw26-mini-summary');if(!el)return;
+  const total=FW26_FILTER_DATA.length;
+  if(!total){el.textContent='尚未載入 26FW 新品資料';return;}
   const arrivedSet=new Set(DB.map(d=>d.商品編號));
-  const cats={};
-  FW26_FILTER_DATA.forEach(r=>{
-    const cat=r[3];if(!cat)return;
-    if(!cats[cat])cats[cat]={total:0,arrived:0};
-    cats[cat].total++;
-    if(arrivedSet.has(r[0]))cats[cat].arrived++;
-  });
-  const tbody=document.querySelector('#tbl-fw-cat tbody');if(!tbody)return;tbody.innerHTML='';
-  // 用 FW26_CATS 順序（可拖曳），有的就用，沒的附在後面
-  const catOrder=FW26_CATS.map(c=>c.類別);
-  const allCats=[...catOrder,...Object.keys(cats).filter(c=>!catOrder.includes(c))];
-  const seen=new Set();
-  allCats.forEach(cat=>{
-    if(seen.has(cat)||!cats[cat])return;seen.add(cat);
-    const v=cats[cat];
-    const pending=v.total-v.arrived,rate=v.total>0?v.arrived/v.total:0;
-    const rateClass=rate>=0.9?'good':rate>=0.5?'warn':'bad';
-    const tr=document.createElement('tr');
-    tr.draggable=true;
-    tr.dataset.cat=cat;
-    tr.innerHTML=`<td class="label-cell">${cat}</td><td class="num">${num(v.total)}</td><td class="num good">${num(v.arrived)}</td><td class="num warn">${num(pending)}</td><td class="num ${rateClass}">${pct(rate)}</td>`;
-    // drag events
-    tr.ondragstart=e=>{e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',cat);tr.classList.add('dragging');};
-    tr.ondragend=()=>tr.classList.remove('dragging');
-    tr.ondragover=e=>{e.preventDefault();tr.classList.add('drag-over');};
-    tr.ondragleave=()=>tr.classList.remove('drag-over');
-    tr.ondrop=e=>{e.preventDefault();tr.classList.remove('drag-over');
-      const fromCat=e.dataTransfer.getData('text/plain');
-      const fi=FW26_CATS.findIndex(c=>c.類別===fromCat);
-      const ti=FW26_CATS.findIndex(c=>c.類別===cat);
-      if(fi>=0&&ti>=0&&fi!==ti){const m=FW26_CATS.splice(fi,1)[0];FW26_CATS.splice(ti,0,m);renderFW26CatTable();}
-    };
-    tbody.appendChild(tr);
-  });
+  const arrived=FW26_FILTER_DATA.filter(r=>arrivedSet.has(r[0])).length;
+  el.innerHTML='已進倉 <b style="color:var(--green,#2d7a4a)">'+num(arrived)+'</b> / '+num(total)+'（'+(total>0?pct(arrived/total):'—')+'）・未進倉 '+num(total-arrived)+'　<span style="color:var(--accent);font-weight:700">詳見 26FW tab →</span>';
 }
 
 function clearFW26DateFilter(){
@@ -7854,19 +7904,30 @@ async function handleXXUpload(event){
     // ★ 格式驗證
     const validate = validateReportFormat(raw, ['商品編號','商品名稱','儲位','銷售庫存','架上數量'], 'XX/TX EPR 報表');
     if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
-    XX_DB=raw.map(r=>({
-      商品編號:String(r['商品編號']||'').trim(),商品名稱:r['商品名稱']||'',
-      顏色:r['顏色']||'',尺寸:r['尺寸']||'',儲位:(r['儲位']||'').trim(),
-      未抓貨:+r['未抓貨']||0,銷售庫存:+r['銷售庫存']||0,
-      架上數量:+r['架上數量']||0,原始架上數量:+r['架上數量']||0,
-      商品材積:+r['商品材積']||0
-    })).filter(r=>r.儲位.startsWith('XX-')||r.儲位.startsWith('TX-'));
-    ZZ_DB=[];
-    document.getElementById('xx-upload-status').textContent=`已載入 ${XX_DB.length} 筆 XX/TX 資料`;
-    DIRTY.xx=true;DIRTY.reloc=true;
-    renderXXTables();updateRelocStats();hideLoading();
+    xxApplyRaw(raw);
+    await xxSharedSave(raw);           // ★ R1（2026-07-18 重整）：共用存檔 → 儲位調整 tab 同步生效
+    try{await plannerApplyOverflowRaw(raw);}catch(e){console.warn('溢位區同步失敗:',e);}
+    hideLoading();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
+}
+// ★ R1（2026-07-18 重整）：XX/TX 報表共用 — 一次上傳，儲位釋放＋儲位調整兩邊生效；重開頁自動還原
+function xxApplyRaw(raw,fromDate){
+  XX_DB=raw.map(r=>({
+    商品編號:String(r['商品編號']||'').trim(),商品名稱:r['商品名稱']||'',
+    顏色:r['顏色']||'',尺寸:r['尺寸']||'',儲位:String(r['儲位']||'').trim(),
+    未抓貨:+r['未抓貨']||0,銷售庫存:+r['銷售庫存']||0,
+    架上數量:+r['架上數量']||0,原始架上數量:+r['架上數量']||0,
+    商品材積:+r['商品材積']||0
+  })).filter(r=>r.儲位.startsWith('XX-')||r.儲位.startsWith('TX-'));
+  ZZ_DB=[];
+  const st=document.getElementById('xx-upload-status');
+  if(st)st.textContent=`已載入 ${XX_DB.length} 筆 XX/TX 資料`+(fromDate?`（上次上傳 ${fromDate}）`:'');
+  DIRTY.xx=true;DIRTY.reloc=true;
+  renderXXTables();updateRelocStats();
+}
+async function xxSharedSave(raw){
+  try{await idbPut('xx_shared_report',{date:new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'}),rows:raw});}catch(e){}
 }
 async function handleZZUpload(event){
   const file=event.target.files[0];if(!file)return;
@@ -10013,6 +10074,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 
 (async function init(){
   loadAisleConfig();loadManualEdits();loadXXCapacity();loadXXZoneConfig();loadPackagingRulesConfig();
+  // ★ R4：applyRmDerivedAvail() 不在此呼叫 — RM_DATA 定義於後方 rackmap script，改於該區塊尾端執行
   let restored=false;
   try{restored=await loadEPRData();if(restored)console.log('EPR restored from IndexedDB');}catch(e){console.warn('EPR restore failed:',e);}
   // FW26: 優先從 IndexedDB 讀取，沒有才用 embedded
@@ -10055,6 +10117,11 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   try{
     const sm=await idbGet('storage_master_sheets');
     if(sm&&typeof sm==='object'){STORAGE_MASTER=sm;}
+  }catch(e){}
+  // ★ R1（2026-07-18 重整）：還原共用 XX/TX 報表 → 儲位釋放 tab 重開頁免重傳
+  try{
+    const xs=await idbGet('xx_shared_report');
+    if(xs&&xs.rows&&xs.rows.length&&!XX_DB.length)xxApplyRaw(xs.rows,xs.date||'');
   }catch(e){}
   console.log('FW26_FILTER_DATA.length after load:',FW26_FILTER_DATA.length);
   // ★ 儲位數據 tab 整個移入儲區總覽底部插槽
@@ -10423,7 +10490,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
         <button class="upload-btn" id="planner-master-clear-btn" onclick="clearPlannerMaster()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-        <button class="upload-btn" onclick="document.getElementById('planner-overflow-input').click()" style="background:#784c96;color:#fff" title="XX/TX 溢位區 ERP 報表：與「儲位釋放」tab 的 XX/TX 報表為同一份、同欄位（商品編號/商品名稱/顏色/尺寸/儲位/未抓貨/銷售庫存/架上數量/商品材積）。注入 STORAGE_MASTER 與走道報表，自動填入 config.overflow">⬆ 溢位區 XX/TX</button>
+        <button class="upload-btn" onclick="document.getElementById('planner-overflow-input').click()" style="background:#784c96;color:#fff" title="XX/TX 溢位區 ERP 報表：與「儲位釋放」tab 共用——任一邊上傳一次，兩邊同步生效，重開頁自動還原。注入 STORAGE_MASTER 與走道報表，自動填入 config.overflow">⬆ 溢位區 XX/TX</button>
         <input type="file" id="planner-overflow-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerOverflowUpload(event)">
         <span id="planner-overflow-status" style="font-size:11px;color:var(--text3)">未上傳</span>
         <button class="upload-btn" id="planner-overflow-clear-btn" onclick="clearPlannerOverflow()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
@@ -11419,6 +11486,12 @@ function rmMasterSyncCheck(sheets){
   }
 }
 
+// ★ R4（2026-07-18 重整）：RM_DATA 已定義 → 由平面圖推導 1F 走道可用儲位（單一真相）。
+//   此區塊在 embedded-data init 的同步段之後執行，loadAisleConfig 已完成；改完重繪儲區總覽。
+try{
+  applyRmDerivedAvail();
+  if(typeof renderSKUTables==='function'&&typeof DB!=='undefined')renderSKUTables();
+}catch(e){console.warn('R4 走道推導失敗:',e);}
 </script>
 </body>
 </html>
