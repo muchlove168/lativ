@@ -9686,7 +9686,7 @@ async function ph1Run(){
 function ph1Render(){
   const tb=document.getElementById('ph1-body');if(!tb)return;
   const lv=document.getElementById('ph1-limit-val');if(lv)lv.textContent=document.getElementById('ph1-limit').value;
-  if(!PH1_RESULT){tb.innerHTML='<tr><td colspan="18" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr>';return;}
+  if(!PH1_RESULT){tb.innerHTML='<tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr>';return;}
   const view=document.getElementById('ph1-view').value;
   const list=ph1Views(PH1_RESULT.rows)[view]||[];
   const lim=+document.getElementById('ph1-limit').value||200;
@@ -9698,27 +9698,18 @@ function ph1Render(){
     if(r.gate)bg='background:rgba(240,200,60,0.20)';
     else if(mk){cum+=r[mk];if(cum<=lim)bg='background:rgba(45,122,74,0.10)';}
     html+='<tr style="'+bg+'">'
-      +'<td style="'+td+'text-align:right;color:var(--text3)">'+(i+1)+'</td>'
       +'<td style="'+td+'font-family:monospace">'+r.fam+'</td>'
       +'<td style="'+td+'">'+r.name+'</td>'
-      +'<td style="'+td+'">'+r.series+'</td>'
-      +'<td style="'+td+'">'+r.pack+(r.acc?' <span style="color:var(--red);font-weight:700">配</span>':'')+'</td>'
-      +'<td style="'+td+'font-family:monospace;font-size:10px;max-width:180px;word-break:break-all">'+r.slotList.join(', ')+'</td>'
-      +'<td style="'+td+'text-align:right">'+r.nSku+'</td>'
-      +'<td style="'+td+'text-align:right">'+r.slots+'</td>'
+      +'<td style="'+td+'font-family:monospace;font-size:10px;max-width:200px;word-break:break-all">'+r.slotList.join(', ')+'</td>'
+      +'<td style="'+td+'text-align:right;font-weight:700">'+r.daily.toFixed(2)+'</td>'
       +'<td style="'+td+'text-align:right">'+r.sold+'</td>'
       +'<td style="'+td+'text-align:right">'+Math.max(r.availD,1)+'</td>'
-      +'<td style="'+td+'text-align:right">'+r.daily.toFixed(2)+'</td>'
-      +'<td style="'+td+'text-align:right;font-weight:700">'+r.eff.toFixed(4)+'</td>'
-      +'<td style="'+td+'text-align:right">'+r.trend.toFixed(2)+'</td>'
-      +'<td style="'+td+'text-align:right;font-weight:700">'+r.score.toFixed(4)+'</td>'
       +'<td style="'+td+'text-align:right">'+r.ss.toLocaleString()+'</td>'
       +'<td style="'+td+'text-align:right">'+r.pend.toLocaleString()+'</td>'
-      +'<td style="'+td+'text-align:center">'+r.f1+'/'+r.f2+(r.fx?'/'+r.fx:'')+'</td>'
-      +'<td style="'+td+'text-align:center">'+(r.gate?'★':'')+'</td>'
+      +'<td style="'+td+'">'+r.pack+(r.acc?' <span style="color:var(--red);font-weight:700">配</span>':'')+(r.gate?' <span title="低庫存但未到量>0 守門">★</span>':'')+'</td>'
       +'</tr>';
   });
-  tb.innerHTML=html||'<tr><td colspan="18" style="padding:32px;text-align:center;color:var(--text3)">此視圖無資料</td></tr>';
+  tb.innerHTML=html||'<tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">此視圖無資料</td></tr>';
 }
 function ph1Export(){
   if(!PH1_RESULT){alert('請先計算排名');return;}
@@ -10445,26 +10436,17 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <div style="max-height:60vh;min-height:200px;overflow:auto">
         <table id="tbl-ph1" style="width:100%;border-collapse:collapse;font-size:11px">
           <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">#</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">款色</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">款號</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">系列</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">包材</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">儲位</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">SKU</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">占格</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08)">日均</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">期間銷量</th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">有效天</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">日均</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08)">每格效率</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">趨勢</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08)">1F分數</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">庫存</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">未到</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:center">1F/2F</th>
-            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:center">守門</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">銷售庫存</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right">未到量</th>
+            <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">包材</th>
           </tr></thead>
-          <tbody id="ph1-body"><tr><td colspan="18" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr></tbody>
+          <tbody id="ph1-body"><tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr></tbody>
         </table>
       </div>
       <div style="padding:6px 12px 10px;font-size:11px;color:var(--text3)">綠底＝累計搬移 ≤ 一輪上限（Gordon：一輪 100–200 SKU，有空間再下一輪）；黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類。鎖定款不顯示：盒類(鞋盒/皮帶盒)・滑齒袋(羽絨/西裝/機能外套)・商務襯衫＝鎖2F；配件類・寢具＝鎖1F（排除數見狀態列）。本表只出排名，不會改任何儲位。</div>
