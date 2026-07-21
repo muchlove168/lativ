@@ -6362,7 +6362,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
         </select>
       </div>
       <span style="color:var(--text2)">SKU數</span>
-      <div><input type="number" data-step="${idx}" data-grp="n" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px"></div>
+      <div><input type="number" data-step="${idx}" data-grp="n" data-auto="1" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px" title="依來源走道勾選項目自動累加；手動修改後即停止自動更新，改動來源走道會再恢復"></div>
     </div>
   `;
   wrap.appendChild(div);
@@ -6431,7 +6431,52 @@ function plannerScheduleRefresh(){
 // 任意 step 切到 internal 時, src 與 dst 視為同一個走道; 點 src 同步 dst, 點 dst 同步 src, 其餘自動取消勾選.
 // 切到 new 時, 取消所有「真實走道」src, 只允許虛擬新品 src; dst 維持真實走道.
 // 切離 new/internal 時, 取消所有虛擬新品 src (避免污染 high/low/internal mode).
+// ★2026-07-21 除錯：原函式多個分支提前 return，跳過結尾的 plannerUpdateSortModeLocks，
+//   造成鎖定狀態殘留（最典型：切到「整理」後新品 radio 永遠灰掉）。
+//   改為 wrapper：不論核心邏輯從哪裡 return，一律補跑鎖定重算 + SKU數自動帶入。
 function plannerHandleInternalBind(e){
+  const t=e&&e.target;
+  let stepEl=null;
+  if(t&&t.dataset&&t.dataset.step)stepEl=document.getElementById(`pln-step-${t.dataset.step}`);
+  try{ plannerHandleInternalBindCore(e); }
+  finally{
+    if(stepEl){
+      // 來源走道有變動 → 解除手動覆寫，恢復自動累加
+      if(t&&t.dataset&&t.dataset.grp==='src'){
+        const nEl=stepEl.querySelector('input[data-grp="n"]');
+        if(nEl)nEl.dataset.auto='1';
+      }
+      // 使用者手動改 SKU 數 → 標記為手動，之後不再自動覆寫（直到來源走道再變動）
+      if(t&&t.dataset&&t.dataset.grp==='n')t.dataset.auto='0';
+      try{plannerUpdateSortModeLocks(stepEl);}catch(err){}
+      try{plannerAutoFillN(stepEl);}catch(err){}
+    }
+  }
+}
+
+// ★2026-07-21：SKU數依「來源走道已勾選項目」即時累加（真實走道 SKU 數 + 新品類別 SKU 數）
+function plannerAutoFillN(stepEl){
+  if(!stepEl)return;
+  const nEl=stepEl.querySelector('input[data-grp="n"]');
+  if(!nEl)return;
+  if(nEl.dataset.auto==='0')return;                 // 使用者手動指定過 → 不覆寫
+  let sum=0,unknown=false;
+  stepEl.querySelectorAll('input[data-grp="src"]:checked').forEach(cb=>{
+    const a=cb.value;
+    const span=cb.dataset.virtual==='new'
+      ? stepEl.querySelector(`.newq-count[data-aisle="${a}"]`)
+      : stepEl.querySelector(`.aisle-count[data-grp="src"][data-aisle="${a}"]`);
+    const txt=span?String(span.textContent||'').trim():'';
+    const v=parseInt(txt,10);
+    if(!isFinite(v)){unknown=true;return;}          // 顯示「-」或「?」時不覆寫
+    sum+=v;
+  });
+  if(unknown)return;
+  nEl.value=sum>0?String(sum):'';
+  nEl.title='依來源走道勾選項目自動累加；手動修改後即停止自動更新，改動來源走道會再恢復';
+}
+
+function plannerHandleInternalBindCore(e){
   const t=e.target;
   if(!t||!t.dataset||!t.dataset.step)return;
   const idx=t.dataset.step;
@@ -6454,8 +6499,15 @@ function plannerHandleInternalBind(e){
     return;
   }
   // 切到 new: 取消所有真實走道 src, 保留虛擬新品 src
+  // ★2026-07-21 除錯：原本此處直接 return，使函式底部「自動勾選排序第一個新品類別」永遠跑不到，
+  //   按下「新品」後來源掛空 → 無法執行。改為就地自動勾選第一個新品類別。
   if(t.dataset.grp==='sortMode' && mode==='new'){
     stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').forEach(c=>{c.checked=false;});
+    const vs=[...stepEl.querySelectorAll('input[data-grp="src"][data-virtual="new"]')];
+    if(vs.length && !vs.some(c=>c.checked)){
+      vs.sort((a,b)=>String(a.value).localeCompare(String(b.value)));
+      vs[0].checked=true;
+    }
     return;
   }
   // 切到 auto/high/low: 取消所有虛擬新品 src + 取消任何因 internal 同步而被勾的 dst (使用者再手動調整)
@@ -6466,7 +6518,17 @@ function plannerHandleInternalBind(e){
   
   // src 或 dst 變動時, 若當前 mode 是 internal → 強制單選 + 互鎖
   if(mode==='internal'&&(t.dataset.grp==='src'||t.dataset.grp==='dst')){
-    if(t.dataset.virtual==='new')return;  // 虛擬新品 src 不參與 internal 互鎖
+    // ★2026-07-21 除錯：原本這裡對虛擬新品 src 直接 return，導致「整理」模式下勾新品來源
+    //   既不會切模式、也不會重算鎖定狀態 → 新品 radio 卡在 disabled。改為走正常切換流程。
+    if(t.dataset.virtual==='new'){
+      if(t.checked){
+        stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual]),input[data-grp="dst"]').forEach(c=>{c.checked=false;});
+        stepEl.querySelectorAll('input[data-grp="sortMode"]').forEach(r=>{r.checked=false;});
+        const nr=stepEl.querySelector('input[data-grp="sortMode"][value="new"]');
+        if(nr){nr.disabled=false;nr.checked=true;}
+      }
+      return;
+    }
     if(!t.checked){
       stepEl.querySelectorAll(`input[data-grp="src"]:not([data-virtual])[value="${t.value}"],input[data-grp="dst"][value="${t.value}"]`).forEach(c=>{c.checked=false;});
       return;
@@ -6492,8 +6554,9 @@ function plannerHandleInternalBind(e){
   //   (規格: 來源走道勾選任一新品類別時, 下方挑選自動鎖定為「新品」)
   if(t.dataset.grp==='src' && t.dataset.virtual==='new' && t.checked && mode!=='new'){
     stepEl.querySelectorAll('input[data-grp="src"]:not([data-virtual])').forEach(c=>{c.checked=false;});
+    stepEl.querySelectorAll('input[data-grp="sortMode"]').forEach(r=>{r.checked=false;});
     const newRadio=stepEl.querySelector('input[data-grp="sortMode"][value="new"]');
-    if(newRadio){newRadio.checked=true;}
+    if(newRadio){newRadio.disabled=false;newRadio.checked=true;}
   }
 
   // ★ 切到「新品」模式時, 自動鎖定排序第一個的新品類別 src
@@ -6553,15 +6616,14 @@ function plannerUpdateSortModeLocks(stepEl){
   const newRadio=modeRadios['new'];
   if(newRadio){
     const newLabel=newRadio.closest('label');
-    const shouldLockNew=!virtualSrcExist || (!virtualSrcChecked && !newRadio.checked);
     // 若來源走道完全沒有新品虛擬選項 → 鎖死
     if(!virtualSrcExist){
       newRadio.disabled=true;
       if(newLabel){newLabel.style.opacity='0.4';newLabel.style.cursor='not-allowed';newLabel.title='來源走道沒有新品，請先從「預告進貨明細」傳送新品至儲位調整';}
-    } else if(!virtualSrcChecked && !newRadio.checked){
-      // 有新品但未勾選任何新品來源，且目前非新品模式 → 鎖死
-      newRadio.disabled=true;
-      if(newLabel){newLabel.style.opacity='0.4';newLabel.style.cursor='not-allowed';newLabel.title='請先在來源走道勾選「新品-XXX」才能使用新品模式';}
+    // ★2026-07-21 除錯：原本「有新品來源但未勾選 → 鎖死新品 radio」造成死結——
+    //   要按新品得先勾新品來源，但在「整理」模式下勾新品來源會被互鎖分支提前 return，
+    //   永遠切不過去。改為：只要存在新品來源就可點；點下去會自動勾第一個新品類別
+    //   （plannerHandleInternalBind 既有邏輯）。
     } else {
       // 可用
       newRadio.disabled=false;
@@ -6607,6 +6669,8 @@ function plannerRefreshStepCounts(){
       if(s1)s1.textContent=String(srcSet[a].size);
       if(s2)s2.textContent=String(emptyCnt[a]);
     });
+    // ★2026-07-21：數字已更新 → 同步回填 SKU數（走道 SKU 數本身變動時也跟著走）
+    try{plannerAutoFillN(stepEl);}catch(e){}
     // ★ 2026-07-10: 新品虛擬來源顯示「此 step 進入時的剩餘 SKU 數」(扣掉前面 step 已排入的)
     // ★ 2026-07-16: 改為扣掉「cells 內任何已占用該商品編號的儲位」— 除了前面 step 排入的
     //   (_isNewProduct)，也含新走道報表顯示已在架上的，數字才跟得上重新上傳的報表。
@@ -6617,6 +6681,7 @@ function plannerRefreshStepCounts(){
         const span=stepEl.querySelector(`.newq-count[data-aisle="${e.label}"]`);
         if(span)span.textContent=String(e.skus.filter(s=>!placedNew.has(String(s.code||''))).length);
       });
+      try{plannerAutoFillN(stepEl);}catch(e2){}   // ★2026-07-21 新品剩餘數寫入後再回填一次
     }
 
     // 嘗試模擬此 step (給下一個 step 用); 設定不完整則停止後續 step 的數字計算
