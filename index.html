@@ -102,6 +102,20 @@
   .sku-cols-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: start; }
   .sku-side-panel { display: flex; flex-direction: column; gap: 8px; }
   .sku-side-panel table th, .sku-side-panel table td { padding: 3px 6px; font-size: 11px; }
+  /* ★ 2026-07-21 側欄圓形圖表 */
+  .side-chart-card .card-title { padding: 6px 8px; }
+  .side-chart-donut { width: 118px; height: 118px; display: block; margin: 0 auto; }
+  .side-chart-legend { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; padding: 0 6px; }
+  .side-chart-legend > div { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; border-radius: 3px; }
+  .side-chart-legend > div > span { color: var(--text3); }
+  .side-chart-legend > div > b { font-variant-numeric: tabular-nums; color: var(--text); }
+  .side-chart-legend > div.editable:hover { background: rgba(107,79,53,0.08); }
+  .cat-pie-legend { display: flex; flex-direction: column; gap: 1px; max-height: 220px; overflow-y: auto; padding: 0 2px; }
+  .cat-pie-item { display: grid; grid-template-columns: 11px 1fr auto auto; gap: 5px; align-items: center; font-size: 10.5px; padding: 1px 2px; }
+  .cat-pie-sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .cat-pie-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
+  .cat-pie-val { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+  .cat-pie-pct { color: var(--text3); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
   .sku-stats-bar { display: flex; flex-wrap: wrap; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); overflow: hidden; }
   .sku-stat-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 8px 16px; border-right: 1px solid var(--border); flex: 1; min-width: 100px; }
   .sku-stat-cell:last-child { border-right: none; }
@@ -304,16 +318,24 @@
       </div>
     </div>
     <div class="sku-side-panel">
-      <!-- ★ R2（2026-07-18 重整）：進倉統計表移至 26FW tab，此處僅留摘要 -->
-      <div class="card" style="margin-bottom:8px">
-        <div class="card-title" style="font-size:11px"><span class="dot"></span>26FW 新品進倉</div>
-        <div id="fw26-mini-summary" onclick="switchTab('fw26')" title="點擊前往 26FW 新品 tab" style="cursor:pointer;padding:8px 10px;font-size:12px;color:var(--text2)">—</div>
+      <!-- ★ 2026-07-21：原「26FW 新品進倉」「季別 SKU」摘要卡改為三個圓形圖表（進倉進度／儲位使用率／各類別 SKU 佔比） -->
+      <!-- ① 進倉進度（可選季別，同步每日銷售 tab 季別總表未進倉數；合計＝總進貨量，可雙擊編輯） -->
+      <div class="card side-chart-card">
+        <div class="card-title" style="font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:6px">
+          <span><span class="dot"></span>進倉進度</span>
+          <select id="progress-season-sel" onchange="renderSeasonProgressChart()" style="font-size:11px;font-family:var(--font);color:var(--accent);border:1px solid var(--border);border-radius:4px;padding:2px 4px;background:var(--surface);cursor:pointer;max-width:96px"></select>
+        </div>
+        <div id="progress-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">—</div></div>
       </div>
-      <!-- ★ R3-E（2026-07-18 重整）：「各季別 SKU 統計」併入每日銷售 tab 季別總表（tbl-season-sales 加 SKU數 欄），
-           此卡片移除；renderSeasonSKUTable 因 tbody 不存在自動 no-op，函式保留未動 -->
-      <div class="card">
-        <div class="card-title" style="font-size:11px"><span class="dot"></span>季別 SKU</div>
-        <div id="season-mini-summary" onclick="switchTab('sales')" title="點擊前往每日銷售 tab 看季別總表" style="cursor:pointer;padding:8px 10px;font-size:12px;color:var(--text2)">詳見每日銷售 tab「季別總表」→</div>
+      <!-- ② 儲位使用率（同步儲位數據「儲位使用數量」表：固定＋臨時） -->
+      <div class="card side-chart-card">
+        <div class="card-title" style="font-size:11px"><span class="dot"></span>儲位使用率</div>
+        <div id="slotusage-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">—</div></div>
+      </div>
+      <!-- ③ 各類別 SKU 佔比（同步儲位調整/新品安排 tab「各類別預計儲區」表） -->
+      <div class="card side-chart-card">
+        <div class="card-title" style="font-size:11px"><span class="dot"></span>各類別 SKU 佔比</div>
+        <div id="catpie-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">尚未比對到 26FW 新品</div></div>
       </div>
     </div>
   </div>
@@ -748,6 +770,7 @@ let AISLE_CONFIG = {
 };
 
 let SEASON_PROGRESS_DATA = [
+  {season:'26FW',totalShipment:0,       pfx:['74','75']},
   {season:'26SS',totalShipment:10354870,pfx:['72','73']},
   {season:'25FW',totalShipment:6204300, pfx:['70','71']},
   {season:'25SS',totalShipment:14015392,pfx:['68','69']},
@@ -910,7 +933,7 @@ function switchTab(name){
   }
   document.getElementById('tab-'+name).classList.add('active');
   // ★ 儲位數據已併入儲區總覽 tab 底部：進入 sku tab 時一併刷新
-  if(name==='sku'){try{renderSlotData();}catch(e){}}
+  if(name==='sku'){try{renderSlotData();}catch(e){}try{refreshSidePanelCharts();}catch(e){}}
   if(name==='rackmap'){rmBoot();return;}
   if(name==='compare'){renderSalesCompare();return;}
   if(DB.length>0&&DIRTY[name]){
@@ -1061,6 +1084,7 @@ async function clearAllData(){
 function renderAll(){
   renderSKUTables();
   renderFW26Stats();renderFW26CatTable();renderFW26Table();
+  try{refreshSidePanelCharts();}catch(e){}
   if(!DB.length)return;
   renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();
   initDBSeasonFilter();renderDBTable();
@@ -1156,7 +1180,7 @@ function confirmDeleteAisles(){
   const checks=document.querySelectorAll('#delete-aisle-list input[type=checkbox]:checked');
   if(!checks.length){closeDeleteAisleModal();return;}
   checks.forEach(cb=>{AISLE_CONFIG[cb.dataset.group]=AISLE_CONFIG[cb.dataset.group].filter(a=>a.走道!==cb.dataset.aisle);});
-  saveAisleConfig();closeDeleteAisleModal();renderSKUTables();
+  saveAisleConfig();closeDeleteAisleModal();renderSKUTables();try{renderSlotData();}catch(e){}
 }
 function closeAddAisleModal(){document.getElementById('modal-add-aisle').style.display='none';document.getElementById('new-aisle-name').value='';document.getElementById('new-aisle-avail').value='';}
 function confirmAddAisle(){
@@ -1167,7 +1191,7 @@ function confirmAddAisle(){
   const all=[...AISLE_CONFIG.g1,...AISLE_CONFIG.g2,...AISLE_CONFIG.g3,...AISLE_CONFIG.g4];
   if(all.find(a=>a.走道===name)){alert('走道 '+name+' 已存在');return;}
   AISLE_CONFIG[group].push({走道:name,可用:avail});
-  saveAisleConfig();closeAddAisleModal();renderSKUTables();
+  saveAisleConfig();closeAddAisleModal();renderSKUTables();try{renderSlotData();}catch(e){}
 }
 function showAddAisleModal(){document.getElementById('modal-add-aisle').style.display='flex';}
 function editAvail(groupId,aisleName,td){
@@ -1182,7 +1206,7 @@ function editAvail(groupId,aisleName,td){
       if(v===-1||isNaN(v)){rmAvailOverrideSet(aisleName,null);config['可用']=derived[aisleName];}
       else{rmAvailOverrideSet(aisleName,v);config['可用']=v;}
     }else{config['可用']=v||0;}
-    saveAisleConfig();renderSKUTables();
+    saveAisleConfig();renderSKUTables();try{renderSlotData();}catch(e){}
   };
   input.onkeydown=e=>{if(e.key==='Enter')input.blur();if(e.key==='Escape')renderSKUTables();};
   td.innerHTML='';td.appendChild(input);input.focus();input.select();
@@ -1239,8 +1263,10 @@ function buildCache(){
     const newUG=rows.filter(r=>newSeason.pfx.includes((r.商品編號||'').substring(0,2))).reduce((s,r)=>s+(r.未抓貨||0),0);
     regionStats[reg]={ungrab,newUG};
   });
+  // ★ 2026-07-21 修正：原本硬編前綴 62~73，漏掉 74/75（26FW）→ 季別總表 26FW 銷售庫存顯示 0、當日未抓顯示 —。
+  //   改為依實際存在的所有前綴建表（自動含 74/75 及未來 76/77…），永不再漏季。
   const seasonStats={};
-  ['62','63','64','65','66','67','68','69','70','71','72','73'].forEach(pfx=>{
+  Object.keys(bySeason).forEach(pfx=>{
     const rows=bySeason[pfx]||[];
     seasonStats[pfx]={stock:rows.reduce((s,r)=>s+(r.銷售庫存||0),0),ungrab:rows.reduce((s,r)=>s+(r.未抓貨||0),0)};
   });
@@ -1565,6 +1591,13 @@ function renderSeasonSalesTable(){
   const trNoPos=document.createElement('tr');trNoPos.style.background='rgba(107,79,53,0.04)';
   trNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26SS未進倉</td><td style="color:var(--text3)">—</td><td class="num editable" id="td-ss26-nopos" ondblclick="editSS26NoPos(this)" style="color:var(--text3)">'+num(SS26_NO_POS_STOCK)+'</td><td style="color:var(--text3)">—</td>';
   tbody.appendChild(trNoPos);
+  // ★ 2026-07-21：26FW未進倉（Σ未到量 74/75，自動計算）— 與側欄「進倉進度」圖 26FW 未進倉數同步
+  const fw26Undel=[...(CACHE.bySeason&&CACHE.bySeason['74']||[]),...(CACHE.bySeason&&CACHE.bySeason['75']||[])].reduce((s,r)=>s+(r.未到量||0),0);
+  if(fw26Undel>0){
+    const trFwNoPos=document.createElement('tr');trFwNoPos.style.background='rgba(107,79,53,0.04)';
+    trFwNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26FW未進倉</td><td style="color:var(--text3)">—</td><td class="num" style="color:var(--text3)">'+num(fw26Undel)+'</td><td style="color:var(--text3)">—</td>';
+    tbody.appendChild(trFwNoPos);
+  }
 }
 function editSS26NoPos(td){
   const input=document.createElement('input');input.type='number';input.className='inline-edit';input.value=SS26_NO_POS_STOCK;input.style.width='90px';
@@ -1700,6 +1733,118 @@ function editTotalShipment(idx,td){
 function saveManualEdits(){try{localStorage.setItem('lativ_manual_edits',JSON.stringify({ss26NoPosStock:SS26_NO_POS_STOCK,seasonProgress:SEASON_PROGRESS_DATA.map(s=>({season:s.season,totalShipment:s.totalShipment}))}));}catch(e){}}
 function loadManualEdits(){
   try{const saved=localStorage.getItem('lativ_manual_edits');if(!saved)return;const data=JSON.parse(saved);if(data.ss26NoPosStock!==undefined)SS26_NO_POS_STOCK=data.ss26NoPosStock;if(data.seasonProgress){data.seasonProgress.forEach(s=>{const item=SEASON_PROGRESS_DATA.find(x=>x.season===s.season);if(item)item.totalShipment=s.totalShipment;});}}catch(e){}
+}
+
+// ============================================================
+// ★ 2026-07-21 儲區總覽側欄三圓形圖表：進倉進度 / 儲位使用率 / 各類別 SKU 佔比
+// ============================================================
+// 季別排序鍵：年份*10 + (SS=1, FW=2)；26SS=261、26FW=262、27SS=271…
+function seasonKey(label){const y=parseInt(String(label).substring(0,2));const s=String(label).substring(2)==='SS'?1:2;return (isNaN(y)?0:y)*10+s;}
+function seasonDisplayName(label){const y='20'+String(label).substring(0,2);return y+(String(label).substring(2)==='SS'?'春夏':'秋冬');}
+// 甜甜圈 SVG（p:0~1、色、中央文字）
+function _donutSVG(p,color,centerLabel){
+  const r=38,cx=50,cy=50,sw=13,circ=2*Math.PI*r;
+  const frac=Math.max(0,Math.min(1,p||0)),dash=circ*frac;
+  return `<svg viewBox="0 0 100 100" class="side-chart-donut">`
+    +`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface2)" stroke-width="${sw}"/>`
+    +(dash>0?`<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-dasharray="${dash.toFixed(2)} ${circ.toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"/>`:'')
+    +`<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" style="font-size:19px;font-weight:700;fill:var(--text)">${centerLabel}</text></svg>`;
+}
+// ① 進倉進度：合計＝總進貨量(SEASON_PROGRESS_DATA)，未進倉＝該季 Σ未到量（26SS 用季別總表可覆寫的 SS26_NO_POS_STOCK），已進倉＝合計−未進倉
+function seasonUndelivered(label){
+  if(label==='26SS')return SS26_NO_POS_STOCK; // 與每日銷售 tab 季別總表「26SS未進倉」列同步（可手動覆寫）
+  const s=SEASON_PROGRESS_DATA.find(x=>x.season===label);
+  const pfx=(s&&s.pfx)||[];
+  if(typeof CACHE==='undefined'||!CACHE||!CACHE.bySeason)return 0;
+  return pfx.reduce((sum,pk)=>sum+(CACHE.bySeason[pk]||[]).reduce((a,r)=>a+(r.未到量||0),0),0);
+}
+function progressSeasonsList(){
+  // 從 2026SS 開始（seasonKey>=261），最新季別排最前
+  return SEASON_PROGRESS_DATA.filter(s=>seasonKey(s.season)>=261).sort((a,b)=>seasonKey(b.season)-seasonKey(a.season));
+}
+function renderSeasonProgressChart(){
+  const wrap=document.getElementById('progress-chart-wrap');if(!wrap)return;
+  const sel=document.getElementById('progress-season-sel');
+  const list=progressSeasonsList();
+  if(sel){
+    const want=list.map(s=>s.season).join(',');
+    if(sel.dataset.built!==want){
+      const keep=sel.value;
+      sel.innerHTML=list.map(s=>`<option value="${s.season}">${seasonDisplayName(s.season)}</option>`).join('');
+      sel.dataset.built=want;
+      if(keep&&list.some(s=>s.season===keep))sel.value=keep;
+    }
+  }
+  const cur=(sel&&sel.value)||(list[0]&&list[0].season);
+  const s=SEASON_PROGRESS_DATA.find(x=>x.season===cur)||list[0];
+  if(!s){wrap.innerHTML='<div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">—</div>';return;}
+  const undelivered=seasonUndelivered(s.season);
+  const total=s.totalShipment||0;
+  const arrived=Math.max(0,total-undelivered);
+  const p=total>0?arrived/total:0;
+  wrap.innerHTML=_donutSVG(p,'var(--accent)',total>0?pct(p):'—')
+    +`<div class="side-chart-legend">`
+    +`<div><span>已進倉</span><b style="color:var(--green)">${total>0?num(arrived):'—'}</b></div>`
+    +`<div><span>未進倉</span><b style="color:var(--yellow)">${num(undelivered)}</b></div>`
+    +`<div class="editable" ondblclick="editProgressTotal(this)" title="雙擊修改總進貨量（合計）"><span>合計</span><b>${total>0?num(total):'<span style=color:var(--text3)>雙擊輸入</span>'}</b></div>`
+    +`</div>`;
+}
+function editProgressTotal(cell){
+  const sel=document.getElementById('progress-season-sel');
+  const cur=sel&&sel.value;
+  const idx=SEASON_PROGRESS_DATA.findIndex(x=>x.season===cur);if(idx<0)return;
+  const b=cell.querySelector('b');if(!b)return;
+  const input=document.createElement('input');input.type='number';input.className='inline-edit';input.value=SEASON_PROGRESS_DATA[idx].totalShipment||0;input.style.width='96px';
+  input.onblur=()=>{SEASON_PROGRESS_DATA[idx].totalShipment=parseInt(input.value)||0;saveManualEdits();renderSeasonProgressChart();try{renderSeasonProgress();}catch(e){}};
+  input.onkeydown=e=>{if(e.key==='Enter')input.blur();if(e.key==='Escape')renderSeasonProgressChart();};
+  b.innerHTML='';b.appendChild(input);input.focus();input.select();
+}
+// ② 儲位使用率：由 renderSlotData 以「儲位使用數量」表相同的 總儲位/已使用 值呼叫
+function renderSlotUsageChart(total,used){
+  const wrap=document.getElementById('slotusage-chart-wrap');if(!wrap)return;
+  const u=used||0,t=total||0,remain=t-u,p=t>0?u/t:0;
+  wrap.innerHTML=_donutSVG(p,'var(--accent)',t>0?pct(p):'—')
+    +`<div class="side-chart-legend">`
+    +`<div><span>使用儲位</span><b style="color:var(--accent)">${num(u)}</b></div>`
+    +`<div><span>剩餘儲位</span><b style="color:${remain<0?'var(--red)':'var(--green)'}">${num(remain)}</b></div>`
+    +`<div><span>儲位數量</span><b>${num(t)}</b></div>`
+    +`</div>`;
+}
+// ③ 各類別 SKU 佔比：由 renderArrangeCompare 以各類別 SKU 數（待排）呼叫
+const CAT_PIE_COLORS=['#6b4f35','#8b6b4a','#b08968','#7b9ecc','#6aaa8c','#c68f5a','#b07ba0','#7ba8b0','#a09060','#c98a7a','#5a8a6a','#9a7bb0','#c0a050','#6a90b0','#b06a6a','#7aa090','#a8a060','#8a7a6a','#4f7a9a','#aa8850','#7a6ab0','#90a060','#b09070','#6ab0a0'];
+let LAST_CAT_PIE_DATA=[];
+function renderCatPieChart(data){
+  const wrap=document.getElementById('catpie-chart-wrap');if(!wrap)return;
+  if(Array.isArray(data))LAST_CAT_PIE_DATA=data;
+  const items=(LAST_CAT_PIE_DATA||[]).filter(d=>d&&d.value>0);
+  if(!items.length){wrap.innerHTML='<div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">尚未比對到 26FW 新品</div>';return;}
+  const total=items.reduce((s,d)=>s+d.value,0),cx=50,cy=50,r=42;
+  let ang=-Math.PI/2,paths='';
+  items.forEach((d,i)=>{
+    const frac=d.value/total,a2=ang+frac*2*Math.PI,col=CAT_PIE_COLORS[i%CAT_PIE_COLORS.length];
+    if(items.length===1){paths+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}"/>`;}
+    else{
+      const x1=(cx+r*Math.cos(ang)).toFixed(2),y1=(cy+r*Math.sin(ang)).toFixed(2);
+      const x2=(cx+r*Math.cos(a2)).toFixed(2),y2=(cy+r*Math.sin(a2)).toFixed(2);
+      const large=frac>0.5?1:0;
+      paths+=`<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z" fill="${col}" stroke="var(--surface)" stroke-width="0.6"/>`;
+    }
+    ang=a2;
+  });
+  const svg=`<svg viewBox="0 0 100 100" style="width:128px;height:128px;display:block;margin:0 auto 8px">${paths}</svg>`;
+  const legend=`<div class="cat-pie-legend">`+items.map((d,i)=>{
+    const col=CAT_PIE_COLORS[i%CAT_PIE_COLORS.length];
+    const pctStr=(d.value/total*100).toFixed(1)+'%';
+    const isUn=d.name==='未匹配';
+    const nm=isUn?'<span style="color:var(--red)">未匹配</span>':String(d.name);
+    return `<div class="cat-pie-item"><span class="cat-pie-sw" style="background:${col}"></span><span class="cat-pie-nm" title="${String(d.name).replace(/"/g,'')}">${nm}</span><span class="cat-pie-val">${num(d.value)}</span><span class="cat-pie-pct">${pctStr}</span></div>`;
+  }).join('')+`</div>`;
+  wrap.innerHTML=svg+legend;
+}
+// 統一刷新側欄圖表（進倉進度＋類別佔比；儲位使用率由 renderSlotData 負責）
+function refreshSidePanelCharts(){
+  try{renderSeasonProgressChart();}catch(e){}
+  try{renderCatPieChart(null);}catch(e){}
 }
 
 // ============================================================
@@ -6881,6 +7026,7 @@ function renderArrangeCompare(){
     document.getElementById('arrange-unmatched').textContent='—';
     if(catBody) catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未上傳資料</td></tr>';
     if(unmatchedBody) unmatchedBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">—</td></tr>';
+    try{renderCatPieChart([]);}catch(e){}
   }else{
     // 建立 lookup
     const fw26Lookup=window.EMBEDDED_FW26_LOOKUP||{};
@@ -6967,6 +7113,10 @@ function renderArrangeCompare(){
       trTotal.innerHTML=`<td style="padding:8px 10px;text-align:left;font-weight:700;border-top:2px solid var(--accent)">合計</td><td style="padding:8px 10px;text-align:right;font-weight:700;border-top:2px solid var(--accent)">${totalSku.toLocaleString()}</td><td style="padding:8px 10px;border-top:2px solid var(--accent)"></td>`;
       catBody.appendChild(trTotal);
     }
+    // ★ 2026-07-21：各類別 SKU 佔比圓形圖同步（值＝各類別「SKU 數」＝待排，含未匹配待排）
+    const _pieData=sorted.map(([cat,_s])=>({name:cat,value:_s.skuCount}));
+    if(_umPendForTotal>0)_pieData.push({name:'未匹配',value:_umPendForTotal});
+    try{renderCatPieChart(_pieData);}catch(e){}
 
     // 未匹配清單
     unmatchedBody.innerHTML='';
@@ -9214,6 +9364,8 @@ function renderSlotData(){
     const fwPending=FW26_FILTER_DATA.length>0?(()=>{const arrivedSet=new Set(DB.map(d=>d.商品編號));const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0]&&!arrivedSet.has(r[0]))seen.add(r[0]);});return seen.size;})():0;
     const diff=totalSlots-used-fwPending;
     countBody.innerHTML=`<tr><td style="padding:6px 8px;text-align:center;font-weight:700">${num(totalSlots)}</td><td style="padding:6px 8px;text-align:center;font-weight:700;color:var(--accent)">${num(used)}</td><td style="padding:6px 8px;text-align:center;font-weight:700;color:var(--orange)">${num(fwPending)}</td><td style="padding:6px 8px;text-align:center;font-weight:700;color:${diff<0?'var(--red)':'var(--green)'}">${num(diff)}</td></tr>`;
+    // ★ 2026-07-21：儲位使用率圓形圖同步（總儲位＝固定+臨時、已使用＝報表筆數，與本表一致）
+    try{renderSlotUsageChart(totalSlots,used);}catch(e){}
   }
 
   // ── 每月底 SKU 數 ──
@@ -10191,6 +10343,8 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   try{rollupBackfillMissing().catch(e=>console.warn('Rollup backfill failed:',e));}catch(e){}
   try{renderSKUTables();}catch(e){console.warn('renderSKUTables failed:',e);}
   try{renderSlotData();}catch(e){console.warn('renderSlotData failed:',e);}
+  try{renderArrangeCompare();}catch(e){console.warn('renderArrangeCompare(init) failed:',e);}
+  try{refreshSidePanelCharts();}catch(e){}
   try{renderFW26Stats();renderFW26CatTable();renderFW26Table();}catch(e){console.warn('renderFW26 failed:',e);}
   try{updateFW26LastUpdate();}catch(e){}
   console.log('renderFW26Stats called, FW26_FILTER_DATA.length=',FW26_FILTER_DATA.length);
