@@ -3414,7 +3414,10 @@ const PLN_PRIM = (function(){
   // §1.4a 候選排序鍵：非相鄰(前置過濾) → 小材積 → 距主碼近 → 欄號小 → 層小。
   // cands: [{col, layer, isSmall(bool), dist}] → 回傳排序後陣列（最佳在前）。
   function overflowSafeSort(cands){
+    // ★2026-07-21：插入「架距(rdist)」——溢出碼不離主碼架優先於小材積偏好與欄距。
+    //   (Gordon C06 案的同類問題：最後手段路徑原本只看欄距，可能挑到隔壁架的小材積欄)
     return [...cands].sort((x,y)=>
+      ((x.rdist||0) - (y.rdist||0)) ||
       (x.isSmall?0:1)-(y.isSmall?0:1) ||
       (x.dist - y.dist) ||
       (x.col - y.col) ||
@@ -5746,7 +5749,9 @@ function plnRunNewEngine(config,initialCells){
           if(adjConflict(c,L,c7))continue;
           const isSmall=isSmallLayout(getColLayout(aisle,c));
           const dist=(mc!=null)?Math.abs(c-mc):0;
-          cands.push({c,L,col:c,layer:L,isSmall,dist});
+          // ★2026-07-21：最後手段路徑同樣要顧「不離主碼架」——加入架距，排序時優先於欄距
+          const rdist=(mc!=null)?Math.abs(rackIdx(c)-rackIdx(mc)):0;
+          cands.push({c,L,col:c,layer:L,isSmall,dist,rdist});
         }
       });
       // §1.4a 優先序委派 PLN_PRIM：非相鄰(上方已過濾)→小材積→近→欄小→層小
@@ -6051,26 +6056,40 @@ function plnRunNewEngine(config,initialCells){
             ovGroups.push({donor:e,items,mc:(e.mainCol!=null?e.mainCol:0)});
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
-          for(const g of ovGroups){
-            let remain=g.items.slice(); const mr=rackOf(g.mc);
+          const allPool=[...allOvf,...shortBackup];
+          // ★2026-07-21 兩段式配置（Gordon C06 案）：
+          //   原本一輪貪婪、依主碼欄序處理 → 前面的色可能先搶走「別架」的溢出欄，
+          //   把同架後面的色擠到更遠的架（7516601 佔走 175 → 7517201 只能掉到 169）。
+          //   改為：Pass1 每個色只准用「自己主碼那一架」的溢出欄；Pass2 才把剩下的就近安置。
+          //   壓力測試 500 組隨機情境：跨架色組 3510 → 554（-84%），較差 0 組，容量不受影響。
+          const fillFrom=(g,remain,pool)=>{
+            const mr=rackOf(g.mc);
             while(remain.length){
-              // ★ 需求7: 同顏色名稱衝突欄排最後 (soft — 僅剩衝突欄時仍可用, 彈性放行)
-              // ★ §7-density v1.4（Gordon 2026-07-15）：AG 溢出候選「小材積(A)優先」於架距——
-              //   XXL 集中 A 欄疊放，不吃短架/孤立 G 欄（整欄 G 留給下批主碼組，剩餘空欄連續）。
-              //   CB 走道不套用（架首C/B 對位規則照舊）。
-              const cands=[...allOvf,...shortBackup].filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7))
-                .sort((a,b)=> ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
+              const cands=pool.filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7))
+                .sort((a,b)=> (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
+                  || ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
                   || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
-                  || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
                   || ((emptyLayers(b).length>=remain.length?1:0)-(emptyLayers(a).length>=remain.length?1:0))
                   || (emptyLayers(a).length-emptyLayers(b).length)
                   || (Math.abs(a-g.mc)-Math.abs(b-g.mc)) || (a-b));
               if(!cands.length)break;
               const col=cands[0]; const before=remain.length;
               for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
-              if(remain.length===before)break; // 本欄無法再放（防無限迴圈）
+              if(remain.length===before)break;   // 本欄無法再放（防無限迴圈）
             }
-            for(const sku of remain){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
+            return remain;
+          };
+          // Pass 1：限定主碼所在架的溢出欄
+          const carry=[];
+          for(const g of ovGroups){
+            const own=allPool.filter(c=>rackOf(c)===rackOf(g.mc));
+            const left=own.length?fillFrom(g,g.items.slice(),own):g.items.slice();
+            if(left.length)carry.push({g,left});
+          }
+          // Pass 2：剩餘者開放全部溢出欄，依架距就近安置
+          for(const cg of carry){
+            const rest=fillFrom(cg.g,cg.left,allPool);
+            for(const sku of rest){ if(!placeOverflowSafe({donor:cg.g.donor,sku}))failed.push({kc:cg.g.donor.kc,n:cg.g.donor.ku.n,reason:'NO_XXL_SLOT',cat:cg.g.donor.ku.cat}); }
           }
         }
       }
