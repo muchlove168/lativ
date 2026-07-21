@@ -2410,10 +2410,19 @@ function wkWeeks(){
     rows:FORECAST_ARCHIVE.filter(r=>(r._week||'NODATE')===w).length}));
 }
 // 套用目前週次選擇 → 產生下游用的 FORECAST_DATA / ARRANGE_DATA
+// ★2026-07-21 修正：ARRANGE_DATA 也跟著週次走 —— 只保留「該週貨櫃內款號(前5碼)」的 SKU，
+//   使「儲位待安排總筆數／已比對 26FW 新品／未匹配筆數／各類別預計儲區」都是該週數量。
+//   選「全部週次」時才回到累積庫全量。
 function wkApplySelection(){
   FORECAST_DATA=(WEEK_SEL==='ALL')?FORECAST_ARCHIVE.slice()
     :FORECAST_ARCHIVE.filter(r=>(r._week||'NODATE')===WEEK_SEL);
-  ARRANGE_DATA=ARRANGE_ARCHIVE.slice();   // 儲位安排＝SKU 規格總表，不分週（下游依勾選櫃號自行過濾）
+  if(WEEK_SEL==='ALL'){
+    ARRANGE_DATA=ARRANGE_ARCHIVE.slice();
+  }else{
+    const st=new Set();
+    FORECAST_DATA.forEach(r=>{const s5=String(r.style||'').substring(0,5);if(s5)st.add(s5);});
+    ARRANGE_DATA=ARRANGE_ARCHIVE.filter(r=>st.has(String(r.code||'').substring(0,5)));
+  }
 }
 async function wkPersist(){
   try{await idbPut('forecast_archive',FORECAST_ARCHIVE);}catch(e){}
@@ -2437,8 +2446,8 @@ function wkRenderBar(){
   const info=document.getElementById('wk-info');
   if(info){
     info.textContent=(WEEK_SEL==='ALL')
-      ?`顯示全部 ${FORECAST_DATA.length} 筆`
-      :`顯示 ${wkLabel(WEEK_SEL)} 共 ${FORECAST_DATA.length} 筆`;
+      ?`顯示全部：預告 ${FORECAST_DATA.length} 筆 · 待安排 SKU ${ARRANGE_DATA.length} 筆`
+      :`顯示 ${wkLabel(WEEK_SEL)}：預告 ${FORECAST_DATA.length} 筆 · 待安排 SKU ${ARRANGE_DATA.length} 筆`;
   }
 }
 function wkOnSelectChange(v){
