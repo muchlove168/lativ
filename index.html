@@ -1848,14 +1848,23 @@ function renderCatPieChart(data){
   const items=(LAST_CAT_PIE_DATA||[]).filter(d=>d&&d.value>0);
   if(!items.length){wrap.innerHTML='<div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">尚未比對到 26FW 新品</div>';return;}
   const total=items.reduce((s,d)=>s+d.value,0);
-  // 版面：圓餅置中，標籤以引線拉到左右兩側（同參考圖樣式）
-  const W=240,H=300,cx=120,cy=150,r=50;
+  // 版面：★2026-07-21 改為「高度隨標籤數自適應」—— 原本固定 H=300，類別少時上下留一大片空白。
+  //   先算標籤堆疊所需高度，再決定畫布高與圓心 y，使圓餅永遠垂直置中且不留多餘空白。
+  const W=240,cx=120,r=50;
   const meta=[];let ang=-Math.PI/2;
   items.forEach((d,i)=>{
     const frac=d.value/total,a2=ang+frac*2*Math.PI;
     meta.push({i,name:String(d.name),value:d.value,frac,a1:ang,a2,mid:(ang+a2)/2,col:CAT_PIE_COLORS[i%CAT_PIE_COLORS.length]});
     ang=a2;
   });
+  const fs=meta.length>20?5.8:meta.length>14?6.6:meta.length>8?7.2:8;
+  const RS=meta.filter(m=>Math.cos(m.mid)>=0),LS=meta.filter(m=>Math.cos(m.mid)<0);
+  const nMax=Math.max(RS.length,LS.length);
+  const MAXH=400,MINH=2*r+16;                       // 下限＝圓餅直徑＋上下各 8 邊距
+  let step=fs*2.2;                                   // 標籤列距
+  let H=Math.max(MINH,(nMax>1?step*(nMax-1):0)+fs+12);
+  if(H>MAXH){H=MAXH;step=(MAXH-fs-12)/(nMax-1);}     // 類別過多時壓縮列距而非撐高卡片
+  const cy=H/2;
   // 扇形
   let paths='';
   meta.forEach(m=>{
@@ -1865,14 +1874,11 @@ function renderCatPieChart(data){
     const large=m.frac>0.5?1:0;
     paths+=`<path class="cp-sl" data-i="${m.i}" d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z" fill="${m.col}" stroke="var(--surface)" stroke-width="0.6"/>`;
   });
-  // 標籤：依中線角度分左右，各自由上而下等距排列，避免重疊
-  const fs=meta.length>20?5.8:meta.length>14?6.6:meta.length>8?7.2:8;
-  const RS=meta.filter(m=>Math.cos(m.mid)>=0),LS=meta.filter(m=>Math.cos(m.mid)<0);
+  // 標籤：依中線角度分左右，各自以圓心為中心等距排列，避免重疊
   const place=arr=>{
     const n=arr.length;if(!n)return;
-    const step=n>1?Math.min(fs*2.2,(H-20)/(n-1)):0;
-    const y0=cy-step*(n-1)/2;
-    arr.sort((a,b)=>Math.sin(a.mid)-Math.sin(b.mid)).forEach((m,k)=>{m.ly=Math.max(8,Math.min(H-6,y0+k*step));});
+    const st=n>1?step:0,y0=cy-st*(n-1)/2;
+    arr.sort((a,b)=>Math.sin(a.mid)-Math.sin(b.mid)).forEach((m,k)=>{m.ly=Math.max(fs,Math.min(H-fs*0.6,y0+k*st));});
   };
   place(RS);place(LS);
   let leaders='',labels='';
