@@ -6418,7 +6418,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
         </select>
       </div>
       <span style="color:var(--text2)">SKU數</span>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><input type="number" data-step="${idx}" data-grp="n" data-auto="1" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px" title="預設自動帶入來源走道勾選項目的 SKU 總數；想少放就直接改小。實際目標＝此數與目的走道空格數取小者，系統會自動找出剛好排滿的整色組合。"><span style="font-size:11px;color:var(--text3)">自動帶入來源總數，想少放直接改</span></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><input type="number" data-step="${idx}" data-grp="n" data-auto="1" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px" title="自動帶入＝來源走道 SKU 總數，並以目的走道空格數封頂；想少放直接改小。系統會依此數自動挑出剛好排滿的整色組合。"></div>
     </div>
   `;
   wrap.appendChild(div);
@@ -6498,7 +6498,7 @@ function plannerHandleInternalBind(e){
   finally{
     if(stepEl){
       // 來源走道有變動 → 解除手動覆寫，恢復自動累加
-      if(t&&t.dataset&&t.dataset.grp==='src'){
+      if(t&&t.dataset&&(t.dataset.grp==='src'||t.dataset.grp==='dst')){
         const nEl=stepEl.querySelector('input[data-grp="n"]');
         if(nEl)nEl.dataset.auto='1';
       }
@@ -6511,6 +6511,8 @@ function plannerHandleInternalBind(e){
 }
 
 // ★2026-07-21：SKU數依「來源走道已勾選項目」即時累加（真實走道 SKU 數 + 新品類別 SKU 數）
+//   ★修正：再以「目的走道空格數」封頂 —— 來源 336 但目的只有 256 格時直接帶 256，
+//   免得填了排不下的數字。整理(internal)模式 src=dst，語意不同，不套用封頂。
 function plannerAutoFillN(stepEl){
   if(!stepEl)return;
   const nEl=stepEl.querySelector('input[data-grp="n"]');
@@ -6528,8 +6530,22 @@ function plannerAutoFillN(stepEl){
     sum+=v;
   });
   if(unknown)return;
+  // 目的走道空格封頂
+  const sortInp=stepEl.querySelector('input[data-grp="sortMode"]:checked');
+  const mode=sortInp?sortInp.value:'';
+  const dstChecked=[...stepEl.querySelectorAll('input[data-grp="dst"]:checked')];
+  if(mode!=='internal'&&dstChecked.length){
+    let cap=0,capUnknown=false;
+    dstChecked.forEach(cb=>{
+      const sp=stepEl.querySelector(`.aisle-count[data-grp="dst"][data-aisle="${cb.value}"]`);
+      const v=parseInt(sp?String(sp.textContent||'').trim():'',10);
+      if(!isFinite(v)){capUnknown=true;return;}
+      cap+=v;
+    });
+    if(!capUnknown&&cap<sum)sum=cap;
+  }
   nEl.value=sum>0?String(sum):'';
-  nEl.title='依來源走道勾選項目自動累加；手動修改後即停止自動更新，改動來源走道會再恢復';
+  nEl.title='自動帶入＝來源走道 SKU 總數，並以目的走道空格數封頂；想少放直接改，改過後就不再自動更新（除非再變動來源/目的走道）';
 }
 
 function plannerHandleInternalBindCore(e){
@@ -6843,25 +6859,9 @@ function plannerRunAllSteps(){
       mergedMoves.push(...r.moves);
       mergedSelected.push(...r.selected);
       cells=r.finalCells;
+      // ★2026-07-21 Gordon：新品模式不顯示 step 狀態文字（與執行結果重複，用不到）
       const statusEl=document.getElementById(`pln-step-${idx}-status`);
-      if(statusEl){
-        const placedN=r.selected.length;
-        const failedSkuN=(r.failed||[]).reduce((s,f)=>s+f.n,0);
-        const qTotal=r.queueTotal||placedN;
-        const skipMsg=failedSkuN?` | 跳過 ${failedSkuN} 個 SKU (空格不足)`:'';
-        // ★2026-07-21：SKU數上限未取用的部分也要講出來（原本靜默截斷）
-        const notTaken=Math.max(0,qTotal-placedN-failedSkuN);
-        const capMsg=notTaken?` | 未取用 ${notTaken} 個 SKU`:'';
-        const leftMsg=(r.capacity&&r.capacity.total>0)?` | 目的走道尚餘 ${r.capacity.total} 空格`:'';
-        if(r.autoFit){
-          const af=r.autoFit;
-          statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} / 佇列 ${qTotal} 個 SKU | 目的走道 ${af.total}/${af.capacity} 格${af.exact?'（剛好排滿）':''}${leftMsg}`;
-          statusEl.style.color=af.exact?'var(--accent)':'#d4a017';
-          continue;
-        }
-        statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} / 佇列 ${qTotal} 個 SKU${skipMsg}${capMsg}${leftMsg}`;
-        statusEl.style.color=(failedSkuN||notTaken)?'#d4a017':'var(--accent)';
-      }
+      if(statusEl)statusEl.textContent='';
       continue;
     }
     
@@ -6987,44 +6987,8 @@ function plannerRenderResult(r){
     <span style="color:var(--text3)">新品佇列共 ${(r.queueTotal||r.selected.length+skippedSkuTotal)} 個 SKU，實際安排 ${r.selected.length} 個，未排入 ${skippedSkuTotal} 個</span><br>
     ${skippedNew.slice(0,8).map(f=>`<span style="font-family:monospace">${f.kc}</span>(${f.n})`).join('、')}${skippedNew.length>8?` …+${skippedNew.length-8}`:''}</div>`:'';
   const failedHtml=otherFailed.length?`<div style="color:var(--red);font-size:11px;margin-top:6px">⚠️ 未放置: ${otherFailed.length} 群組 (${otherFailed.slice(0,3).map(f=>f.kc).join(', ')}${otherFailed.length>3?'...':''})</div>`:'';
-  // ═══ ★2026-07-21：未排入 / 空儲位未使用 對帳 ═══
-  //   原本只在「排入失敗(NEW_NO_FIT)」時才有提示；若 SKU 數是被情境配置的「SKU數上限」
-  //   以整色不拆為由靜默截斷（例：上限256、下一色組3個 → 停在254），畫面完全沒交代，
-  //   使用者只會看到目的走道莫名剩幾格。這裡把三種缺口一次講清楚。
-  const newSteps=(r.stepResults||[]).filter(x=>x&&x.config&&x.config.sortMode==='new');
-  let reconHtml='';
-  if(newSteps.length){
-    const qTotal=newSteps.reduce((s2,x)=>s2+(x.queueTotal||0),0);
-    const placedN=newN;
-    const failN=skippedSkuTotal;
-    const notTaken=Math.max(0,qTotal-placedN-failN);
-    const slotsLeft=r.capacity.total||0;
-    const lines=[];
-    const af=newSteps.map(x=>x.autoFit).filter(Boolean)[0];
-    if(af){
-      const capped=af.limit>0&&af.limit<af.capacity;   // 使用者把 SKU數 調得比空格數還小
-      if(af.exact){
-        lines.push(`<span style="color:#2c8">✓ 已自動找出剛好排滿的組合：從 ${af.groupsTotal} 個顏色中挑 ${af.picked} 個，共 <b>${af.total}</b> 個 SKU${capped?`＝你設定的 SKU數 ${af.limit}`:`＝目的走道空格 ${af.capacity}`}</span>`);
-      }else{
-        lines.push(`<span style="color:#d4a017">湊不出剛好 ${af.target} 的組合（每個顏色必須整組放、不能拆）→ 改用最接近的組合：挑 ${af.picked} 個顏色共 <b>${af.total}</b> 個 SKU，還差 ${af.target-af.total} 格</span>`);
-      }
-      if(capped)lines.push(`目的走道其實有 ${af.capacity} 格，但你把 SKU數 設成 ${af.limit} → 只排 ${af.total} 個（把 SKU數 改大或清空就會排滿）`);
-    }
-    if(notTaken>0)lines.push(`<b>${notTaken}</b> 個 SKU 這輪沒排到，會留給下一個步驟`);
-    if(failN>0)lines.push(`<b>${failN}</b> 個 SKU 排入失敗（目的走道空格不足）`);
-    if(slotsLeft>0){
-      lines.push(`目的走道還剩 <b>${slotsLeft}</b> 格沒用到`);
-    }
-    if(lines.length){
-      reconHtml=`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.7">
-        📋 <b>缺口對帳</b>：佇列 ${qTotal} ＝ 排入 ${placedN} ＋ 未取用 ${notTaken} ＋ 失敗 ${failN}<br>
-        ${lines.map(l=>'・'+l).join('<br>')}
-        ${notTaken>0?'<br><span style="color:var(--text3)">→ 剩下的可以新增一個步驟排到別條走道。</span>':''}
-      </div>`;
-    }else{
-      reconHtml=`<div style="color:#2c8;font-size:11px;margin-top:6px;background:rgba(44,136,102,0.08);padding:6px 8px;border-radius:4px">✓ 佇列 ${qTotal} 個 SKU 全數排入，目的走道無剩餘空格</div>`;
-    }
-  }
+  // ★2026-07-21 Gordon：「缺口對帳」區塊已移除（用不到）
+  const reconHtml='';
   // ★ 2026-07-04: 拆色警告 (v6 挑選 — 同色組被部分挑選時顯示; 未到≤10 標可接受)
   const selWarnHtml=(r.selWarnings&&r.selWarnings.length)?`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.6">
     ⚠ 拆色警告: ${r.selWarnings.length} 個色組被拆到不同走道<br>
