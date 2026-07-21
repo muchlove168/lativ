@@ -2346,6 +2346,135 @@ function editCmpTopColorN(span){
   span.innerHTML='';span.appendChild(input);input.focus();input.select();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// ★ 2026-07-21 週次疊加庫（ERP 一次只給一週 → 多週累積 + 去重）
+//   設計：ARRANGE_ARCHIVE / FORECAST_ARCHIVE 為「累積庫」（idb 持久化）；
+//        ARRANGE_DATA / FORECAST_DATA 維持為「當前檢視」，所有既有下游程式碼不用改。
+//   去重：以不含日期的欄位組成 _key（採購單號|款號|櫃號櫃型|進口編號），
+//        重複匯入 → 覆蓋同 key 那筆（進倉日/箱數更新），不會新增一列。
+// ═══════════════════════════════════════════════════════════════════
+let ARRANGE_ARCHIVE=[], FORECAST_ARCHIVE=[];
+let WEEK_SEL='ALL';                       // 'ALL' | 'NODATE' | 週起始日 'YYYY-MM-DD'
+
+function wkFmt(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function wkStart(ymd){                    // 週首＝週日（對齊 ERP／Google 日曆 日一二三四五六）
+  const d=new Date(ymd+'T00:00:00');if(isNaN(d))return '';
+  d.setDate(d.getDate()-d.getDay());return wkFmt(d);
+}
+function wkEnd(startYmd){const d=new Date(startYmd+'T00:00:00');d.setDate(d.getDate()+6);return wkFmt(d);}
+function wkMD(ymd){return ymd?ymd.slice(5).replace('-','/'):'';}
+function wkLabel(w){
+  if(w==='ALL')return '全部週次';
+  if(!w||w==='NODATE')return '未定進倉日';
+  return wkMD(w)+'～'+wkMD(wkEnd(w));
+}
+// 預告進貨表日期欄只有 M/D，用匯入當天推年份（跨年容錯）
+function wkResolveYMD(md,ref){
+  const m=/^(\d{1,2})\/(\d{1,2})$/.exec(String(md||'').trim());if(!m)return '';
+  const mm=+m[1],dd=+m[2];if(mm<1||mm>12||dd<1||dd>31)return '';
+  let y=ref.getFullYear();const diff=mm-(ref.getMonth()+1);
+  if(diff<=-6)y++;else if(diff>=6)y--;
+  return y+'-'+String(mm).padStart(2,'0')+'-'+String(dd).padStart(2,'0');
+}
+const _wkN=s=>String(s==null?'':s).trim().toUpperCase();
+// 去重鍵：只用「不會因船期異動而改變」的欄位
+function wkFcKey(r){
+  const id=[_wkN(r.poNo),_wkN(r.style),_wkN(r.containerType),_wkN(r.importNo)].join('|');
+  return id==='|||'?('NOID|'+_wkN(r.name)+'|'+_wkN(r.batch)):id;
+}
+function wkArrKey(r){return _wkN(r.code);}
+
+// 疊加合併（upsert）：同 key → 覆蓋，不同 key → 新增
+function wkMerge(archive,rows,keyFn,decorate){
+  const idx={};archive.forEach((r,i)=>{idx[r._key]=i;});
+  const dupInFile={};let added=0,updated=0;
+  rows.forEach(r=>{
+    let k=keyFn(r);
+    if(dupInFile[k]){dupInFile[k]++;k=k+'~'+dupInFile[k];}else dupInFile[k]=1;
+    const rec=Object.assign({},r,{_key:k});
+    if(decorate)decorate(rec);
+    if(idx[k]!=null){archive[idx[k]]=rec;updated++;}
+    else{idx[k]=archive.length;archive.push(rec);added++;}
+  });
+  return {added,updated};
+}
+
+// 目前庫內有哪些週（新→舊，未定日期排最後）
+function wkWeeks(){
+  const m={};
+  FORECAST_ARCHIVE.forEach(r=>{const w=r._week||'NODATE';if(!m[w])m[w]=new Set();
+    const ci=resolveContainerInfo(r);m[w].add(ci.importNo+'||'+ci.containerType);});
+  const ks=Object.keys(m).filter(k=>k!=='NODATE').sort().reverse();
+  if(m['NODATE'])ks.push('NODATE');
+  return ks.map(w=>({week:w,containers:m[w].size,
+    rows:FORECAST_ARCHIVE.filter(r=>(r._week||'NODATE')===w).length}));
+}
+// 套用目前週次選擇 → 產生下游用的 FORECAST_DATA / ARRANGE_DATA
+function wkApplySelection(){
+  FORECAST_DATA=(WEEK_SEL==='ALL')?FORECAST_ARCHIVE.slice()
+    :FORECAST_ARCHIVE.filter(r=>(r._week||'NODATE')===WEEK_SEL);
+  ARRANGE_DATA=ARRANGE_ARCHIVE.slice();   // 儲位安排＝SKU 規格總表，不分週（下游依勾選櫃號自行過濾）
+}
+async function wkPersist(){
+  try{await idbPut('forecast_archive',FORECAST_ARCHIVE);}catch(e){}
+  try{await idbPut('arrange_archive',ARRANGE_ARCHIVE);}catch(e){}
+  try{await idbPut('forecast_rows',FORECAST_DATA);await idbPut('arrange_rows',ARRANGE_DATA);}catch(e){}
+  try{localStorage.setItem('wk_sel',WEEK_SEL);}catch(e){}
+}
+// 週次選單 + 日期選擇器渲染
+function wkRenderBar(){
+  const sel=document.getElementById('wk-select');if(!sel)return;
+  const ws=wkWeeks();
+  const total=FORECAST_ARCHIVE.length;
+  const allC=new Set();FORECAST_ARCHIVE.forEach(r=>{const ci=resolveContainerInfo(r);allC.add(ci.importNo+'||'+ci.containerType);});
+  let h=`<option value="ALL">全部週次（${ws.length} 週 · ${allC.size} 櫃 · ${total} 筆）</option>`;
+  ws.forEach(w=>{h+=`<option value="${w.week}">${wkLabel(w.week)}（${w.containers} 櫃 · ${w.rows} 筆）</option>`;});
+  sel.innerHTML=h;
+  if(!ws.some(w=>w.week===WEEK_SEL)&&WEEK_SEL!=='ALL')WEEK_SEL='ALL';
+  sel.value=WEEK_SEL;
+  const bar=document.getElementById('wk-bar');
+  if(bar)bar.style.display=total?'flex':'none';
+  const info=document.getElementById('wk-info');
+  if(info){
+    info.textContent=(WEEK_SEL==='ALL')
+      ?`顯示全部 ${FORECAST_DATA.length} 筆`
+      :`顯示 ${wkLabel(WEEK_SEL)} 共 ${FORECAST_DATA.length} 筆`;
+  }
+}
+function wkOnSelectChange(v){
+  WEEK_SEL=v;
+  const dp=document.getElementById('wk-date');
+  if(dp&&v!=='ALL'&&v!=='NODATE')dp.value=v;
+  wkApplySelection();wkPersist();wkRefreshDownstream();
+}
+// 日期選擇器 → 自動跳到該日期所屬的那一週
+function wkOnDatePick(v){
+  if(!v)return;
+  const w=wkStart(v);
+  const has=wkWeeks().some(x=>x.week===w);
+  if(!has){alert('目前庫內沒有 '+wkLabel(w)+' 這一週的預告進貨資料。');return;}
+  WEEK_SEL=w;wkApplySelection();wkPersist();wkRefreshDownstream();
+}
+function wkRefreshDownstream(){
+  wkRenderBar();
+  try{plannerInvalidateResult('週次檢視切換');}catch(e){}
+  try{plannerSyncNewQueue('週次檢視切換');}catch(e){}
+  try{renderArrangeCompare();}catch(e){}
+  try{renderPlanner();}catch(e){}
+}
+// 刪除目前選取的那一週（或全部）
+async function wkDeleteCurrent(){
+  if(WEEK_SEL==='ALL'){
+    if(!confirm('確定清除「全部週次」的預告進貨累積資料？\n（儲位安排 SKU 規格庫會保留）'))return;
+    FORECAST_ARCHIVE=[];
+  }else{
+    const n=FORECAST_ARCHIVE.filter(r=>(r._week||'NODATE')===WEEK_SEL).length;
+    if(!confirm(`確定刪除 ${wkLabel(WEEK_SEL)} 這一週的 ${n} 筆預告進貨資料？`))return;
+    FORECAST_ARCHIVE=FORECAST_ARCHIVE.filter(r=>(r._week||'NODATE')!==WEEK_SEL);
+  }
+  WEEK_SEL='ALL';wkApplySelection();await wkPersist();wkRefreshDownstream();
+}
+
 async function handleArrangeUpload(event){
   const file=event.target.files[0];if(!file)return;
   showLoading('讀取儲位安排報表中...');
@@ -2368,10 +2497,13 @@ async function handleArrangeUpload(event){
       packaging:String(r['商品包材']||''),
       arrival:String(r['貨到通知']||''),
     })).filter(r=>r.code);
-    try{await idbPut('arrange_rows',ARRANGE_DATA);}catch(e){}
+    // ★2026-07-21 疊加：以商品編號 upsert 進 ARRANGE_ARCHIVE，不覆蓋前幾週已累積的 SKU 規格
     const _arrDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+    const _am=wkMerge(ARRANGE_ARCHIVE,ARRANGE_DATA,wkArrKey,rec=>{rec._src=_arrDate;});
+    wkApplySelection();
+    await wkPersist();
     try{localStorage.setItem('arrange_upload_date',_arrDate);}catch(e){}
-    document.getElementById('arrange-status').textContent=`已載入 ${ARRANGE_DATA.length} 筆儲位安排資料（上傳日期：${_arrDate}）`;
+    document.getElementById('arrange-status').textContent=`儲位安排累積 ${ARRANGE_ARCHIVE.length} 筆（本次新增 ${_am.added} / 更新 ${_am.updated}；${_arrDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     // ★ 2026-07-16 Gordon：儲位安排報表只是換一份待排清單，不是新一輪（新一輪由 EPR 報表觸發）
@@ -2380,6 +2512,7 @@ async function handleArrangeUpload(event){
     plannerSyncNewQueue('儲位安排報表重新上傳');
     renderArrangeCompare();
     renderPlanner();
+    wkRenderBar();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
 }
@@ -2413,10 +2546,18 @@ async function handleForecastUpload(event){
       arrivalDate:findArrivalDate(r),
       boxCount:findArrivalBoxCount(r),
     }));
-    try{await idbPut('forecast_rows',FORECAST_DATA);}catch(e){}
+    // ★2026-07-21 疊加：同一貨櫃（採購單號|款號|櫃號|進口編號）重複匯入 → 覆蓋更新進倉日/箱數，不會重複出現
     const _fcDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
+    const _ref=new Date();
+    const _fm=wkMerge(FORECAST_ARCHIVE,FORECAST_DATA,wkFcKey,rec=>{
+      rec._ymd=wkResolveYMD(rec.arrivalDate,_ref);
+      rec._week=rec._ymd?wkStart(rec._ymd):'';
+      rec._src=_fcDate;
+    });
+    wkApplySelection();
+    await wkPersist();
     try{localStorage.setItem('forecast_upload_date',_fcDate);}catch(e){}
-    document.getElementById('forecast-status').textContent=`已載入 ${FORECAST_DATA.length} 筆預告進貨資料（上傳日期：${_fcDate}）`;
+    document.getElementById('forecast-status').textContent=`預告進貨累積 ${FORECAST_ARCHIVE.length} 筆／${wkWeeks().length} 週（本次新增 ${_fm.added} / 更新 ${_fm.updated}；${_fcDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     // ★ 2026-07-16 Gordon：新的預告進貨表 → 已進倉/取消的款號要從待排新品佇列移除
@@ -2424,6 +2565,7 @@ async function handleForecastUpload(event){
     plannerSyncNewQueue('預告進貨表重新上傳');
     renderArrangeCompare();
     renderPlanner();
+    wkRenderBar();
   }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
   event.target.value='';
 }
@@ -2469,7 +2611,11 @@ async function clearArrangeData(){
   if(!confirm('確定要清除所有資料（儲位安排 + 預告進貨表）？'))return;
   ARRANGE_DATA=[];
   FORECAST_DATA=[];
-  try{await idbPut('arrange_rows',[]);await idbPut('forecast_rows',[]);}catch(e){}
+  ARRANGE_ARCHIVE=[];FORECAST_ARCHIVE=[];WEEK_SEL='ALL';   // ★2026-07-21 連同週次累積庫一併清空
+  try{await idbPut('arrange_rows',[]);await idbPut('forecast_rows',[]);
+      await idbPut('arrange_archive',[]);await idbPut('forecast_archive',[]);}catch(e){}
+  try{localStorage.setItem('wk_sel','ALL');}catch(e){}
+  try{wkRenderBar();}catch(e){}
   try{localStorage.removeItem('arrange_upload_date');localStorage.removeItem('forecast_upload_date');}catch(e){}
   document.getElementById('arrange-status').textContent='';
   document.getElementById('forecast-status').textContent='';
@@ -10354,24 +10500,41 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   try{fw26Restored=await loadFW26Data();}catch(e){console.warn('FW26 load failed:',e);}
   if(!fw26Restored){FW26_FILTER_DATA=EMBEDDED_FW26_STATIC;}
   // 載入儲位安排 + 預告進貨
+  // ★2026-07-21：優先讀「週次累積庫」；若尚無（舊版資料）則以現有單週資料自動建庫遷移
   try{
-    const arr=await idbGet('arrange_rows');
-    if(arr&&arr.length){
-      ARRANGE_DATA=arr;
-      const _arrDate=localStorage.getItem('arrange_upload_date')||'';
-      document.getElementById('arrange-status').textContent=`已載入 ${arr.length} 筆儲位安排資料${_arrDate?'（上傳日期：'+_arrDate+'）':''}`;
-      document.getElementById('arrange-clear-btn').style.display='inline-flex';
+    let aArc=await idbGet('arrange_archive');
+    if(!aArc||!aArc.length){
+      const arr=await idbGet('arrange_rows')||[];
+      aArc=[];if(arr.length)wkMerge(aArc,arr,wkArrKey,rec=>{rec._src=localStorage.getItem('arrange_upload_date')||'';});
+      if(aArc.length){try{await idbPut('arrange_archive',aArc);}catch(e){}}
     }
-  }catch(e){}
+    ARRANGE_ARCHIVE=aArc||[];
+  }catch(e){ARRANGE_ARCHIVE=[];}
   try{
-    const fc=await idbGet('forecast_rows');
-    if(fc&&fc.length){
-      FORECAST_DATA=fc;
-      const _fcDate=localStorage.getItem('forecast_upload_date')||'';
-      document.getElementById('forecast-status').textContent=`已載入 ${fc.length} 筆預告進貨資料${_fcDate?'（上傳日期：'+_fcDate+'）':''}`;
-      document.getElementById('arrange-clear-btn').style.display='inline-flex';
+    let fArc=await idbGet('forecast_archive');
+    if(!fArc||!fArc.length){
+      const fc=await idbGet('forecast_rows')||[];
+      fArc=[];
+      if(fc.length){const _r=new Date();wkMerge(fArc,fc,wkFcKey,rec=>{
+        rec._ymd=wkResolveYMD(rec.arrivalDate,_r);rec._week=rec._ymd?wkStart(rec._ymd):'';
+        rec._src=localStorage.getItem('forecast_upload_date')||'';});}
+      if(fArc.length){try{await idbPut('forecast_archive',fArc);}catch(e){}}
     }
-  }catch(e){}
+    FORECAST_ARCHIVE=fArc||[];
+  }catch(e){FORECAST_ARCHIVE=[];}
+  try{WEEK_SEL=localStorage.getItem('wk_sel')||'ALL';}catch(e){WEEK_SEL='ALL';}
+  wkApplySelection();
+  if(ARRANGE_ARCHIVE.length){
+    const _arrDate=localStorage.getItem('arrange_upload_date')||'';
+    document.getElementById('arrange-status').textContent=`儲位安排累積 ${ARRANGE_ARCHIVE.length} 筆${_arrDate?'（最後上傳：'+_arrDate+'）':''}`;
+    document.getElementById('arrange-clear-btn').style.display='inline-flex';
+  }
+  if(FORECAST_ARCHIVE.length){
+    const _fcDate=localStorage.getItem('forecast_upload_date')||'';
+    document.getElementById('forecast-status').textContent=`預告進貨累積 ${FORECAST_ARCHIVE.length} 筆／${wkWeeks().length} 週${_fcDate?'（最後上傳：'+_fcDate+'）':''}`;
+    document.getElementById('arrange-clear-btn').style.display='inline-flex';
+  }
+  try{wkRenderBar();}catch(e){}
   // 載入歷史 ERP（銷售比對）
   try{
     const cmp=await idbGet('compare_old');
@@ -10564,6 +10727,19 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <span id="forecast-status" style="font-size:12px;color:var(--text3)"></span>
 
     <button class="upload-btn" onclick="clearArrangeData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto;display:none" id="arrange-clear-btn">✖ 清除資料</button>
+  </div>
+
+  <!-- ★2026-07-21 週次檢視列：ERP 一次只給一週 → 多週疊加後在此切換要看哪一週 -->
+  <div id="wk-bar" style="display:none;flex-wrap:wrap;gap:10px;align-items:center;margin:0 18px 12px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
+    <span style="font-size:13px;font-weight:700;color:var(--accent);white-space:nowrap">📅 進倉週次</span>
+    <select id="wk-select" onchange="wkOnSelectChange(this.value)"
+      style="font-size:13px;font-family:var(--font);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;background:var(--surface);cursor:pointer;min-width:230px"></select>
+    <span style="font-size:12px;color:var(--text3);white-space:nowrap">或選日期跳到該週</span>
+    <input type="date" id="wk-date" onchange="wkOnDatePick(this.value)"
+      style="font-size:13px;font-family:var(--font);border:1px solid var(--border);border-radius:4px;padding:3px 6px;background:var(--surface);cursor:pointer">
+    <span id="wk-info" style="font-size:12px;color:var(--text3);margin-left:4px"></span>
+    <button onclick="wkDeleteCurrent()" title="刪除目前選取週次的預告進貨資料"
+      style="margin-left:auto;font-size:12px;font-family:var(--font);cursor:pointer;border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:3px 10px;background:var(--surface)">🗑 刪除此週</button>
   </div>
 
   <div class="stats-bar" style="padding:0 18px">
