@@ -110,12 +110,14 @@
   .side-chart-legend > div > span { color: var(--text3); }
   .side-chart-legend > div > b { font-variant-numeric: tabular-nums; color: var(--text); }
   .side-chart-legend > div.editable:hover { background: rgba(107,79,53,0.08); }
-  .cat-pie-legend { display: flex; flex-direction: column; gap: 1px; max-height: 220px; overflow-y: auto; padding: 0 2px; }
-  .cat-pie-item { display: grid; grid-template-columns: 11px 1fr auto auto; gap: 5px; align-items: center; font-size: 10.5px; padding: 1px 2px; }
-  .cat-pie-sw { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-  .cat-pie-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
-  .cat-pie-val { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
-  .cat-pie-pct { color: var(--text3); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+  /* ★ 2026-07-21：各類別 SKU 佔比改為「圓餅＋引線外標籤＋hover 提示」，取消下方清單 */
+  .cat-pie-svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .cat-pie-svg .cp-sl { cursor: pointer; transition: opacity .12s; }
+  .cat-pie-svg .cp-lb { pointer-events: none; font-family: var(--font); }
+  .cat-pie-svg .cp-ld { pointer-events: none; opacity: .75; }
+  .cp-tip { position: absolute; z-index: 40; background: var(--surface, #fff); border: 1px solid var(--border); border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.16); padding: 4px 9px; font-size: 11px; color: var(--text);
+            white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums; }
   .sku-stats-bar { display: flex; flex-wrap: wrap; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); overflow: hidden; }
   .sku-stat-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 8px 16px; border-right: 1px solid var(--border); flex: 1; min-width: 100px; }
   .sku-stat-cell:last-child { border-right: none; }
@@ -319,11 +321,11 @@
     </div>
     <div class="sku-side-panel">
       <!-- ★ 2026-07-21：原「26FW 新品進倉」「季別 SKU」摘要卡改為三個圓形圖表（進倉進度／儲位使用率／各類別 SKU 佔比） -->
-      <!-- ① 進倉進度（可選季別，同步每日銷售 tab 季別總表未進倉數；合計＝總進貨量，可雙擊編輯） -->
+      <!-- ① 新品SKU進倉進度（★2026-07-21 改：以 SKU 數呈現，資料源＝26FW 新品清單，與 26FW tab 統計列同步） -->
       <div class="card side-chart-card">
         <div class="card-title" style="font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:6px">
-          <span><span class="dot"></span>進倉進度</span>
-          <select id="progress-season-sel" onchange="renderSeasonProgressChart()" style="font-size:11px;font-family:var(--font);color:var(--accent);border:1px solid var(--border);border-radius:4px;padding:2px 4px;background:var(--surface);cursor:pointer;max-width:96px"></select>
+          <span><span class="dot"></span>新品SKU進倉進度</span>
+          <span id="progress-season-tag" style="font-size:10px;font-weight:600;color:var(--accent);background:var(--surface2);border-radius:3px;padding:1px 5px">—</span>
         </div>
         <div id="progress-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">—</div></div>
       </div>
@@ -1598,16 +1600,15 @@ function renderSeasonSalesTable(){
     const tr=document.createElement('tr');tr.innerHTML='<td style="font-weight:500">'+sg.label+'</td><td class="num">'+(skuN?num(skuN):'—')+'</td><td class="num">'+num(stock)+'</td><td class="num">'+(ungrab>0?num(ungrab):'—')+'</td>';tbody.appendChild(tr);
   });
   const trT=document.createElement('tr');trT.className='total-row';trT.innerHTML='<td>Total</td><td class="num">'+num(grandSku)+'</td><td class="num">'+num(grandStock)+'</td><td class="num">'+num(grandUngrab)+'</td>';tbody.appendChild(trT);
-  // ★ 2026-07-21：未進倉 SKU 數 = 該季前綴中「未到量>0」的不重複商品編號數（與未進倉數量＝Σ未到量 同源）
-  const noPosSku=(pfxs)=>{const seen=new Set();pfxs.forEach(pk=>{((CACHE.bySeason&&CACHE.bySeason[pk])||[]).forEach(r=>{if((r.未到量||0)>0&&r.商品編號)seen.add(r.商品編號);});});return seen.size;};
-  const ss26Sku=noPosSku(['72','73']);
+  // ★ 2026-07-21 修正：26SS 無新品清單可比對，未進倉 SKU 數一律顯示「—」（原用 Σ未到量>0 推估，數字無意義）
   const trNoPos=document.createElement('tr');trNoPos.style.background='rgba(107,79,53,0.04)';
-  trNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26SS未進倉</td><td class="num" style="color:var(--text3)">'+(ss26Sku?num(ss26Sku):'—')+'</td><td class="num editable" id="td-ss26-nopos" ondblclick="editSS26NoPos(this)" style="color:var(--text3)">'+num(SS26_NO_POS_STOCK)+'</td><td style="color:var(--text3)">—</td>';
+  trNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26SS未進倉</td><td class="num" style="color:var(--text3)">—</td><td class="num editable" id="td-ss26-nopos" ondblclick="editSS26NoPos(this)" style="color:var(--text3)">'+num(SS26_NO_POS_STOCK)+'</td><td style="color:var(--text3)">—</td>';
   tbody.appendChild(trNoPos);
-  // ★ 2026-07-21：26FW未進倉—SKU數同上；數量可手動編輯（預設 Σ未到量 74/75），與側欄「進倉進度」圖 26FW 未進倉數同步
-  const fw26Sku=noPosSku(['74','75']);
+  // ★ 2026-07-21 修正：26FW未進倉 SKU 數改為「26FW 新品 tab」的未進倉 SKU 數（fw26SkuProgress()），單一資料源不再各算各的
+  const fw26Sku=(typeof fw26SkuProgress==='function')?fw26SkuProgress().pending:0;
+  const fw26Tot=(typeof fw26SkuProgress==='function')?fw26SkuProgress().total:0;
   const trFwNoPos=document.createElement('tr');trFwNoPos.style.background='rgba(107,79,53,0.04)';
-  trFwNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26FW未進倉</td><td class="num" style="color:var(--text3)">'+(fw26Sku?num(fw26Sku):'—')+'</td><td class="num editable" id="td-fw26-nopos" ondblclick="editFW26NoPos(this)" style="color:var(--text3)">'+num(FW26_NO_POS_STOCK)+'</td><td style="color:var(--text3)">—</td>';
+  trFwNoPos.innerHTML='<td style="font-size:11px;color:var(--text3);font-weight:600">26FW未進倉</td><td class="num" style="color:var(--text3)" title="同步 26FW 新品 tab 未進倉 SKU 數">'+(fw26Tot?num(fw26Sku):'—')+'</td><td class="num editable" id="td-fw26-nopos" ondblclick="editFW26NoPos(this)" style="color:var(--text3)">'+num(FW26_NO_POS_STOCK)+'</td><td style="color:var(--text3)">—</td>';
   tbody.appendChild(trFwNoPos);
 }
 function editSS26NoPos(td){
@@ -1733,11 +1734,18 @@ function renderSeasonProgress(){
   const tbody=document.querySelector('#tbl-season-progress tbody');if(!tbody)return;tbody.innerHTML='';
   SEASON_PROGRESS_DATA.forEach((s,idx)=>{
     const rows=[...(CACHE.bySeason[s.pfx[0]]||[]),...(CACHE.bySeason[s.pfx[1]]||[])];
-    const stock=rows.reduce((a,r)=>a+(r.銷售庫存||0)+(r.未到量||0),0);
-    const sold=Math.max(0,s.totalShipment-stock);const pctVal=s.totalShipment>0?sold/s.totalShipment:0;
-    const pctClass=pctVal>0.9?'good':pctVal>0.5?'':'warn';
+    // ★ 2026-07-21 除錯：原本未進倉量直接取 Σ未到量，但 26SS/26FW 的未進倉量在「季別總表」是可手動覆寫的
+    //   （SS26_NO_POS_STOCK / FW26_NO_POS_STOCK），兩張表各算各的 → 26FW 已售與側欄進倉進度對不起來。
+    //   改為統一走 seasonUndelivered()：26SS/26FW 用可覆寫值，其餘季別仍＝Σ未到量。
+    //   另移除 Math.max(0,…)：總進貨量尚未維護時原本會被壓成 0 而看不出異常，改為顯示負值並標紅提示。
+    const onHand=rows.reduce((a,r)=>a+(r.銷售庫存||0),0);
+    const undel=seasonUndelivered(s.season);
+    const stock=onHand+undel;
+    const sold=s.totalShipment-stock;const pctVal=s.totalShipment>0?sold/s.totalShipment:0;
+    const pctClass=sold<0?'bad':pctVal>0.9?'good':pctVal>0.5?'':'warn';
+    const soldTxt=sold<0?'<span style="color:var(--red)" title="總進貨量小於庫存(含未進)，請雙擊左欄更新總進貨量">'+num(sold)+'</span>':num(sold);
     const tr=document.createElement('tr');
-    tr.innerHTML='<td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3);font-weight:600">'+s.season+'</td><td class="num editable" style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)" ondblclick="editTotalShipment('+idx+',this)">'+num(s.totalShipment)+'</td><td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)">'+(DB.length?num(stock):'—')+'</td><td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)">'+(DB.length?num(sold):'—')+'</td><td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)" class="'+pctClass+'">'+(DB.length?pct(pctVal):'—')+'</td>';
+    tr.innerHTML='<td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3);font-weight:600">'+s.season+'</td><td class="num editable" style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)" ondblclick="editTotalShipment('+idx+',this)">'+num(s.totalShipment)+'</td><td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)" title="銷售庫存 '+num(onHand)+' ＋ 未進倉 '+num(undel)+'">'+(DB.length?num(stock):'—')+'</td><td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)">'+(DB.length?soldTxt:'—')+'</td><td style="padding:4px 6px;border-bottom:1px solid rgba(221,216,208,.3)" class="'+pctClass+'">'+(DB.length?pct(pctVal):'—')+'</td>';
     tbody.appendChild(tr);
   });
 }
@@ -1781,42 +1789,43 @@ function progressSeasonsList(){
   // 從 2026SS 開始（seasonKey>=261），最新季別排最前
   return SEASON_PROGRESS_DATA.filter(s=>seasonKey(s.season)>=261).sort((a,b)=>seasonKey(b.season)-seasonKey(a.season));
 }
+// ★ 2026-07-21：新品 SKU 進倉進度單一資料源 —— 與 26FW tab 統計列（fw-total / fw-arrived / fw-pending）完全同源
+//   total   = 新品清單筆數（FW26_FILTER_DATA）
+//   arrived = 商品編號已出現在 EPR 資料庫（DB）者
+//   pending = total - arrived
+function fw26SkuProgress(){
+  const list=(typeof FW26_FILTER_DATA!=='undefined'&&FW26_FILTER_DATA)?FW26_FILTER_DATA:[];
+  const total=list.length;
+  if(!total)return{total:0,arrived:0,pending:0};
+  const arrivedSet=new Set((typeof DB!=='undefined'&&DB?DB:[]).map(d=>d.商品編號));
+  const arrived=list.filter(r=>arrivedSet.has(r[0])).length;
+  return{total,arrived,pending:total-arrived};
+}
+// 新品清單所屬季別（依商品編號前 2 碼對回 SEASON_PROGRESS_DATA.pfx，取出現次數最多者）
+function fw26SeasonLabel(){
+  const list=(typeof FW26_FILTER_DATA!=='undefined'&&FW26_FILTER_DATA)?FW26_FILTER_DATA:[];
+  if(!list.length)return '';
+  const cnt={};
+  list.forEach(r=>{const pk=String(r[0]||'').substring(0,2);if(!pk)return;
+    const s=SEASON_PROGRESS_DATA.find(x=>x.pfx.indexOf(pk)>=0);
+    const lab=s?s.season:null;if(lab)cnt[lab]=(cnt[lab]||0)+1;});
+  const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0];
+  return top?top[0]:'';
+}
 function renderSeasonProgressChart(){
   const wrap=document.getElementById('progress-chart-wrap');if(!wrap)return;
-  const sel=document.getElementById('progress-season-sel');
-  const list=progressSeasonsList();
-  if(sel){
-    const want=list.map(s=>s.season).join(',');
-    if(sel.dataset.built!==want){
-      const keep=sel.value;
-      sel.innerHTML=list.map(s=>`<option value="${s.season}">${seasonDisplayName(s.season)}</option>`).join('');
-      sel.dataset.built=want;
-      if(keep&&list.some(s=>s.season===keep))sel.value=keep;
-    }
-  }
-  const cur=(sel&&sel.value)||(list[0]&&list[0].season);
-  const s=SEASON_PROGRESS_DATA.find(x=>x.season===cur)||list[0];
-  if(!s){wrap.innerHTML='<div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">—</div>';return;}
-  const undelivered=seasonUndelivered(s.season);
-  const total=s.totalShipment||0;
-  const arrived=Math.max(0,total-undelivered);
-  const p=total>0?arrived/total:0;
-  wrap.innerHTML=_donutSVG(p,'var(--accent)',total>0?pct(p):'—')
+  const {total,arrived,pending}=fw26SkuProgress();
+  const tag=document.getElementById('progress-season-tag');
+  const lab=fw26SeasonLabel();
+  if(tag)tag.textContent=lab?seasonDisplayName(lab):'—';
+  if(!total){wrap.innerHTML='<div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">尚未上傳新品清單</div>';return;}
+  const p=arrived/total;
+  wrap.innerHTML=_donutSVG(p,'var(--accent)',pct(p))
     +`<div class="side-chart-legend">`
-    +`<div><span>已進倉</span><b style="color:var(--green)">${total>0?num(arrived):'—'}</b></div>`
-    +`<div><span>未進倉</span><b style="color:var(--yellow)">${num(undelivered)}</b></div>`
-    +`<div class="editable" ondblclick="editProgressTotal(this)" title="雙擊修改總進貨量（合計）"><span>合計</span><b>${total>0?num(total):'<span style=color:var(--text3)>雙擊輸入</span>'}</b></div>`
+    +`<div><span>已進倉 SKU</span><b style="color:var(--green)">${num(arrived)}</b></div>`
+    +`<div><span>未進倉 SKU</span><b style="color:var(--yellow)">${num(pending)}</b></div>`
+    +`<div><span>總新品 SKU</span><b>${num(total)}</b></div>`
     +`</div>`;
-}
-function editProgressTotal(cell){
-  const sel=document.getElementById('progress-season-sel');
-  const cur=sel&&sel.value;
-  const idx=SEASON_PROGRESS_DATA.findIndex(x=>x.season===cur);if(idx<0)return;
-  const b=cell.querySelector('b');if(!b)return;
-  const input=document.createElement('input');input.type='number';input.className='inline-edit';input.value=SEASON_PROGRESS_DATA[idx].totalShipment||0;input.style.width='96px';
-  input.onblur=()=>{SEASON_PROGRESS_DATA[idx].totalShipment=parseInt(input.value)||0;saveManualEdits();renderSeasonProgressChart();try{renderSeasonProgress();}catch(e){}};
-  input.onkeydown=e=>{if(e.key==='Enter')input.blur();if(e.key==='Escape')renderSeasonProgressChart();};
-  b.innerHTML='';b.appendChild(input);input.focus();input.select();
 }
 // ② 儲位使用率：由 renderSlotData 以「儲位使用數量」表相同的 總儲位/已使用 值呼叫
 function renderSlotUsageChart(total,used){
@@ -1832,33 +1841,67 @@ function renderSlotUsageChart(total,used){
 // ③ 各類別 SKU 佔比：由 renderArrangeCompare 以各類別 SKU 數（待排）呼叫
 const CAT_PIE_COLORS=['#6b4f35','#8b6b4a','#b08968','#7b9ecc','#6aaa8c','#c68f5a','#b07ba0','#7ba8b0','#a09060','#c98a7a','#5a8a6a','#9a7bb0','#c0a050','#6a90b0','#b06a6a','#7aa090','#a8a060','#8a7a6a','#4f7a9a','#aa8850','#7a6ab0','#90a060','#b09070','#6ab0a0'];
 let LAST_CAT_PIE_DATA=[];
+function _cpEsc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function renderCatPieChart(data){
   const wrap=document.getElementById('catpie-chart-wrap');if(!wrap)return;
   if(Array.isArray(data))LAST_CAT_PIE_DATA=data;
   const items=(LAST_CAT_PIE_DATA||[]).filter(d=>d&&d.value>0);
   if(!items.length){wrap.innerHTML='<div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">尚未比對到 26FW 新品</div>';return;}
-  const total=items.reduce((s,d)=>s+d.value,0),cx=50,cy=50,r=42;
-  let ang=-Math.PI/2,paths='';
+  const total=items.reduce((s,d)=>s+d.value,0);
+  // 版面：圓餅置中，標籤以引線拉到左右兩側（同參考圖樣式）
+  const W=240,H=300,cx=120,cy=150,r=50;
+  const meta=[];let ang=-Math.PI/2;
   items.forEach((d,i)=>{
-    const frac=d.value/total,a2=ang+frac*2*Math.PI,col=CAT_PIE_COLORS[i%CAT_PIE_COLORS.length];
-    if(items.length===1){paths+=`<circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}"/>`;}
-    else{
-      const x1=(cx+r*Math.cos(ang)).toFixed(2),y1=(cy+r*Math.sin(ang)).toFixed(2);
-      const x2=(cx+r*Math.cos(a2)).toFixed(2),y2=(cy+r*Math.sin(a2)).toFixed(2);
-      const large=frac>0.5?1:0;
-      paths+=`<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z" fill="${col}" stroke="var(--surface)" stroke-width="0.6"/>`;
-    }
+    const frac=d.value/total,a2=ang+frac*2*Math.PI;
+    meta.push({i,name:String(d.name),value:d.value,frac,a1:ang,a2,mid:(ang+a2)/2,col:CAT_PIE_COLORS[i%CAT_PIE_COLORS.length]});
     ang=a2;
   });
-  const svg=`<svg viewBox="0 0 100 100" style="width:128px;height:128px;display:block;margin:0 auto 8px">${paths}</svg>`;
-  const legend=`<div class="cat-pie-legend">`+items.map((d,i)=>{
-    const col=CAT_PIE_COLORS[i%CAT_PIE_COLORS.length];
-    const pctStr=(d.value/total*100).toFixed(1)+'%';
-    const isUn=d.name==='未匹配';
-    const nm=isUn?'<span style="color:var(--red)">未匹配</span>':String(d.name);
-    return `<div class="cat-pie-item"><span class="cat-pie-sw" style="background:${col}"></span><span class="cat-pie-nm" title="${String(d.name).replace(/"/g,'')}">${nm}</span><span class="cat-pie-val">${num(d.value)}</span><span class="cat-pie-pct">${pctStr}</span></div>`;
-  }).join('')+`</div>`;
-  wrap.innerHTML=svg+legend;
+  // 扇形
+  let paths='';
+  meta.forEach(m=>{
+    if(meta.length===1){paths+=`<circle class="cp-sl" data-i="${m.i}" cx="${cx}" cy="${cy}" r="${r}" fill="${m.col}"/>`;return;}
+    const x1=(cx+r*Math.cos(m.a1)).toFixed(2),y1=(cy+r*Math.sin(m.a1)).toFixed(2);
+    const x2=(cx+r*Math.cos(m.a2)).toFixed(2),y2=(cy+r*Math.sin(m.a2)).toFixed(2);
+    const large=m.frac>0.5?1:0;
+    paths+=`<path class="cp-sl" data-i="${m.i}" d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z" fill="${m.col}" stroke="var(--surface)" stroke-width="0.6"/>`;
+  });
+  // 標籤：依中線角度分左右，各自由上而下等距排列，避免重疊
+  const fs=meta.length>20?5.8:meta.length>14?6.6:meta.length>8?7.2:8;
+  const RS=meta.filter(m=>Math.cos(m.mid)>=0),LS=meta.filter(m=>Math.cos(m.mid)<0);
+  const place=arr=>{
+    const n=arr.length;if(!n)return;
+    const step=n>1?Math.min(fs*2.2,(H-20)/(n-1)):0;
+    const y0=cy-step*(n-1)/2;
+    arr.sort((a,b)=>Math.sin(a.mid)-Math.sin(b.mid)).forEach((m,k)=>{m.ly=Math.max(8,Math.min(H-6,y0+k*step));});
+  };
+  place(RS);place(LS);
+  let leaders='',labels='';
+  meta.forEach(m=>{
+    const right=Math.cos(m.mid)>=0;
+    const ex=right?175:65,tx=right?179:61;
+    const p1x=cx+r*Math.cos(m.mid),p1y=cy+r*Math.sin(m.mid);
+    const p2x=cx+(r+8)*Math.cos(m.mid),p2y=cy+(r+8)*Math.sin(m.mid);
+    leaders+=`<polyline class="cp-ld" data-i="${m.i}" points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)} ${ex},${m.ly.toFixed(1)}" fill="none" stroke="${m.col}" stroke-width="0.7"/>`;
+    labels+=`<text class="cp-lb" data-i="${m.i}" x="${tx}" y="${m.ly.toFixed(1)}" text-anchor="${right?'start':'end'}" dominant-baseline="middle" style="font-size:${fs}px;fill:${m.name==='未匹配'?'var(--red)':'var(--text2)'}">${_cpEsc(m.name)}</text>`;
+  });
+  wrap.style.position='relative';
+  wrap.innerHTML=`<svg viewBox="0 0 ${W} ${H}" class="cat-pie-svg">${paths}${leaders}${labels}</svg><div class="cp-tip" style="display:none"></div>`;
+  // hover：顯示「類別：SKU數 (佔比%)」
+  const tip=wrap.querySelector('.cp-tip');
+  wrap.querySelectorAll('.cp-sl').forEach(el=>{
+    const m=meta[parseInt(el.dataset.i,10)];if(!m)return;
+    const lb=wrap.querySelector('.cp-lb[data-i="'+m.i+'"]');
+    el.addEventListener('mousemove',ev=>{
+      tip.textContent=m.name+'：'+num(m.value)+' ('+(m.frac*100).toFixed(2)+'%)';
+      tip.style.display='block';
+      const rc=wrap.getBoundingClientRect();
+      let x=ev.clientX-rc.left+12,y=ev.clientY-rc.top+12;
+      x=Math.min(x,Math.max(2,wrap.clientWidth-tip.offsetWidth-4));
+      tip.style.left=Math.max(2,x)+'px';tip.style.top=y+'px';
+      el.style.opacity='0.72';if(lb)lb.style.fontWeight='700';
+    });
+    el.addEventListener('mouseleave',()=>{tip.style.display='none';el.style.opacity='';if(lb)lb.style.fontWeight='';});
+  });
 }
 // 統一刷新側欄圖表（進倉進度＋類別佔比；儲位使用率由 renderSlotData 負責）
 function refreshSidePanelCharts(){
@@ -7645,7 +7688,7 @@ function sortFW26(col){
   renderFW26Table();
 }
 
-function renderFW26Stats(){const total=FW26_FILTER_DATA.length;const arrivedSet=new Set(DB.map(d=>d.商品編號));const arrived=FW26_FILTER_DATA.filter(r=>arrivedSet.has(r[0])).length;const pending=total-arrived;document.getElementById('fw-total').textContent=num(total);document.getElementById('fw-arrived').textContent=num(arrived);document.getElementById('fw-pending').textContent=num(pending);document.getElementById('fw-rate').textContent=total>0?pct(arrived/total):'—';}
+function renderFW26Stats(){const{total,arrived,pending}=fw26SkuProgress();document.getElementById('fw-total').textContent=num(total);document.getElementById('fw-arrived').textContent=num(arrived);document.getElementById('fw-pending').textContent=num(pending);document.getElementById('fw-rate').textContent=total>0?pct(arrived/total):'—';}
 
 // ★ R2（2026-07-18 重整）：原「依類別分析」(tbl-fw-cat) 已併入 tbl-fw26-cat（移至 26FW tab，含進倉率＋儲區）。
 //   本函式保留原名相容所有呼叫點：改為渲染合併表＋儲區總覽側欄一行摘要。
