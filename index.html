@@ -3903,7 +3903,7 @@ function plnAutoSelect(rows,colorGroups,n){
 }
 
 
-// ═══ ★2026-07-21 自動湊滿（Gordon：不想再手動勾 SKU 數）═══
+// ═══ ★2026-07-21 自動選出最佳整色組合（取代原「依序取到撞牆即停」）═══
 //   以「整色組」為原子單位做 0/1 子集合和最佳化，目標 C＝目的走道空儲位數。
 //   ① 先找總和「剛好＝C」的完美組合；② 找不到則取 ≤C 的最大總數（密度最高）。
 //   ③ 同分時以成本函數挑選：cost = 佇列序 index（主）+ 溢出碼數（次）。
@@ -5438,11 +5438,9 @@ function plnRunNewEngine(config,initialCells){
   //   以「色」為原子單位、依（款 n DESC→kc ASC→color7 ASC）佇列序取整色，累計超過 N 即停（不跳款跳色補位、
   //   不足一色的殘額不拆色硬塞）：N=42、6碼色 → 取同款前 7 色共 42 個 SKU。未取的色不進本輪佇列，
   //   由跨步驟去重自動流到下一 step。
-  // ★★ 2026-07-21 尾數補齊（Gordon C07 案：上限256 → 只取254，剩 2 格空著）★★
-  //   Phase1 維持原「不跳款跳色補位」規則不變；Phase2 僅在 Phase1 收尾後仍有缺口時啟動，
-  //   一律以「整色」為單位（絕不拆色），依序嘗試：(a)後補放得下的整色組 →
-  //   (b)一換一（換掉優先序最低的已選色組，改放大 gap 的未選色組）→ (c)二換二。
-  //   可由情境配置「尾數補齊」核取方塊關閉，關閉後行為與 2026-07-15 規則完全相同。
+  // ★★ 2026-07-21（Gordon C07 案：256 格只排 254、剩 2 格）★★
+  //   舊規則「依序取整色、撞到放不下就整個停」已退役，改為一律呼叫 plnAutoFitGroups
+  //   一次比對所有整色組合。原 2026-07-15「不跳款跳色補位」規則同步作廢。
   // ── 攤平成色組清單（佇列序：款 n DESC → kc ASC → color7 ASC）──
   const groups=[];
   kuans.forEach(ku=>{
@@ -5450,66 +5448,18 @@ function plnRunNewEngine(config,initialCells){
     ku.skus.forEach(s=>{const c7=String(s.code||'').substring(0,7);(cm[c7]=cm[c7]||[]).push(s);});
     Object.keys(cm).sort().forEach(c7=>groups.push({kc:ku.kc,color:c7,size:cm[c7].length,skus:cm[c7]}));
   });
-  let _capStop=null,_capFill=null,_autoFit=null;
-  let take=null;
-
-  // ══ 模式A：自動湊滿（預設）══ 目標＝目的走道空儲位數，忽略手填 SKU 數
-  if(config.autoFit!==false){
-    const C=plnAuditCapacity(cells,config).total;
-    const af=plnAutoFitGroups(groups,C);
-    take=af.take;
-    _autoFit={capacity:C,total:af.total,exact:af.exact,spill:af.spill,
-      picked:af.take.filter(Boolean).length,groupsTotal:groups.length,queueTotal:skus.length};
-  }
-  // ══ 模式B：手填 SKU 數上限（原 2026-07-15 規則 + 尾數補齊）══
-  else if(config.nToPick>0&&config.nToPick<skus.length){
-    const N=config.nToPick;
-    take=new Array(groups.length).fill(false);
-    let acc=0,stopAt=-1;
-    for(let i=0;i<groups.length;i++){
-      if(acc+groups[i].size>N){
-        stopAt=i;_capStop={kc:groups[i].kc,color:groups[i].color,need:groups[i].size,acc:acc,limit:N};
-        break;
-      }
-      take[i]=true;acc+=groups[i].size;
-    }
-    if(config.fillRemainder!==false && stopAt>=0 && acc<N){
-      const before=acc,acts=[];
-      for(let i=stopAt;i<groups.length&&acc<N;i++){
-        if(take[i]||acc+groups[i].size>N)continue;
-        take[i]=true;acc+=groups[i].size;acts.push(`後補 ${groups[i].color}(${groups[i].size})`);
-      }
-      if(acc<N){
-        const gap=N-acc;let done=false;
-        for(let i=groups.length-1;i>=0&&!done;i--){
-          if(!take[i])continue;
-          for(let j2=0;j2<groups.length;j2++){
-            if(take[j2])continue;
-            if(groups[j2].size-groups[i].size===gap){
-              take[i]=false;take[j2]=true;acc+=gap;done=true;
-              acts.push(`換出 ${groups[i].color}(${groups[i].size}) → 換入 ${groups[j2].color}(${groups[j2].size})`);
-              break;
-            }
-          }
-        }
-      }
-      if(acc<N){
-        const gap=N-acc,sel=[],uns=[];
-        groups.forEach((g,i)=>{(take[i]?sel:uns).push(i);});
-        let done=false;
-        for(let a=sel.length-1;a>=1&&!done;a--)for(let b=a-1;b>=0&&!done;b--){
-          const outSz=groups[sel[a]].size+groups[sel[b]].size;
-          for(let c=0;c<uns.length&&!done;c++)for(let d=c+1;d<uns.length&&!done;d++){
-            if(groups[uns[c]].size+groups[uns[d]].size-outSz===gap){
-              take[sel[a]]=false;take[sel[b]]=false;take[uns[c]]=true;take[uns[d]]=true;acc+=gap;done=true;
-              acts.push(`換出 ${groups[sel[a]].color}+${groups[sel[b]].color} → 換入 ${groups[uns[c]].color}+${groups[uns[d]].color}`);
-            }
-          }
-        }
-      }
-      if(acc>before)_capFill={from:before,to:acc,limit:N,actions:acts};
-    }
-  }
+  // ★2026-07-21：挑選一律走「自動找最佳整色組合」，不再有模式切換。
+  //   目標 = min(SKU數欄位, 目的走道空格數)；SKU數留空/0 視為不限 → 直接以空格數為目標。
+  //   plnAutoFitGroups 會先找總和剛好等於目標的組合（完美排滿），找不到才取 ≤目標 的最大總數。
+  let _autoFit=null;
+  const _cap=plnAuditCapacity(cells,config).total;
+  const _lim=config.nToPick>0?config.nToPick:Infinity;
+  const _target=Math.min(_cap,_lim);
+  const _af=plnAutoFitGroups(groups,_target);
+  const take=_af.take;
+  _autoFit={capacity:_cap,limit:config.nToPick||0,target:_target,total:_af.total,
+    exact:_af.exact,spill:_af.spill,picked:_af.take.filter(Boolean).length,
+    groupsTotal:groups.length,queueTotal:skus.length};
 
   if(take){
     const keep=new Set();
@@ -6335,9 +6285,9 @@ function plnRunNewEngine(config,initialCells){
   // §1.3f-④/⑤/容量不足: 能排幾色排幾色, 排不進的「色」逐一失敗回報
   pendingUnits.forEach(u=>failed.push({kc:u.color7,n:u.skus.length,reason:'NEW_NO_FIT_COLOR',cat:u.cat}));
   // ★2026-07-21：帶出「未排入」診斷欄位 —— queueTotal=去重後佇列總數；nToPick=情境配置SKU數；
-  //   capKept=經SKU數上限裁切後真正進入本輪的數量；capStop=被上限擋下的那個色組（整色不拆）。
+  //   capKept=實際進入本輪排入的 SKU 數；autoFit=自動選組的結果（目標/選中/是否剛好排滿）。
   return {selected:placed,capacity:plnAuditCapacity(cells,config),deficit:0,moves,failed,config,xxSalesMax:0,finalCells:cells,
-    queueTotal:_queueTotal0,nToPick:config.nToPick||0,capKept:skus.length,capStop:_capStop,capFill:_capFill,autoFit:_autoFit};
+    queueTotal:_queueTotal0,nToPick:config.nToPick||0,capKept:skus.length,autoFit:_autoFit};
 }
 
 
@@ -6468,7 +6418,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
         </select>
       </div>
       <span style="color:var(--text2)">SKU數</span>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><input type="number" data-step="${idx}" data-grp="n" data-auto="1" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px" title="依來源走道勾選項目自動累加；手動修改後即停止自動更新，改動來源走道會再恢復"><label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;color:#784c96;font-weight:600;cursor:pointer" title="新品模式專用。忽略左邊手填的 SKU 數，改以「目的走道空儲位數」為目標，自動跑一輪全佇列比對：先找剛好排滿的整色組合，找不到才取密度最高的組合。"><input type="checkbox" data-step="${idx}" data-grp="autofit" checked>自動湊滿</label><label style="display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--text2);cursor:pointer" title="僅在「自動湊滿」關閉時生效。依序取整色到手填上限後若仍差幾格，改用整色為單位的後補／換色把尾數補滿（絕不拆色）"><input type="checkbox" data-step="${idx}" data-grp="fillrem" checked>尾數補齊</label></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><input type="number" data-step="${idx}" data-grp="n" data-auto="1" value="${defaultN}" style="width:80px;padding:3px 6px;font-size:13px" title="預設自動帶入來源走道勾選項目的 SKU 總數；想少放就直接改小。實際目標＝此數與目的走道空格數取小者，系統會自動找出剛好排滿的整色組合。"><span style="font-size:11px;color:var(--text3)">自動帶入來源總數，想少放直接改</span></div>
     </div>
   `;
   wrap.appendChild(div);
@@ -6518,8 +6468,6 @@ function plannerCollectStepConfig(idx){
     destination:collect('dst'),
     overflow:plnGetOverflowAisles(),
     nToPick:parseInt(nInp?nInp.value:'0')||0,
-    fillRemainder:(()=>{const cb=document.querySelector(`#pln-step-${idx} input[data-grp="fillrem"]`);return cb?!!cb.checked:true;})(),
-    autoFit:(()=>{const cb=document.querySelector(`#pln-step-${idx} input[data-grp="autofit"]`);return cb?!!cb.checked:true;})(),
     sortMode:sortMode,
     aisleGeometry:plnGetAisleGeometry(),
   };
@@ -6567,25 +6515,6 @@ function plannerAutoFillN(stepEl){
   if(!stepEl)return;
   const nEl=stepEl.querySelector('input[data-grp="n"]');
   if(!nEl)return;
-  // ★2026-07-21 自動湊滿：SKU數改為「目的走道空儲位數」（＝湊滿目標），唯讀顯示
-  const afCb=stepEl.querySelector('input[data-grp="autofit"]');
-  const sortInp=stepEl.querySelector('input[data-grp="sortMode"]:checked');
-  const isNew=sortInp&&sortInp.value==='new';
-  if(afCb&&afCb.checked&&isNew){
-    let cap=0,unknown=false;
-    stepEl.querySelectorAll('input[data-grp="dst"]:checked').forEach(cb=>{
-      const sp=stepEl.querySelector(`.aisle-count[data-grp="dst"][data-aisle="${cb.value}"]`);
-      const v=parseInt(sp?sp.textContent:'',10);
-      if(!isFinite(v)){unknown=true;return;}
-      cap+=v;
-    });
-    if(!unknown){nEl.value=cap>0?String(cap):'';}
-    nEl.readOnly=true;nEl.style.background='var(--surface2)';nEl.style.color='var(--text3)';
-    nEl.title='「自動湊滿」開啟中：目標＝目的走道空儲位數，由系統自動選整色組合，不需手動填';
-    return;
-  }
-  nEl.readOnly=false;nEl.style.background='';nEl.style.color='';
-  nEl.title='依來源走道勾選項目自動累加；手動修改後即停止自動更新，改動來源走道會再恢復';
   if(nEl.dataset.auto==='0')return;                 // 使用者手動指定過 → 不覆寫
   let sum=0,unknown=false;
   stepEl.querySelectorAll('input[data-grp="src"]:checked').forEach(cb=>{
@@ -6926,7 +6855,7 @@ function plannerRunAllSteps(){
         const leftMsg=(r.capacity&&r.capacity.total>0)?` | 目的走道尚餘 ${r.capacity.total} 空格`:'';
         if(r.autoFit){
           const af=r.autoFit;
-          statusEl.textContent=`✓ 新品安排 | 自動湊滿${af.exact?'（完美排滿）':'（密度最高）'} ${af.total}/${af.capacity} 格 | 排入 ${placedN} / 佇列 ${qTotal}${leftMsg}`;
+          statusEl.textContent=`✓ 新品安排 | 排入 ${placedN} / 佇列 ${qTotal} 個 SKU | 目的走道 ${af.total}/${af.capacity} 格${af.exact?'（剛好排滿）':''}${leftMsg}`;
           statusEl.style.color=af.exact?'var(--accent)':'#d4a017';
           continue;
         }
@@ -7071,35 +7000,26 @@ function plannerRenderResult(r){
     const notTaken=Math.max(0,qTotal-placedN-failN);
     const slotsLeft=r.capacity.total||0;
     const lines=[];
-    const afs=newSteps.map(x=>x.autoFit).filter(Boolean);
-    if(afs.length){
-      const af=afs[0];
+    const af=newSteps.map(x=>x.autoFit).filter(Boolean)[0];
+    if(af){
+      const capped=af.limit>0&&af.limit<af.capacity;   // 使用者把 SKU數 調得比空格數還小
       if(af.exact){
-        lines.push(`<span style="color:#2c8">🎯 自動湊滿：找到<b>完美組合</b> — 從 ${af.groupsTotal} 個色組中選 ${af.picked} 組，總計 <b>${af.total}</b> 個 SKU＝目的走道空儲位 ${af.capacity} 格，剛好排滿</span>`);
+        lines.push(`<span style="color:#2c8">✓ 已自動找出剛好排滿的組合：從 ${af.groupsTotal} 個顏色中挑 ${af.picked} 個，共 <b>${af.total}</b> 個 SKU${capped?`＝你設定的 SKU數 ${af.limit}`:`＝目的走道空格 ${af.capacity}`}</span>`);
       }else{
-        lines.push(`<span style="color:#d4a017">🎯 自動湊滿：<b>無完美組合</b>（整色不拆的前提下湊不出剛好 ${af.capacity}）→ 改取密度最高組合：${af.picked} 組共 <b>${af.total}</b> 個 SKU，填充率 ${(af.total/af.capacity*100).toFixed(1)}%，剩 ${af.capacity-af.total} 格</span>`);
+        lines.push(`<span style="color:#d4a017">湊不出剛好 ${af.target} 的組合（每個顏色必須整組放、不能拆）→ 改用最接近的組合：挑 ${af.picked} 個顏色共 <b>${af.total}</b> 個 SKU，還差 ${af.target-af.total} 格</span>`);
       }
+      if(capped)lines.push(`目的走道其實有 ${af.capacity} 格，但你把 SKU數 設成 ${af.limit} → 只排 ${af.total} 個（把 SKU數 改大或清空就會排滿）`);
     }
-    const cf=newSteps.map(x=>x.capFill).filter(Boolean)[0];
-    if(cf){
-      lines.push(`<span style="color:#2c8">尾數補齊生效：${cf.from} → <b>${cf.to}</b> 個（上限 ${cf.limit}）</span><br><span style="color:var(--text3);font-family:monospace;font-size:10.5px">　${cf.actions.join('；')}</span>`);
-    }
-    if(notTaken>0){
-      const cs=newSteps.map(x=>x.capStop).filter(Boolean)[0];
-      const why=cs
-        ? `受情境配置「SKU數 ${cs.limit}」上限限制：累計到 ${cs.acc} 個後，下一個色組 <span style="font-family:monospace">${cs.kc}／${cs.color}</span> 有 ${cs.need} 個 SKU，補進去會超過上限，而整色不拆 → 停在 ${cs.acc} 個`
-        : `受情境配置「SKU數」上限限制，未取用的色組會留給下一個步驟`;
-      lines.push(`<b>${notTaken}</b> 個 SKU 未取用 — ${why}`);
-    }
+    if(notTaken>0)lines.push(`<b>${notTaken}</b> 個 SKU 這輪沒排到，會留給下一個步驟`);
     if(failN>0)lines.push(`<b>${failN}</b> 個 SKU 排入失敗（目的走道空格不足）`);
     if(slotsLeft>0){
-      lines.push(`目的走道尚有 <b>${slotsLeft}</b> 個空儲位未使用${notTaken>0?'（因整色不拆，湊不滿一個完整色組就不硬塞）':''}`);
+      lines.push(`目的走道還剩 <b>${slotsLeft}</b> 格沒用到`);
     }
     if(lines.length){
       reconHtml=`<div style="color:#d4a017;font-size:11px;margin-top:6px;background:rgba(212,160,23,0.08);padding:6px 8px;border-radius:4px;line-height:1.7">
         📋 <b>缺口對帳</b>：佇列 ${qTotal} ＝ 排入 ${placedN} ＋ 未取用 ${notTaken} ＋ 失敗 ${failN}<br>
         ${lines.map(l=>'・'+l).join('<br>')}
-        ${notTaken>0?'<br><span style="color:var(--text3)">→ 想把剩餘空格用滿：把「SKU數」調大（或清空＝不限），或新增一個步驟承接未取用的部分。</span>':''}
+        ${notTaken>0?'<br><span style="color:var(--text3)">→ 剩下的可以新增一個步驟排到別條走道。</span>':''}
       </div>`;
     }else{
       reconHtml=`<div style="color:#2c8;font-size:11px;margin-top:6px;background:rgba(44,136,102,0.08);padding:6px 8px;border-radius:4px">✓ 佇列 ${qTotal} 個 SKU 全數排入，目的走道無剩餘空格</div>`;
