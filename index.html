@@ -15,20 +15,20 @@
     --shadow: 0 1px 3px rgba(0,0,0,0.08);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 13px; min-height: 100vh; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; min-height: 100vh; }
   td, th { text-align: center !important; }
   td.label-cell, th.label-cell { text-align: left !important; }
 
   .header { background: var(--accent); padding: 0 20px; display: flex; align-items: center; gap: 16px; height: 52px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 6px rgba(0,0,0,0.15); }
-  .header-logo { color: #fff; font-size: 15px; font-weight: 700; letter-spacing: 1px; border-right: 1px solid rgba(255,255,255,0.3); padding-right: 16px; margin-right: 4px; }
-  .header h1 { font-size: 14px; font-weight: 600; color: #fff; letter-spacing: 0.3px; }
-  .header-date { color: rgba(255,255,255,0.75); font-size: 12px; margin-left: auto; }
-  .header-row-count { background: rgba(255,255,255,0.2); color: #fff; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
-  .upload-btn { background: #fff; color: var(--accent); border: none; border-radius: 4px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; transition: background 0.15s; font-family: var(--font); letter-spacing: 0.3px; }
+  .header-logo { color: #fff; font-size: 16px; font-weight: 700; letter-spacing: 1px; border-right: 1px solid rgba(255,255,255,0.3); padding-right: 16px; margin-right: 4px; }
+  .header h1 { font-size: 15px; font-weight: 600; color: #fff; letter-spacing: 0.3px; }
+  .header-date { color: rgba(255,255,255,0.75); font-size: 13px; margin-left: auto; }
+  .header-row-count { background: rgba(255,255,255,0.2); color: #fff; padding: 3px 10px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+  .upload-btn { background: #fff; color: var(--accent); border: none; border-radius: 4px; padding: 6px 14px; font-size: 13px; font-weight: 700; cursor: pointer; transition: background 0.15s; font-family: var(--font); letter-spacing: 0.3px; }
   .upload-btn:hover { background: #f0ece6; }
   #file-input { display: none; }
   .tabs { display: flex; background: var(--surface); border-bottom: 2px solid var(--border); padding: 0 20px; gap: 0; overflow-x: auto; position: sticky; top: 52px; z-index: 99; box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
-  .tab { padding: 10px 18px; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; font-size: 13px; font-weight: 500; transition: all 0.15s; margin-bottom: -2px; white-space: nowrap; }
+  .tab { padding: 10px 14px; color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; font-size: 14px; font-weight: 500; transition: all 0.15s; margin-bottom: -2px; white-space: nowrap; }
   .tab:hover { color: var(--accent); background: var(--accent-light); }
   .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; background: var(--accent-light); }
   .content { padding: 16px 20px; }
@@ -46,21 +46,21 @@
   #tab-plnarr.active #tab-arrange .stats-bar,
   #tab-plnarr.active #tab-planner .stats-bar { padding-left:0!important; padding-right:0!important; }
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
-  .card-title { padding: 9px 14px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 12px; color: var(--text2); letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; background: var(--surface2); flex-wrap: wrap; }
+  .card-title { padding: 9px 14px; border-bottom: 1px solid var(--border); font-weight: 700; font-size: 13px; color: var(--text2); letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; background: var(--surface2); flex-wrap: wrap; }
   .card-title .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   .tbl-wrap { overflow-x: auto; }
 
   /* ── 手機響應式（iPhone / Android）── */
   @media (max-width: 768px) {
-    body { font-size: 12px; }
+    body { font-size: 13px; }
     .header { padding: 0 10px; gap: 8px; height: auto; min-height: 48px; flex-wrap: wrap; overflow-x: auto; }
-    .header-logo { font-size: 13px; padding-right: 10px; }
-    .header h1 { font-size: 12px; }
-    .header-row-count { font-size: 11px; padding: 2px 8px; }
-    .header-date { font-size: 11px; margin-left: 0; }
-    .upload-btn { font-size: 11px; padding: 5px 8px; }
+    .header-logo { font-size: 14px; padding-right: 10px; }
+    .header h1 { font-size: 13px; }
+    .header-row-count { font-size: 12px; padding: 2px 8px; }
+    .header-date { font-size: 12px; margin-left: 0; }
+    .upload-btn { font-size: 12px; padding: 5px 8px; }
     .tabs { padding: 0 8px; }
-    .tab { padding: 8px 12px; font-size: 12px; }
+    .tab { padding: 8px 9px; font-size: 13px; }
     .content { padding: 10px; }
     #tab-sku > div[style*="display:flex"] { flex-direction: column !important; }
     #tab-sku .sku-side-panel { width: 100% !important; min-width: unset !important; }
@@ -68,16 +68,16 @@
     .stat-box { min-width: unset !important; }
     .sku-footer { flex-direction: column !important; gap: 8px !important; padding: 10px !important; }
     .sku-footer > div { width: 100% !important; text-align: center; }
-    table { font-size: 12px; }
-    th { padding: 6px 6px; font-size: 11px; }
+    table { font-size: 13px; }
+    th { padding: 6px 4px; font-size: 12px; }
     td { padding: 6px 6px; }
-    .card-title { font-size: 12px; }
+    .card-title { font-size: 13px; }
     button { min-height: 36px; }
     #tab-slotdata > div { flex-direction: column !important; }
     #slot-mid-col, #tab-slotdata > div > div { width: 100% !important; }
   }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { background: var(--surface2); color: var(--text2); padding: 7px 10px; text-align: center !important; font-weight: 700; white-space: nowrap; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: 0.3px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { background: var(--surface2); color: var(--text2); padding: 7px 6px; text-align: center !important; font-weight: 700; white-space: nowrap; border-bottom: 1px solid var(--border); font-size: 12px; letter-spacing: 0.3px; }
   td { padding: 6px 10px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.4); white-space: nowrap; }
   tr:last-child td { border-bottom: none; }
   tr:hover td { background: rgba(107,79,53,0.04); }
@@ -90,22 +90,22 @@
   .total-row td { background: var(--accent-light); font-weight: 700; border-top: 1px solid var(--border); color: var(--accent); }
   .stats-bar { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
   .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px 16px; flex: 1; min-width: 120px; box-shadow: var(--shadow); }
-  .stat-box .label { font-size: 11px; color: var(--text2); margin-bottom: 4px; text-align: center; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
+  .stat-box .label { font-size: 12px; color: var(--text2); margin-bottom: 4px; text-align: center; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
   .stat-box .val { font-size: 20px; font-weight: 700; color: var(--text); text-align: center; }
   .editable { cursor: pointer; border-radius: 3px; }
   .editable:hover { background: rgba(107,79,53,0.1); }
-  input.inline-edit { background: #fff; border: 1px solid var(--accent); border-radius: 3px; color: var(--text); width: 60px; text-align: center; padding: 2px 4px; font-size: 12px; font-family: var(--font); }
+  input.inline-edit { background: #fff; border: 1px solid var(--accent); border-radius: 3px; color: var(--text); width: 60px; text-align: center; padding: 2px 4px; font-size: 13px; font-family: var(--font); }
 
   /* SKU TAB */
   .sku-wrapper { display: grid; grid-template-columns: 3.35fr 0.65fr; gap: 10px; align-items: start; }
   .sku-left-area { display: flex; flex-direction: column; gap: 8px; }
   .sku-cols-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: start; }
   .sku-side-panel { display: flex; flex-direction: column; gap: 8px; }
-  .sku-side-panel table th, .sku-side-panel table td { padding: 3px 6px; font-size: 11px; }
+  .sku-side-panel table th, .sku-side-panel table td { padding: 3px 4px; font-size: 12px; }
   /* ★ 2026-07-21 側欄圓形圖表 */
   .side-chart-card .card-title { padding: 6px 8px; }
   .side-chart-donut { width: 118px; height: 118px; display: block; margin: 0 auto; }
-  .side-chart-legend { margin-top: 8px; font-size: 11px; display: flex; flex-direction: column; gap: 2px; padding: 0 6px; }
+  .side-chart-legend { margin-top: 8px; font-size: 12px; display: flex; flex-direction: column; gap: 2px; padding: 0 6px; }
   .side-chart-legend > div { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; border-radius: 3px; }
   .side-chart-legend > div > span { color: var(--text3); }
   .side-chart-legend > div > b { font-variant-numeric: tabular-nums; color: var(--text); }
@@ -116,65 +116,65 @@
   .cat-pie-svg .cp-lb { pointer-events: none; font-family: var(--font); }
   .cat-pie-svg .cp-ld { pointer-events: none; opacity: .75; }
   .cp-tip { position: absolute; z-index: 40; background: var(--surface, #fff); border: 1px solid var(--border); border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0,0,0,.16); padding: 4px 9px; font-size: 11px; color: var(--text);
+            box-shadow: 0 2px 8px rgba(0,0,0,.16); padding: 4px 9px; font-size: 12px; color: var(--text);
             white-space: nowrap; pointer-events: none; font-variant-numeric: tabular-nums; }
   .sku-stats-bar { display: flex; flex-wrap: wrap; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; box-shadow: var(--shadow); overflow: hidden; }
   .sku-stat-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 8px 16px; border-right: 1px solid var(--border); flex: 1; min-width: 100px; }
   .sku-stat-cell:last-child { border-right: none; }
-  .sku-stat-label { font-size: 11px; color: var(--text3); white-space: nowrap; padding-bottom: 4px; border-bottom: 1px solid var(--border); width: 100%; text-align: center; }
+  .sku-stat-label { font-size: 12px; color: var(--text3); white-space: nowrap; padding-bottom: 4px; border-bottom: 1px solid var(--border); width: 100%; text-align: center; }
   .sku-stat-val { font-size: 16px; font-weight: 700; color: var(--text); }
-  .sku-zone-sep td { background: rgba(107,79,53,0.07) !important; font-size: 10px; font-weight: 700; color: var(--accent); text-align: center !important; padding: 3px 6px !important; border-top: 1px solid var(--border) !important; letter-spacing: 0.5px; }
+  .sku-zone-sep td { background: rgba(107,79,53,0.07) !important; font-size: 11px; font-weight: 700; color: var(--accent); text-align: center !important; padding: 3px 6px !important; border-top: 1px solid var(--border) !important; letter-spacing: 0.5px; }
   .sku-sub-tbl .sku-zone-sep td { text-align: center !important; }
   #tbl-fw26-cat tbody tr { cursor: grab; transition: background 0.1s; }
   #tbl-fw26-cat tbody tr.dragging { opacity: 0.4; cursor: grabbing; }
   #tbl-fw26-cat tbody tr.drag-over { background: var(--accent-light) !important; }
   #tbl-fw26-cat td.zone-cell { text-align: center !important; font-weight: 700; color: var(--accent); vertical-align: middle; border-left: 2px solid var(--border); }
-  #tbl-fw26-cat input.zone-input { border: 1px solid var(--accent); border-radius: 3px; padding: 1px 4px; width: 38px; text-align: center; font-size: 11px; font-family: var(--font); color: var(--accent); font-weight: 700; background: #fff; }
+  #tbl-fw26-cat input.zone-input { border: 1px solid var(--accent); border-radius: 3px; padding: 1px 4px; width: 38px; text-align: center; font-size: 12px; font-family: var(--font); color: var(--accent); font-weight: 700; background: #fff; }
   .sku-col { display: flex; flex-direction: column; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
-  .sku-sub-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
-  .sku-sub-tbl th { background: var(--surface2); color: var(--text3); padding: 4px 6px; text-align: center !important; font-weight: 600; font-size: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  .sku-sub-tbl td { padding: 4px 6px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 12px; white-space: nowrap; }
+  .sku-sub-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .sku-sub-tbl th { background: var(--surface2); color: var(--text3); padding: 4px 4px; text-align: center !important; font-weight: 600; font-size: 11px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .sku-sub-tbl td { padding: 4px 4px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 13px; white-space: nowrap; }
   .sku-sub-tbl tr:last-child td { border-bottom: none; }
   .sku-sub-tbl th:first-child, .sku-sub-tbl td:first-child { text-align: left !important; width: 46px; }
   .sku-sub-tbl tr:hover td { background: rgba(107,79,53,0.04); }
   .sku-sub-tbl .total-row td { background: var(--accent-light); font-weight: 700; color: var(--accent); border-top: 1px solid var(--border); }
-  .toggle-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface2); cursor: pointer; font-size: 11px; color: var(--text2); white-space: nowrap; }
+  .toggle-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface2); cursor: pointer; font-size: 12px; color: var(--text2); white-space: nowrap; }
   .toggle-btn:hover { background: var(--accent-light); }
 
   /* SALES TAB */
   .sales-five-layout { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; align-items: start; }
   .sales-zone-block { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
-  .sales-zone-header { padding: 8px 10px; background: var(--surface2); font-weight: 700; font-size: 12px; color: var(--text2); letter-spacing: 0.4px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
-  .sales-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
-  .sales-tbl th { background: var(--surface2); color: var(--text3); padding: 4px 5px; text-align: center !important; font-weight: 600; font-size: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  .sales-tbl td { padding: 4px 5px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 11px; white-space: nowrap; }
+  .sales-zone-header { padding: 8px 10px; background: var(--surface2); font-weight: 700; font-size: 13px; color: var(--text2); letter-spacing: 0.4px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
+  .sales-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .sales-tbl th { background: var(--surface2); color: var(--text3); padding: 4px 3px; text-align: center !important; font-weight: 600; font-size: 11px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .sales-tbl td { padding: 4px 3px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 12px; white-space: nowrap; }
   .sales-tbl tr:last-child td { border-bottom: none; }
   .sales-tbl tr:hover td { background: rgba(107,79,53,0.04); }
   .sales-tbl .total-row td { background: var(--accent-light); font-weight: 700; color: var(--accent); border-top: 1px solid var(--border); }
   .sales-summary-panel { display: flex; flex-direction: column; gap: 8px; }
   .stats-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; box-shadow: var(--shadow); }
-  .sp-title { font-size: 11px; font-weight: 700; color: var(--text2); margin-bottom: 6px; letter-spacing: 0.3px; text-align: center; }
+  .sp-title { font-size: 12px; font-weight: 700; color: var(--text2); margin-bottom: 6px; letter-spacing: 0.3px; text-align: center; }
   .sp-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
   .sp-cell { text-align: center; }
-  .sp-label { font-size: 10px; color: var(--text3); margin-bottom: 2px; }
-  .sp-val { font-size: 14px; font-weight: 700; color: var(--text); }
-  .sp-pct { font-size: 14px; font-weight: 700; color: var(--accent); }
-  .zone-tag { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 700; background: var(--accent-light); color: var(--accent); margin-left: 4px; }
-  .summary-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
-  .summary-tbl th { background: var(--surface2); color: var(--text3); padding: 4px 6px; text-align: center !important; font-weight: 600; font-size: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .sp-label { font-size: 11px; color: var(--text3); margin-bottom: 2px; }
+  .sp-val { font-size: 15px; font-weight: 700; color: var(--text); }
+  .sp-pct { font-size: 15px; font-weight: 700; color: var(--accent); }
+  .zone-tag { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 700; background: var(--accent-light); color: var(--accent); margin-left: 4px; }
+  .summary-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .summary-tbl th { background: var(--surface2); color: var(--text3); padding: 4px 4px; text-align: center !important; font-weight: 600; font-size: 11px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   .summary-tbl td { padding: 4px 6px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.3); }
   .summary-tbl tr:last-child td { border-bottom: none; }
   .summary-tbl tr:hover td { background: rgba(107,79,53,0.04); }
   .summary-tbl .total-row td { background: var(--accent-light); font-weight: 700; color: var(--accent); border-top: 1px solid var(--border); }
   .alert-box { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
-  .alert-header { padding: 6px 10px; font-size: 11px; font-weight: 700; color: var(--text2); display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
+  .alert-header { padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--text2); display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--border); }
   .alert-body { padding: 8px 10px; }
 
   /* FW26 TAB */
-  .fw-tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+  .fw-tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 700; }
   .fw-in { background: rgba(45,122,74,0.12); color: var(--green); }
   .fw-out { background: rgba(192,57,43,0.1); color: var(--red); }
-  .threshold-label { color: var(--accent); font-size: 11px; cursor: pointer; margin-left: 4px; }
+  .threshold-label { color: var(--accent); font-size: 12px; cursor: pointer; margin-left: 4px; }
   .sortable-th { cursor: pointer; user-select: none; }
   .sortable-th:hover { background: var(--accent-light); }
 
@@ -184,49 +184,49 @@
   .reloc-layout { display: grid; grid-template-columns: 320px 1fr; gap: 12px; align-items: start; }
   .reloc-control-panel { display: flex; flex-direction: column; gap: 10px; }
   .reloc-section { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
-  .reloc-section-title { padding: 8px 12px; background: var(--surface2); font-weight: 700; font-size: 12px; color: var(--accent); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+  .reloc-section-title { padding: 8px 12px; background: var(--surface2); font-weight: 700; font-size: 13px; color: var(--accent); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
   .reloc-section-body { padding: 10px 12px; }
-  .reloc-mode-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; }
+  .reloc-mode-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
   .reloc-mode-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); font-weight: 500; }
   .reloc-mode-row label:hover { background: var(--accent-light); }
   .reloc-mode-row input[type=checkbox]:checked + span { color: var(--accent); font-weight: 700; }
-  .reloc-stat-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 12px; }
+  .reloc-stat-row { display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 13px; }
   .reloc-stat-row:last-child { border-bottom: none; }
   .reloc-stat-label { color: var(--text2); }
   .reloc-stat-val { font-weight: 700; color: var(--text); }
-  .reloc-run-btn { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: var(--font); letter-spacing: 0.5px; transition: background 0.15s; }
+  .reloc-run-btn { width: 100%; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: var(--font); letter-spacing: 0.5px; transition: background 0.15s; }
   .reloc-run-btn:hover { background: var(--accent2); }
   .reloc-run-btn:disabled { background: var(--border); color: var(--text3); cursor: not-allowed; }
-  .reloc-export-btn { width: 100%; padding: 8px; background: var(--surface); color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: var(--font); transition: all 0.15s; }
+  .reloc-export-btn { width: 100%; padding: 8px; background: var(--surface); color: var(--accent); border: 1px solid var(--accent); border-radius: 6px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: var(--font); transition: all 0.15s; }
   .reloc-export-btn:hover { background: var(--accent-light); }
 
   /* 結果區 */
   .reloc-result-area { display: flex; flex-direction: column; gap: 10px; }
   .reloc-zone-block { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; box-shadow: var(--shadow); }
-  .reloc-zone-header { padding: 8px 12px; background: var(--surface2); font-weight: 700; font-size: 12px; color: var(--text2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
-  .reloc-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
-  .reloc-tbl th { background: var(--surface2); color: var(--text3); padding: 5px 8px; text-align: center !important; font-weight: 600; font-size: 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  .reloc-tbl td { padding: 4px 8px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 11px; white-space: nowrap; }
+  .reloc-zone-header { padding: 8px 12px; background: var(--surface2); font-weight: 700; font-size: 13px; color: var(--text2); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .reloc-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .reloc-tbl th { background: var(--surface2); color: var(--text3); padding: 5px 5px; text-align: center !important; font-weight: 600; font-size: 11px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .reloc-tbl td { padding: 4px 5px; text-align: center !important; border-bottom: 1px solid rgba(221,216,208,0.3); font-size: 12px; white-space: nowrap; }
   .reloc-tbl tr:last-child td { border-bottom: none; }
   .reloc-tbl tr:hover td { background: rgba(107,79,53,0.04); }
-  .reloc-tbl .loc-sep td { background: rgba(107,79,53,0.06) !important; font-size: 10px; font-weight: 700; color: var(--accent); text-align: left !important; padding: 5px 10px !important; border-top: 1px solid var(--border) !important; }
+  .reloc-tbl .loc-sep td { background: rgba(107,79,53,0.06) !important; font-size: 11px; font-weight: 700; color: var(--accent); text-align: left !important; padding: 5px 10px !important; border-top: 1px solid var(--border) !important; }
   .reloc-tbl .total-row td { background: var(--accent-light); font-weight: 700; color: var(--accent); border-top: 1px solid var(--border); }
-  .reloc-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+  .reloc-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 700; }
   .badge-pull { background: rgba(192,57,43,0.1); color: var(--red); }
   .badge-pull-cur { background: rgba(184,134,11,0.12); color: var(--yellow); }
   .badge-overflow { background: rgba(107,79,53,0.1); color: var(--accent); }
-  .no-data-msg { padding: 40px; text-align: center; color: var(--text3); font-size: 13px; }
+  .no-data-msg { padding: 40px; text-align: center; color: var(--text3); font-size: 14px; }
 
   /* 未分配SKU區 */
   .unassigned-block { background: #fdf5f2; border: 1px solid #e0c8c0; border-radius: 6px; overflow: hidden; }
-  .unassigned-header { padding: 8px 12px; background: #fdf0ec; font-weight: 700; font-size: 12px; color: var(--red); border-bottom: 1px solid #e0c8c0; display: flex; align-items: center; gap: 8px; }
+  .unassigned-header { padding: 8px 12px; background: #fdf0ec; font-weight: 700; font-size: 13px; color: var(--red); border-bottom: 1px solid #e0c8c0; display: flex; align-items: center; gap: 8px; }
 
   /* Loading */
   .loading { display: none; position: fixed; inset: 0; background: rgba(245,243,239,0.9); z-index: 999; align-items: center; justify-content: center; flex-direction: column; gap: 12px; }
   .loading.show { display: flex; }
   .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .loading p { color: var(--text2); font-size: 14px; }
+  .loading p { color: var(--text2); font-size: 15px; }
 </style>
 </head>
 <body>
@@ -245,10 +245,10 @@
   <button class="upload-btn" onclick="clearAllData()" style="background:rgba(192,57,43,0.9);color:#fff">🗑 清除資料</button>
   <div style="display:flex;align-items:center;gap:6px;margin-left:12px">
     <select id="hist-select" onchange="histLoad(this.value)"
-      style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:4px;padding:4px 8px;font-size:12px;font-family:var(--font)">
+      style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:4px;padding:4px 8px;font-size:13px;font-family:var(--font)">
       <option value="" style="color:#333;background:#fff">— 歷史記錄 —</option>
     </select>
-    <span id="hist-count" style="font-size:11px;color:rgba(255,255,255,0.6)"></span>
+    <span id="hist-count" style="font-size:12px;color:rgba(255,255,255,0.6)"></span>
     <button class="upload-btn" onclick="exportAllData()" title="匯出整包資料（EPR + FW26 + 所有設定 + 歷史紀錄），可在其他裝置匯入">📤 匯出</button>
     <label class="upload-btn" style="cursor:pointer" title="匯入其他裝置匯出的整包資料">📥 匯入<input type="file" accept=".json" style="display:none" onchange="importAllData(this.files[0]);this.value=''"></label>
   </div>
@@ -323,21 +323,21 @@
       <!-- ★ 2026-07-21：原「26FW 新品進倉」「季別 SKU」摘要卡改為三個圓形圖表（進倉進度／儲位使用率／各類別 SKU 佔比） -->
       <!-- ① 新品SKU進倉進度（★2026-07-21 改：以 SKU 數呈現，資料源＝26FW 新品清單，與 26FW tab 統計列同步） -->
       <div class="card side-chart-card">
-        <div class="card-title" style="font-size:11px;display:flex;justify-content:space-between;align-items:center;gap:6px">
+        <div class="card-title" style="font-size:12px;display:flex;justify-content:space-between;align-items:center;gap:6px">
           <span><span class="dot"></span>新品SKU進倉進度</span>
-          <span id="progress-season-tag" style="font-size:10px;font-weight:600;color:var(--accent);background:var(--surface2);border-radius:3px;padding:1px 5px">—</span>
+          <span id="progress-season-tag" style="font-size:11px;font-weight:600;color:var(--accent);background:var(--surface2);border-radius:3px;padding:1px 5px">—</span>
         </div>
-        <div id="progress-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">—</div></div>
+        <div id="progress-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:13px;text-align:center">—</div></div>
       </div>
       <!-- ② 儲位使用率（同步儲位數據「儲位使用數量」表：固定＋臨時） -->
       <div class="card side-chart-card">
-        <div class="card-title" style="font-size:11px"><span class="dot"></span>儲位使用率</div>
-        <div id="slotusage-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">—</div></div>
+        <div class="card-title" style="font-size:12px"><span class="dot"></span>儲位使用率</div>
+        <div id="slotusage-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:13px;text-align:center">—</div></div>
       </div>
       <!-- ③ 各類別 SKU 佔比（同步儲位調整/新品安排 tab「各類別預計儲區」表） -->
       <div class="card side-chart-card">
-        <div class="card-title" style="font-size:11px"><span class="dot"></span>各類別 SKU 佔比</div>
-        <div id="catpie-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:12px;text-align:center">尚未比對到 26FW 新品</div></div>
+        <div class="card-title" style="font-size:12px"><span class="dot"></span>各類別 SKU 佔比</div>
+        <div id="catpie-chart-wrap" style="padding:8px 6px 10px"><div style="padding:14px 8px;color:var(--text3);font-size:13px;text-align:center">尚未比對到 26FW 新品</div></div>
       </div>
     </div>
   </div>
@@ -345,7 +345,7 @@
   <div id="sku-slotdata-slot" style="margin-top:16px">
     <div style="display:flex;align-items:center;gap:8px;padding:4px 2px 0;border-top:2px solid var(--border)">
       <span class="dot" style="width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block"></span>
-      <span style="font-weight:700;font-size:13px;color:var(--text2);letter-spacing:0.5px">儲位數據</span>
+      <span style="font-weight:700;font-size:14px;color:var(--text2);letter-spacing:0.5px">儲位數據</span>
     </div>
   </div>
 </div>
@@ -353,12 +353,12 @@
 <!-- Delete Aisle Modal -->
 <div id="modal-delete-aisle" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:var(--surface);border-radius:8px;padding:24px;min-width:340px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
-    <div style="font-size:15px;font-weight:700;color:var(--text2);margin-bottom:4px">🗑 刪除停用走道</div>
-    <div style="font-size:11px;color:var(--text3);margin-bottom:12px">僅顯示可用儲位 = 0 的走道，勾選後刪除</div>
+    <div style="font-size:16px;font-weight:700;color:var(--text2);margin-bottom:4px">🗑 刪除停用走道</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">僅顯示可用儲位 = 0 的走道，勾選後刪除</div>
     <div id="delete-aisle-list" style="overflow-y:auto;flex:1;display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:14px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button onclick="closeDeleteAisleModal()" style="padding:6px 14px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:13px">取消</button>
-      <button onclick="confirmDeleteAisles()" style="padding:6px 14px;border:none;border-radius:4px;background:#c0392b;color:#fff;cursor:pointer;font-size:13px">刪除勾選走道</button>
+      <button onclick="closeDeleteAisleModal()" style="padding:6px 14px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:14px">取消</button>
+      <button onclick="confirmDeleteAisles()" style="padding:6px 14px;border:none;border-radius:4px;background:#c0392b;color:#fff;cursor:pointer;font-size:14px">刪除勾選走道</button>
     </div>
   </div>
 </div>
@@ -366,20 +366,20 @@
 <!-- Add Aisle Modal -->
 <div id="modal-add-aisle" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;align-items:center;justify-content:center">
   <div style="background:var(--surface);border-radius:8px;padding:24px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
-    <div style="font-size:15px;font-weight:700;color:var(--text2);margin-bottom:16px">新增走道</div>
+    <div style="font-size:16px;font-weight:700;color:var(--text2);margin-bottom:16px">新增走道</div>
     <div style="display:grid;gap:10px">
-      <label style="font-size:12px;color:var(--text3)">走道名稱（如 F03）<input id="new-aisle-name" type="text" placeholder="F03" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px"></label>
-      <label style="font-size:12px;color:var(--text3)">所屬區域
-        <select id="new-aisle-group" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px">
+      <label style="font-size:13px;color:var(--text3)">走道名稱（如 F03）<input id="new-aisle-name" type="text" placeholder="F03" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:14px"></label>
+      <label style="font-size:13px;color:var(--text3)">所屬區域
+        <select id="new-aisle-group" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:14px">
           <option value="g1">1F — B/A/F 區</option><option value="g2">1F — C/D/E 區</option>
           <option value="g3">2F — P/M 區</option><option value="g4">2F — L 區</option>
         </select>
       </label>
-      <label style="font-size:12px;color:var(--text3)">可用儲位數<input id="new-aisle-avail" type="number" placeholder="432" min="0" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px"></label>
+      <label style="font-size:13px;color:var(--text3)">可用儲位數<input id="new-aisle-avail" type="number" placeholder="432" min="0" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:14px"></label>
     </div>
     <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
-      <button onclick="closeAddAisleModal()" style="padding:6px 14px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:13px">取消</button>
-      <button onclick="confirmAddAisle()" style="padding:6px 14px;border:none;border-radius:4px;background:var(--accent);color:#fff;cursor:pointer;font-size:13px">新增</button>
+      <button onclick="closeAddAisleModal()" style="padding:6px 14px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);cursor:pointer;font-size:14px">取消</button>
+      <button onclick="confirmAddAisle()" style="padding:6px 14px;border:none;border-radius:4px;background:var(--accent);color:#fff;cursor:pointer;font-size:14px">新增</button>
     </div>
   </div>
 </div>
@@ -398,7 +398,7 @@
     </div>
     <div class="sales-summary-panel">
       <div class="card">
-        <div class="card-title"><span class="dot"></span>區域彙總 <span id="sales-total-ungrab-badge" style="margin-left:auto;font-size:12px;font-weight:700;color:var(--text)">—</span></div>
+        <div class="card-title"><span class="dot"></span>區域彙總 <span id="sales-total-ungrab-badge" style="margin-left:auto;font-size:13px;font-weight:700;color:var(--text)">—</span></div>
         <div class="tbl-wrap"><table class="summary-tbl" id="tbl-region"><thead><tr><th>區域</th><th>未抓貨</th><th title="新品未抓貨 ÷ 總未抓貨（銷量視角）">新品銷%</th><th>區域%</th></tr></thead><tbody></tbody></table></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
@@ -409,7 +409,7 @@
         <div class="stats-panel"><div class="sp-title" style="border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:6px">SS 銷售比</div><div class="sp-row2"><div class="sp-cell"><div class="sp-label">1F</div><div class="sp-pct" id="sp-ss-1f">—</div></div><div class="sp-cell"><div class="sp-label">2F</div><div class="sp-pct" id="sp-ss-2f">—</div></div></div></div>
         <div class="stats-panel"><div class="sp-title" style="border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:6px">FW 銷售比</div><div class="sp-row2"><div class="sp-cell"><div class="sp-label">1F</div><div class="sp-pct" id="sp-fw-1f">—</div></div><div class="sp-cell"><div class="sp-label">2F</div><div class="sp-pct" id="sp-fw-2f">—</div></div></div></div>
         <div class="stats-panel" style="grid-column:span 2">
-          <div class="sp-title" style="border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:6px">新品/舊品 銷售比 <span id="new-season-badge" style="font-size:10px;font-weight:400;color:var(--text3)"></span></div>
+          <div class="sp-title" style="border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:6px">新品/舊品 銷售比 <span id="new-season-badge" style="font-size:11px;font-weight:400;color:var(--text3)"></span></div>
           <div class="sp-row2"><div class="sp-cell"><div class="sp-label">新品</div><div class="sp-pct" id="sp-new-pct">—</div></div><div class="sp-cell"><div class="sp-label">舊品</div><div class="sp-pct" id="sp-old-pct">—</div></div></div>
           <div class="sp-row2" style="margin-top:4px;border-top:1px solid var(--border);padding-top:4px"><div class="sp-cell"><div class="sp-label">1F新品比</div><div class="sp-pct" id="sp-new-1f">—</div></div><div class="sp-cell"><div class="sp-label">2F新品比</div><div class="sp-pct" id="sp-new-2f">—</div></div></div>
         </div>
@@ -422,7 +422,7 @@
       </div>
       <div class="stats-panel" style="padding-bottom:6px">
         <div class="sp-title">各季進貨統計</div>
-        <table style="width:100%;font-size:11px;border-collapse:collapse" id="tbl-season-progress">
+        <table style="width:100%;font-size:12px;border-collapse:collapse" id="tbl-season-progress">
           <thead><tr style="background:var(--surface2)">
             <th style="padding:4px 6px;border-bottom:1px solid var(--border)">季別</th>
             <th style="padding:4px 6px;border-bottom:1px solid var(--border)">總進貨量</th>
@@ -437,7 +437,7 @@
         <div class="alert-body">
           <div style="font-size:16px;font-weight:700;color:var(--red);margin-bottom:4px;text-align:center" id="reserve-warn-count">—</div>
           <div id="tbl-reserve-warn" style="width:100%"></div>
-          <div style="margin-top:6px;font-size:10px;color:var(--text2);text-align:center" id="reserve-note"></div>
+          <div style="margin-top:6px;font-size:11px;color:var(--text2);text-align:center" id="reserve-note"></div>
         </div>
       </div>
     </div>
@@ -449,9 +449,9 @@
   <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center">
     <button class="upload-btn" onclick="document.getElementById('fw26-file-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳 26FW 新品報表</button>
     <input type="file" id="fw26-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleFW26Upload(event)">
-    <span id="fw26-upload-status" style="font-size:12px;color:var(--text3)"></span>
+    <span id="fw26-upload-status" style="font-size:13px;color:var(--text3)"></span>
     <button class="upload-btn" onclick="showFW26Schedule()" style="background:var(--surface);color:var(--accent);border:1px solid var(--accent)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" style="vertical-align:-2px;margin-right:4px"><rect x="1" y="2" width="14" height="13" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 1v3M11 1v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M1 6h14" stroke="currentColor" stroke-width="1.2"/><rect x="4" y="9" width="2" height="2" rx="0.4" fill="currentColor"/><rect x="7" y="9" width="2" height="2" rx="0.4" fill="currentColor"/><rect x="10" y="9" width="2" height="2" rx="0.4" fill="currentColor"/></svg>預計進倉時程</button>
-    <span id="fw26-last-update" style="font-size:11px;color:var(--text3);margin-left:6px"></span>
+    <span id="fw26-last-update" style="font-size:12px;color:var(--text3);margin-left:6px"></span>
     <button class="upload-btn" onclick="clearFW26Data()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto">✖ 清除新品資料</button>
   </div>
   <div class="stats-bar">
@@ -466,14 +466,14 @@
       <div class="card">
         <div class="card-title">
           <span class="dot"></span>新品清單
-          <span style="color:var(--text3);font-weight:400;margin-left:8px;font-size:11px">篩選：</span>
-          <select id="fw-filter-cat" onchange="renderFW26Table()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:12px;font-family:var(--font)"><option value="">全部類別</option></select>
-          <select id="fw-filter-status" onchange="renderFW26Table()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:12px;font-family:var(--font)"><option value="">全部狀態</option><option value="arrived">已進倉</option><option value="pending">未進倉</option></select>
-          <span style="color:var(--text3);font-weight:400;margin-left:4px;font-size:11px">交期：</span>
-          <select id="fw-date-from" onchange="onFW26DateFromChange()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:11px;font-family:var(--font)"><option value="">起始日期</option></select>
-          <span style="color:var(--text3);font-size:11px">~</span>
-          <select id="fw-date-to" onchange="renderFW26Table()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:11px;font-family:var(--font)"><option value="">結束日期</option></select>
-          <button onclick="clearFW26DateFilter()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font)">✖</button>
+          <span style="color:var(--text3);font-weight:400;margin-left:8px;font-size:12px">篩選：</span>
+          <select id="fw-filter-cat" onchange="renderFW26Table()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:13px;font-family:var(--font)"><option value="">全部類別</option></select>
+          <select id="fw-filter-status" onchange="renderFW26Table()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:13px;font-family:var(--font)"><option value="">全部狀態</option><option value="arrived">已進倉</option><option value="pending">未進倉</option></select>
+          <span style="color:var(--text3);font-weight:400;margin-left:4px;font-size:12px">交期：</span>
+          <select id="fw-date-from" onchange="onFW26DateFromChange()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:12px;font-family:var(--font)"><option value="">起始日期</option></select>
+          <span style="color:var(--text3);font-size:12px">~</span>
+          <select id="fw-date-to" onchange="renderFW26Table()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:12px;font-family:var(--font)"><option value="">結束日期</option></select>
+          <button onclick="clearFW26DateFilter()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:2px 8px;font-size:12px;cursor:pointer;font-family:var(--font)">✖</button>
         </div>
         <div class="tbl-wrap" style="max-height:calc(100vh - 280px);min-height:560px;overflow-y:auto"><table id="tbl-fw-list"><thead style="position:sticky;top:0"><tr>
           <th>採購人員</th><th>採購單季別</th>
@@ -493,7 +493,7 @@
     </div>
     <!-- 右：依類別分析（★ R2 合併版：原儲區總覽「26FW 新品 SKU 進倉統計」移入，含進倉率＋儲區，可拖曳排序、儲區可點擊編輯） -->
     <div class="card">
-      <div class="card-title" style="font-size:11px"><span class="dot"></span>依類別分析（拖曳排序・儲區可編輯）</div>
+      <div class="card-title" style="font-size:12px"><span class="dot"></span>依類別分析（拖曳排序・儲區可編輯）</div>
       <div class="tbl-wrap"><table id="tbl-fw26-cat"><thead><tr><th>類別</th><th>總SKU</th><th>已進倉</th><th>未進倉</th><th>進倉率</th><th>儲區</th></tr></thead><tbody></tbody></table></div>
     </div>
   </div>
@@ -509,23 +509,23 @@
   <div class="card">
     <div class="card-title" style="gap:6px;flex-wrap:wrap">
       <span class="dot"></span>資料庫
-      <span style="color:var(--text3);font-weight:400;font-size:11px;margin-left:6px">季別</span>
-      <select id="db-filter-season" onchange="renderDBTable()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:12px;font-family:var(--font)">
+      <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:6px">季別</span>
+      <select id="db-filter-season" onchange="renderDBTable()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:13px;font-family:var(--font)">
         <option value="">- 請選擇 -</option>
       </select>
-      <select id="db-filter-field" onchange="renderDBTable()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:12px;font-family:var(--font)">
+      <select id="db-filter-field" onchange="renderDBTable()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:13px;font-family:var(--font)">
         <option value="商品編號" selected>商品編號</option>
         <option value="商品名稱">商品名稱</option>
         <option value="儲位">儲位</option>
         <option value="倉位">倉位</option>
       </select>
-      <input id="db-search" placeholder="搜尋..." onInput="renderDBTable()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 8px;font-size:12px;font-family:var(--font);width:160px">
+      <input id="db-search" placeholder="搜尋..." onInput="renderDBTable()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 8px;font-size:13px;font-family:var(--font);width:160px">
       <span id="db-search-icon" onclick="renderDBTable()" style="cursor:pointer;display:inline-flex;align-items:center"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="color:var(--text3)"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
-      <button onclick="document.getElementById('db-search').value='';document.getElementById('db-filter-season').value='';DB_TOP_N=0;DB_TOP_STYLE=0;DB_TOP_COLOR=0;renderDBTable();['db-top-btn','db-top-style-btn','db-top-color-btn'].forEach(id=>{const b=document.getElementById(id);if(b){b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.border='1px solid var(--border)';}});" style="background:var(--surface2);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;font-family:var(--font)">✕</button>
-      <button id="db-top-btn" onclick="toggleDBTop()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">未抓貨 TOP <span id="db-top-n-display" ondblclick="event.stopPropagation();editDBTopN(this)" style="font-weight:700;min-width:28px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">100</span></button>
-      <button id="db-top-style-btn" onclick="toggleDBTopStyle()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="db-top-style-n-display" ondblclick="event.stopPropagation();editDBTopStyleN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 款</button>
-      <button id="db-top-color-btn" onclick="toggleDBTopColor()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="db-top-color-n-display" ondblclick="event.stopPropagation();editDBTopColorN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 色</button>
-      <button onclick="exportDBFiltered()" title="匯出當前篩選結果" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:var(--font);margin-left:auto;display:inline-flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>匯出</button>
+      <button onclick="document.getElementById('db-search').value='';document.getElementById('db-filter-season').value='';DB_TOP_N=0;DB_TOP_STYLE=0;DB_TOP_COLOR=0;renderDBTable();['db-top-btn','db-top-style-btn','db-top-color-btn'].forEach(id=>{const b=document.getElementById(id);if(b){b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.border='1px solid var(--border)';}});" style="background:var(--surface2);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:3px 8px;font-size:13px;cursor:pointer;font-family:var(--font)">✕</button>
+      <button id="db-top-btn" onclick="toggleDBTop()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">未抓貨 TOP <span id="db-top-n-display" ondblclick="event.stopPropagation();editDBTopN(this)" style="font-weight:700;min-width:28px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">100</span></button>
+      <button id="db-top-style-btn" onclick="toggleDBTopStyle()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="db-top-style-n-display" ondblclick="event.stopPropagation();editDBTopStyleN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 款</button>
+      <button id="db-top-color-btn" onclick="toggleDBTopColor()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="db-top-color-n-display" ondblclick="event.stopPropagation();editDBTopColorN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 色</button>
+      <button onclick="exportDBFiltered()" title="匯出當前篩選結果" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:var(--font);margin-left:auto;display:inline-flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>匯出</button>
     </div>
     <div class="tbl-wrap" style="height:calc(100vh - 260px);overflow-y:auto"><table id="tbl-db">
       <thead style="position:sticky;top:0"><tr>
@@ -553,7 +553,7 @@
     <button class="upload-btn" onclick="clearZZData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red)">✖ 清除作帳刷讀</button>
     <input type="file" id="xx-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleXXUpload(event)">
     <input type="file" id="zz-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleZZUpload(event)">
-    <span id="xx-upload-status" style="margin-left:auto;align-self:center;font-size:12px;color:var(--text3)"></span>
+    <span id="xx-upload-status" style="margin-left:auto;align-self:center;font-size:13px;color:var(--text3)"></span>
   </div>
 
   <!-- ═══ 儲位釋放 區塊 ═══ -->
@@ -579,7 +579,7 @@
         <div class="reloc-section">
           <div class="reloc-section-title">⚙️ 釋放儲位設定</div>
           <div class="reloc-section-body">
-            <div style="font-size:11px;color:var(--text3);margin-bottom:8px">選擇哪些 SKU 要納入釋放儲位：</div>
+            <div style="font-size:12px;color:var(--text3);margin-bottom:8px">選擇哪些 SKU 要納入釋放儲位：</div>
             <div class="reloc-mode-row">
               <label>
                 <input type="checkbox" id="chk-pull" checked onchange="updateRelocStats()">
@@ -592,12 +592,12 @@
                 <span>當季已完售(採購可能追加)</span>
               </label>
             </div>
-            <div style="font-size:11px;color:var(--text3);margin-top:10px;margin-bottom:6px">空儲位閾值（剩餘材積 ≥ 此值優先使用）：</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:10px;margin-bottom:6px">空儲位閾值（剩餘材積 ≥ 此值優先使用）：</div>
             <div style="display:flex;align-items:center;gap:8px">
-              <input type="number" id="reloc-threshold" value="1.1" step="0.1" min="0" style="width:80px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)">
-              <span style="font-size:11px;color:var(--text2)">m³（預設 1.1，即儲位的50%）</span>
+              <input type="number" id="reloc-threshold" value="1.1" step="0.1" min="0" style="width:80px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:14px;font-family:var(--font)">
+              <span style="font-size:12px;color:var(--text2)">m³（預設 1.1，即儲位的50%）</span>
             </div>
-            <div style="font-size:11px;color:var(--text3);margin-top:10px;margin-bottom:6px">分配區域（可多選）：</div>
+            <div style="font-size:12px;color:var(--text3);margin-top:10px;margin-bottom:6px">分配區域（可多選）：</div>
             <div class="reloc-mode-row">
               <label><input type="checkbox" id="chk-zone-xx" checked><span>XX 區（1F）</span></label>
               <label><input type="checkbox" id="chk-zone-tx" checked><span>TX 區（2F）</span></label>
@@ -608,12 +608,12 @@
         <!-- 包材對應規則（可編輯） -->
         <div class="reloc-section">
           <div class="reloc-section-title">📦 包材對應規則
-            <button onclick="resetPackagingRules()" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 8px;font-size:10px;cursor:pointer;font-family:var(--font)">重設預設值</button>
+            <button onclick="resetPackagingRules()" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text3);border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:var(--font)">重設預設值</button>
           </div>
           <div class="reloc-section-body" style="padding:0">
             <div id="packaging-rules-list" style="max-height:280px;overflow-y:auto"></div>
             <div style="padding:8px 12px;border-top:1px solid var(--border)">
-              <button onclick="addPackagingRule()" style="width:100%;padding:5px;background:var(--accent-light);border:1px dashed var(--accent);color:var(--accent);border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font)">＋ 新增規則</button>
+              <button onclick="addPackagingRule()" style="width:100%;padding:5px;background:var(--accent-light);border:1px dashed var(--accent);color:var(--accent);border-radius:4px;font-size:12px;cursor:pointer;font-family:var(--font)">＋ 新增規則</button>
             </div>
           </div>
         </div>
@@ -629,7 +629,7 @@
         <div class="no-data-msg">
           <div style="font-size:32px;margin-bottom:12px">📦</div>
           <div style="font-weight:700;margin-bottom:6px">儲位釋放尚未執行</div>
-          <div style="font-size:12px">請先上傳 EPR 主報表與 XX/TX 報表，<br>設定參數後點擊「執行儲位釋放」</div>
+          <div style="font-size:13px">請先上傳 EPR 主報表與 XX/TX 報表，<br>設定參數後點擊「執行儲位釋放」</div>
         </div>
       </div>
     </div>
@@ -637,11 +637,11 @@
 
   <!-- ═══ XX/TX 區統計（移至最下方） ═══ -->
   <div style="margin-top:18px;padding-top:14px;border-top:2px dashed var(--border)">
-    <div style="font-size:14px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:1px">▼ XX/TX 區統計</div>
+    <div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:1px">▼ XX/TX 區統計</div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">
         <span class="dot"></span>XX區統計（1F零碼區）
-        <button onclick="showXXZoneConfig('XX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+        <button onclick="showXXZoneConfig('XX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
       </div>
       <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
         <table id="tbl-xx">
@@ -663,7 +663,7 @@
     <div class="card">
       <div class="card-title">
         <span class="dot"></span>TX區統計（2F零碼區）
-        <button onclick="showXXZoneConfig('TX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:11px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+        <button onclick="showXXZoneConfig('TX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
       </div>
       <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
         <table id="tbl-tx">
@@ -685,25 +685,25 @@
   </div>
 </div>
 
-<div id="hist-panel" style="display:none;position:fixed;bottom:20px;right:20px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;width:280px;box-shadow:0 4px 20px rgba(0,0,0,0.15);font-size:12px"></div>
+<div id="hist-panel" style="display:none;position:fixed;bottom:20px;right:20px;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;width:280px;box-shadow:0 4px 20px rgba(0,0,0,0.15);font-size:13px"></div>
 
 <!-- ★ 從備份檔挑單日報表 Modal -->
 <div id="backup-pick-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9998;align-items:center;justify-content:center">
   <div style="background:var(--bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);width:340px;max-width:92vw;padding:0">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border);background:var(--surface);border-radius:10px 10px 0 0">
-      <span style="font-weight:700;font-size:14px;color:var(--accent)">📂 從備份檔挑選單日報表</span>
+      <span style="font-weight:700;font-size:15px;color:var(--accent)">📂 從備份檔挑選單日報表</span>
       <button onclick="document.getElementById('backup-pick-modal').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3)">✕</button>
     </div>
     <div style="padding:14px 18px;display:flex;flex-direction:column;gap:10px">
-      <div id="backup-pick-info" style="font-size:11px;color:var(--text3)"></div>
-      <label style="font-size:12px;color:var(--text2)">選擇日期
-        <select id="backup-pick-select" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)"></select>
+      <div id="backup-pick-info" style="font-size:12px;color:var(--text3)"></div>
+      <label style="font-size:13px;color:var(--text2)">選擇日期
+        <select id="backup-pick-select" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:14px;font-family:var(--font)"></select>
       </label>
-      <div style="font-size:11px;color:var(--text3)">此操作不會匯入備份、不影響目前裝置的任何資料。</div>
+      <div style="font-size:12px;color:var(--text3)">此操作不會匯入備份、不影響目前裝置的任何資料。</div>
     </div>
     <div style="padding:10px 18px 14px;display:flex;gap:8px;justify-content:flex-end">
-      <button onclick="backupPickDownload()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:6px 14px;font-size:12px;cursor:pointer;font-family:var(--font)">⬇ 下載 .xlsx</button>
-      <button onclick="backupPickCompare()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)">載入至銷售比對</button>
+      <button onclick="backupPickDownload()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:var(--font)">⬇ 下載 .xlsx</button>
+      <button onclick="backupPickCompare()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">載入至銷售比對</button>
     </div>
   </div>
 </div>
@@ -1860,7 +1860,7 @@ function renderCatPieChart(data){
   const fs=meta.length>20?6.8:meta.length>14?7.6:meta.length>8?8.4:9.2;   // ★2026-07-21 類別文字放大一級
   const RS=meta.filter(m=>Math.cos(m.mid)>=0),LS=meta.filter(m=>Math.cos(m.mid)<0);
   const nMax=Math.max(RS.length,LS.length);
-  const MAXH=400,MINH=170;                           // ★下限＝對齊上方兩張圓環卡（118px 圓環＋3 列圖例）的內容高
+  const MAXH=400,MINH=180;                           // ★下限＝對齊上方兩張圓環卡（118px 圓環＋3 列圖例）的內容高
   let step=fs*2.2;                                   // 標籤列距
   let H=Math.max(MINH,(nMax>1?step*(nMax-1):0)+fs+12);
   if(H>MAXH){H=MAXH;step=(MAXH-fs-12)/(nMax-1);}     // 類別過多時壓縮列距而非撐高卡片
@@ -10444,7 +10444,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 </style>
 <div class="tab-panel" id="tab-slotdata">
   <div style="padding:10px 18px 0;display:flex;justify-content:flex-end">
-    <button onclick="exportSlotData()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:var(--font);display:inline-flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>匯出報表</button>
+    <button onclick="exportSlotData()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:var(--font);display:inline-flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 2v9M4 8l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>匯出報表</button>
   </div>
   <div style="padding:8px 18px 14px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start">
 
@@ -10454,7 +10454,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <!-- 固定儲位 -->
       <div class="card" style="min-width:220px">
         <div class="card-title" style="justify-content:center;text-align:center"><span class="dot"></span>固定儲位</div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="background:var(--surface2)">
             <th style="padding:5px 10px;border-bottom:1px solid var(--border);width:50px">區域</th>
             <th style="padding:5px 10px;border-bottom:1px solid var(--border)">儲架單位</th>
@@ -10467,7 +10467,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <!-- 臨時儲位 -->
       <div class="card" id="slot-temp-card" style="min-width:220px;display:none">
         <div class="card-title" style="justify-content:center;text-align:center"><span class="dot"></span>臨時儲位</div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="background:var(--surface2)">
             <th style="padding:5px 10px;border-bottom:1px solid var(--border);width:50px">區域</th>
             <th style="padding:5px 10px;border-bottom:1px solid var(--border);width:40px">儲架單位</th>
@@ -10482,7 +10482,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <div id="slot-mid-col" style="display:flex;flex-direction:column;gap:12px;flex:1;min-width:280px">
       <div class="card">
         <div class="card-title" style="justify-content:center;text-align:center"><span class="dot"></span>儲位規劃 / 使用數量</div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="background:var(--surface2)">
             <th style="padding:5px 8px;border-bottom:1px solid var(--border)">儲位屬性</th>
             <th style="padding:5px 8px;border-bottom:1px solid var(--border)">1F</th>
@@ -10496,7 +10496,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       </div>
       <div class="card">
         <div class="card-title" style="justify-content:center;text-align:center"><span class="dot"></span>儲位使用數量</div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="background:var(--surface2)">
             <th style="padding:5px 8px;border-bottom:1px solid var(--border)">總儲位</th>
             <th style="padding:5px 8px;border-bottom:1px solid var(--border)">已使用</th>
@@ -10508,7 +10508,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       </div>
       <div class="card">
         <div class="card-title" style="justify-content:center;text-align:center"><span class="dot"></span>每季度採購 SKU 數</div>
-        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed">
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed">
           <thead><tr style="background:var(--surface2)" id="slot-season-head"></tr></thead>
           <tbody id="slot-season-body"></tbody>
         </table></div>
@@ -10519,13 +10519,13 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <div style="flex:1;min-width:280px">
       <div class="card">
         <div class="card-title" style="justify-content:center;text-align:center"><span class="dot"></span>每月底 SKU 數</div>
-        <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:500px">
+        <div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:13px;min-width:500px">
           <thead><tr style="background:var(--surface2)" id="slot-monthly-head"></tr></thead>
           <tbody id="slot-monthly-body"></tbody>
           <tfoot id="slot-monthly-foot"></tfoot>
         </table></div>
       </div>
-      <div id="season-sku-last-update" style="margin-top:6px;font-size:11px;color:var(--text3);text-align:right;padding:0 4px"></div>
+      <div id="season-sku-last-update" style="margin-top:6px;font-size:12px;color:var(--text3);text-align:right;padding:0 4px"></div>
     </div>
 
   </div>
@@ -10535,18 +10535,18 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 <div id="slot-aisle-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9998;align-items:center;justify-content:center">
   <div style="background:var(--bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:480px;width:90vw;max-height:80vh;overflow:auto;padding:0">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border);background:var(--surface);border-radius:10px 10px 0 0;position:sticky;top:0;z-index:1">
-      <span style="font-weight:700;font-size:14px;color:var(--accent)" id="slot-modal-title">選擇固定走道</span>
+      <span style="font-weight:700;font-size:15px;color:var(--accent)" id="slot-modal-title">選擇固定走道</span>
       <button onclick="document.getElementById('slot-aisle-modal').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3)">✕</button>
     </div>
     <div style="padding:10px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-      <label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;font-family:var(--font);cursor:pointer;font-weight:700;color:var(--accent)">
+      <label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;font-family:var(--font);cursor:pointer;font-weight:700;color:var(--accent)">
         <input type="checkbox" id="slot-modal-selectall" onchange="toggleSlotSelectAll(this.checked)" style="cursor:pointer">全選
       </label>
     </div>
     <div id="slot-modal-checks" style="padding:10px 18px 12px;display:flex;flex-wrap:wrap;gap:8px"></div>
     <div style="padding:10px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--surface);border-radius:0 0 10px 10px;position:sticky;bottom:0">
-      <button onclick="document.getElementById('slot-aisle-modal').style.display='none'" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer;font-family:var(--font)">取消</button>
-      <button onclick="confirmSlotAisles()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;cursor:pointer;font-family:var(--font)">確認</button>
+      <button onclick="document.getElementById('slot-aisle-modal').style.display='none'" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 14px;font-size:13px;cursor:pointer;font-family:var(--font)">取消</button>
+      <button onclick="confirmSlotAisles()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:13px;cursor:pointer;font-family:var(--font)">確認</button>
     </div>
   </div>
 </div>
@@ -10557,11 +10557,11 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   <div style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
     <button class="upload-btn" onclick="document.getElementById('arrange-file-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳「匯出儲位安排」報表</button>
     <input type="file" id="arrange-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleArrangeUpload(event)">
-    <span id="arrange-status" style="font-size:11px;color:var(--text3)"></span>
+    <span id="arrange-status" style="font-size:12px;color:var(--text3)"></span>
 
     <button class="upload-btn" onclick="document.getElementById('forecast-file-input').click()" style="background:var(--accent);color:#fff;margin-left:8px">⬆ 上傳「匯出預告進貨表」報表</button>
     <input type="file" id="forecast-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleForecastUpload(event)">
-    <span id="forecast-status" style="font-size:11px;color:var(--text3)"></span>
+    <span id="forecast-status" style="font-size:12px;color:var(--text3)"></span>
 
     <button class="upload-btn" onclick="clearArrangeData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto;display:none" id="arrange-clear-btn">✖ 清除資料</button>
   </div>
@@ -10577,7 +10577,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <!-- 左：類別統計 -->
     <div class="card">
       <div class="card-title"><span class="dot"></span>各類別預計儲區</div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:var(--surface2)">
           <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:left">類別</th>
           <th style="padding:6px 10px;border-bottom:1px solid var(--border);text-align:right">SKU 數</th>
@@ -10591,7 +10591,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--red)"></span>未匹配之商品（可能非新品或未在 26FW 新品報表內）</div>
       <div style="max-height:300px;overflow:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品編號</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
@@ -10610,11 +10610,11 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <div class="card">
       <div class="card-title" style="gap:6px;flex-wrap:wrap"><span class="dot"></span>預告進貨明細
         <span style="flex:1"></span>
-        <button id="forecast-export-btn" onclick="exportArrangeNewReport()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">匯出待排新品</button>
-        <button id="forecast-send-planner-btn" onclick="sendToPlannerFromForecast()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:11px;cursor:pointer;font-family:var(--font);font-weight:600">傳送至儲位調整</button>
+        <button id="forecast-export-btn" onclick="exportArrangeNewReport()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">匯出待排新品</button>
+        <button id="forecast-send-planner-btn" onclick="sendToPlannerFromForecast()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">傳送至儲位調整</button>
       </div>
       <div style="max-height:560px;overflow:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center">進倉日期</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:left">進口編號</th>
@@ -10640,15 +10640,15 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   <div style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
     <button class="upload-btn" onclick="document.getElementById('compare-file-input').click()" style="background:var(--accent);color:#fff">⬆ 上傳歷史 ERP 報表（起始日）</button>
     <input type="file" id="compare-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleCompareUpload(event)">
-    <select id="compare-hist-select" onchange="if(this.value)compareLoadStored(this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--font);background:var(--surface);color:var(--text);cursor:pointer;max-width:200px">
+    <select id="compare-hist-select" onchange="if(this.value)compareLoadStored(this.value)" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font);background:var(--surface);color:var(--text);cursor:pointer;max-width:200px">
       <option value="">— 或選擇系統已存日期 —</option>
     </select>
     <button class="upload-btn" onclick="var d=document.getElementById('compare-hist-select').value;if(d)histDownloadEPR(d);else alert('請先在左側下拉選單選擇日期');" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="將選定日期的完整 ERP 報表下載回電腦 (.xlsx)">⬇ 下載該日報表</button>
     <button class="upload-btn" onclick="document.getElementById('backup-pick-input').click()" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="開啟月底匯出的 lativ_backup json，直接挑某一天的報表（不匯入、不影響目前資料）">📂 從備份檔挑日期</button>
     <input type="file" id="backup-pick-input" accept=".json" style="display:none" onchange="backupPickFile(this.files[0]);this.value=''">
-    <span id="rollup-status" style="font-size:11px;color:var(--text3);border:1px dashed var(--border);border-radius:4px;padding:3px 8px"></span>
-    <span id="compare-status" style="font-size:12px;color:var(--text3)"></span>
-    <span style="font-size:12px;color:var(--text3);margin-left:8px">→ 與當前 ERP 比對</span>
+    <span id="rollup-status" style="font-size:12px;color:var(--text3);border:1px dashed var(--border);border-radius:4px;padding:3px 8px"></span>
+    <span id="compare-status" style="font-size:13px;color:var(--text3)"></span>
+    <span style="font-size:13px;color:var(--text3);margin-left:8px">→ 與當前 ERP 比對</span>
     <button class="upload-btn" onclick="clearCompareData()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);margin-left:auto;display:none" id="compare-clear-btn">✖ 清除歷史報表</button>
   </div>
 
@@ -10663,32 +10663,32 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <div class="card">
       <div class="card-title" style="gap:6px;flex-wrap:wrap">
         <span class="dot"></span>SKU 銷售差異明細
-        <span style="color:var(--text3);font-weight:400;font-size:11px;margin-left:6px">季別</span>
-        <select id="cmp-filter-season" onchange="renderSalesCompare()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:12px;font-family:var(--font)">
+        <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:6px">季別</span>
+        <select id="cmp-filter-season" onchange="renderSalesCompare()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:13px;font-family:var(--font)">
           <option value="">- 請選擇 -</option>
         </select>
-        <select id="cmp-filter-field" onchange="renderSalesCompare()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:12px;font-family:var(--font)">
+        <select id="cmp-filter-field" onchange="renderSalesCompare()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:13px;font-family:var(--font)">
           <option value="商品編號" selected>商品編號</option>
           <option value="商品名稱">商品名稱</option>
           <option value="儲位">儲位</option>
         </select>
-        <input id="cmp-search" placeholder="搜尋..." onInput="renderSalesCompare()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 8px;font-size:12px;font-family:var(--font);width:160px">
+        <input id="cmp-search" placeholder="搜尋..." onInput="renderSalesCompare()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 8px;font-size:13px;font-family:var(--font);width:160px">
         <span style="cursor:pointer;display:inline-flex;align-items:center" onclick="renderSalesCompare()"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="color:var(--text3)"><circle cx="6.5" cy="6.5" r="5" stroke="currentColor" stroke-width="1.5"/><line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
-        <button onclick="document.getElementById('cmp-search').value='';document.getElementById('cmp-filter-season').value='';CMP_TOP_N=0;CMP_TOP_STYLE=0;CMP_TOP_COLOR=0;renderSalesCompare();['cmp-top-btn','cmp-top-style-btn','cmp-top-color-btn'].forEach(id=>{const b=document.getElementById(id);if(b){b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.border='1px solid var(--border)';}});" style="background:var(--surface2);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;font-family:var(--font)">✕</button>
-        <button id="cmp-top-btn" onclick="toggleCmpTop()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">估算銷售 TOP <span id="cmp-top-n-display" ondblclick="event.stopPropagation();editCmpTopN(this)" style="font-weight:700;min-width:28px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">100</span></button>
-        <button id="cmp-top-style-btn" onclick="toggleCmpTopStyle()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="cmp-top-style-n-display" ondblclick="event.stopPropagation();editCmpTopStyleN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 款</button>
-        <button id="cmp-top-color-btn" onclick="toggleCmpTopColor()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="cmp-top-color-n-display" ondblclick="event.stopPropagation();editCmpTopColorN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 色</button>
+        <button onclick="document.getElementById('cmp-search').value='';document.getElementById('cmp-filter-season').value='';CMP_TOP_N=0;CMP_TOP_STYLE=0;CMP_TOP_COLOR=0;renderSalesCompare();['cmp-top-btn','cmp-top-style-btn','cmp-top-color-btn'].forEach(id=>{const b=document.getElementById(id);if(b){b.style.background='var(--surface2)';b.style.color='var(--text)';b.style.border='1px solid var(--border)';}});" style="background:var(--surface2);border:1px solid var(--border);color:var(--text3);border-radius:4px;padding:3px 8px;font-size:13px;cursor:pointer;font-family:var(--font)">✕</button>
+        <button id="cmp-top-btn" onclick="toggleCmpTop()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">估算銷售 TOP <span id="cmp-top-n-display" ondblclick="event.stopPropagation();editCmpTopN(this)" style="font-weight:700;min-width:28px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">100</span></button>
+        <button id="cmp-top-style-btn" onclick="toggleCmpTopStyle()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="cmp-top-style-n-display" ondblclick="event.stopPropagation();editCmpTopStyleN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 款</button>
+        <button id="cmp-top-color-btn" onclick="toggleCmpTopColor()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 10px;font-size:13px;cursor:pointer;font-family:var(--font);margin-left:4px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px">TOP <span id="cmp-top-color-n-display" ondblclick="event.stopPropagation();editCmpTopColorN(this)" style="font-weight:700;min-width:20px;text-align:center;cursor:text;border-bottom:1px dashed var(--text3);padding:0 2px">10</span> 色</button>
       </div>
 
       <div style="max-height:calc(100vh - 320px);min-height:400px;overflow:auto">
-        <table style="width:100%;border-collapse:collapse;font-size:11px" id="tbl-compare">
+        <table style="width:100%;border-collapse:collapse;font-size:12px" id="tbl-compare">
           <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
-            <th onclick="sortCmpBy('code')" style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">商品編號 <span id="cmp-sort-code" style="color:var(--text3);font-size:10px"></span></th>
+            <th onclick="sortCmpBy('code')" style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">商品編號 <span id="cmp-sort-code" style="color:var(--text3);font-size:11px"></span></th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">顏色</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">尺寸</th>
-            <th onclick="sortCmpBy('slot')" style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;cursor:pointer;user-select:none">儲位 <span id="cmp-sort-slot" style="color:var(--text3);font-size:10px"></span></th>
-            <th onclick="sortCmpBy('sold')" style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08);cursor:pointer;user-select:none">估算銷售 <span id="cmp-sort-sold" style="color:var(--text3);font-size:10px">▼</span></th>
+            <th onclick="sortCmpBy('slot')" style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;cursor:pointer;user-select:none">儲位 <span id="cmp-sort-slot" style="color:var(--text3);font-size:11px"></span></th>
+            <th onclick="sortCmpBy('sold')" style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08);cursor:pointer;user-select:none">估算銷售 <span id="cmp-sort-sold" style="color:var(--text3);font-size:11px">▼</span></th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">歷史銷售庫存</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">歷史未到量</th>
             <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">當前銷售庫存</th>
@@ -10699,11 +10699,11 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
         </table>
       </div>
       <!-- ★ 2026-07-18：分頁列 -->
-      <div id="cmp-pager" style="display:none;align-items:center;gap:8px;padding:8px 12px;font-size:12px;border-top:1px solid var(--border);font-family:var(--font)">
-        <button id="cmp-prev-btn" onclick="cmpSetPage(CMP_PAGE-1)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:var(--font)">← 上一頁</button>
-        <button id="cmp-next-btn" onclick="cmpSetPage(CMP_PAGE+1)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:var(--font)">下一頁 →</button>
+      <div id="cmp-pager" style="display:none;align-items:center;gap:8px;padding:8px 12px;font-size:13px;border-top:1px solid var(--border);font-family:var(--font)">
+        <button id="cmp-prev-btn" onclick="cmpSetPage(CMP_PAGE-1)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:var(--font)">← 上一頁</button>
+        <button id="cmp-next-btn" onclick="cmpSetPage(CMP_PAGE+1)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 12px;font-size:13px;cursor:pointer;font-family:var(--font)">下一頁 →</button>
         <span id="cmp-page-info" style="color:var(--text3)"></span>
-        <span style="margin-left:auto;color:var(--text3)">每頁 <input type="number" min="10" step="50" value="100" onchange="cmpSetPageSize(this.value)" style="width:64px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--font)"> 筆</span>
+        <span style="margin-left:auto;color:var(--text3)">每頁 <input type="number" min="10" step="50" value="100" onchange="cmpSetPageSize(this.value)" style="width:64px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)"> 筆</span>
       </div>
     </div>
 
@@ -10711,35 +10711,35 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
     <div class="card" id="ph1-card" style="margin-top:14px">
       <div class="card-title" style="gap:8px;flex-wrap:wrap">
         <span class="dot"></span>過季款色排名（1F/2F 調換・階段1）
-        <button id="ph1-run-btn" onclick="ph1Run()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)">▶ 計算排名</button>
-        <select id="ph1-view" onchange="ph1Render()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:12px;font-family:var(--font)">
+        <button id="ph1-run-btn" onclick="ph1Run()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">▶ 計算排名</button>
+        <select id="ph1-view" onchange="ph1Render()" style="background:#fff;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:13px;font-family:var(--font)">
           <option value="pull" selected>拉下1F候選（現在 2F 的 SKU）</option>
           <option value="push">推上2F候選（現在 1F 的 SKU・排除配件）</option>
           <option value="all">全部過季 SKU</option>
         </select>
-        <span style="font-size:11px;color:var(--text3)">顯示筆數</span>
-        <input type="number" id="ph1-limit-n" min="1" step="50" value="100" onchange="ph1Render()" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:var(--font)">
-        <span id="ph1-count-info" style="font-size:11px;color:var(--text3)"></span>
-        <button id="ph1-export-btn" onclick="ph1Export()" style="display:none;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:var(--font)">⬇ 匯出 xlsx</button>
-        <span id="ph1-status" style="font-size:11px;color:var(--text3)"></span>
+        <span style="font-size:12px;color:var(--text3)">顯示筆數</span>
+        <input type="number" id="ph1-limit-n" min="1" step="50" value="100" onchange="ph1Render()" style="width:70px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)">
+        <span id="ph1-count-info" style="font-size:12px;color:var(--text3)"></span>
+        <button id="ph1-export-btn" onclick="ph1Export()" style="display:none;background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:4px;padding:5px 12px;font-size:13px;cursor:pointer;font-family:var(--font)">⬇ 匯出 xlsx</button>
+        <span id="ph1-status" style="font-size:12px;color:var(--text3)"></span>
       </div>
       <div style="max-height:60vh;min-height:200px;overflow:auto">
-        <table id="tbl-ph1" style="width:100%;border-collapse:collapse;font-size:11px">
+        <table id="tbl-ph1" style="width:100%;border-collapse:collapse;font-size:12px">
           <thead style="position:sticky;top:0;background:var(--surface2);z-index:1"><tr>
-            <th onclick="ph1SortBy('code')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">款號 <span id="ph1-sort-code" style="color:var(--accent);font-size:10px"></span></th>
+            <th onclick="ph1SortBy('code')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">款號 <span id="ph1-sort-code" style="color:var(--accent);font-size:11px"></span></th>
             <th style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left">商品名稱</th>
-            <th onclick="ph1SortBy('slot')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">儲位 <span id="ph1-sort-slot" style="color:var(--accent);font-size:10px">▲</span></th>
-            <th onclick="ph1SortBy('daily')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08);cursor:pointer;user-select:none">日均 <span id="ph1-sort-daily" style="color:var(--accent);font-size:10px"></span></th>
-            <th onclick="ph1SortBy('sold')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">期間銷量 <span id="ph1-sort-sold" style="color:var(--accent);font-size:10px"></span></th>
-            <th onclick="ph1SortBy('availD')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">有效天 <span id="ph1-sort-availD" style="color:var(--accent);font-size:10px"></span></th>
-            <th onclick="ph1SortBy('ss')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">銷售庫存 <span id="ph1-sort-ss" style="color:var(--accent);font-size:10px"></span></th>
-            <th onclick="ph1SortBy('pend')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">未到量 <span id="ph1-sort-pend" style="color:var(--accent);font-size:10px"></span></th>
-            <th onclick="ph1SortBy('pack')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">包材 <span id="ph1-sort-pack" style="color:var(--accent);font-size:10px"></span></th>
+            <th onclick="ph1SortBy('slot')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">儲位 <span id="ph1-sort-slot" style="color:var(--accent);font-size:11px">▲</span></th>
+            <th onclick="ph1SortBy('daily')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;background:rgba(45,122,74,0.08);cursor:pointer;user-select:none">日均 <span id="ph1-sort-daily" style="color:var(--accent);font-size:11px"></span></th>
+            <th onclick="ph1SortBy('sold')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">期間銷量 <span id="ph1-sort-sold" style="color:var(--accent);font-size:11px"></span></th>
+            <th onclick="ph1SortBy('availD')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">有效天 <span id="ph1-sort-availD" style="color:var(--accent);font-size:11px"></span></th>
+            <th onclick="ph1SortBy('ss')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">銷售庫存 <span id="ph1-sort-ss" style="color:var(--accent);font-size:11px"></span></th>
+            <th onclick="ph1SortBy('pend')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:right;cursor:pointer;user-select:none">未到量 <span id="ph1-sort-pend" style="color:var(--accent);font-size:11px"></span></th>
+            <th onclick="ph1SortBy('pack')" style="padding:5px 6px;border-bottom:1px solid var(--border);text-align:left;cursor:pointer;user-select:none">包材 <span id="ph1-sort-pack" style="color:var(--accent);font-size:11px"></span></th>
           </tr></thead>
           <tbody id="ph1-body"><tr><td colspan="9" style="padding:32px;text-align:center;color:var(--text3)">按「▶ 計算排名」開始（需系統已存 ≥2 天日報表）</td></tr></tbody>
         </table>
       </div>
-      <div style="padding:6px 12px 10px;font-size:11px;color:var(--text3)">單 SKU 呈現，筆數＝取「日均前 X」：拉下1F＝2F 過季 SKU 取日均<b>最高</b>前 X、推上2F＝1F 過季 SKU 取日均<b>最低</b>前 X，再依表頭排序呈現（預設儲位升冪）。黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類（不列入推上2F）。鎖定款不顯示：盒類/滑齒袋/商務襯衫＝鎖2F；配件類/寢具＝鎖1F。本表只出排名，不會改任何儲位。</div>
+      <div style="padding:6px 12px 10px;font-size:12px;color:var(--text3)">單 SKU 呈現，筆數＝取「日均前 X」：拉下1F＝2F 過季 SKU 取日均<b>最高</b>前 X、推上2F＝1F 過季 SKU 取日均<b>最低</b>前 X，再依表頭排序呈現（預設儲位升冪）。黃底★＝低庫存但未到量&gt;0 守門（不動）；<span style="color:var(--red);font-weight:700">配</span>＝配件類（不列入推上2F）。鎖定款不顯示：盒類/滑齒袋/商務襯衫＝鎖2F；配件類/寢具＝鎖1F。本表只出排名，不會改任何儲位。</div>
     </div>
   </div>
 </div>
@@ -10752,20 +10752,20 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
         <button class="upload-btn" onclick="document.getElementById('planner-aisle-input').click()" style="background:var(--accent);color:#fff">⬆ 走道報表</button>
         <input type="file" id="planner-aisle-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerAisleUpload(event)">
-        <span id="planner-aisle-status" style="font-size:11px;color:var(--text3)">未上傳</span>
-        <button class="upload-btn" id="planner-aisle-clear-btn" onclick="clearPlannerAisle()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
+        <span id="planner-aisle-status" style="font-size:12px;color:var(--text3)">未上傳</span>
+        <button class="upload-btn" id="planner-aisle-clear-btn" onclick="clearPlannerAisle()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:12px;padding:4px 10px">✖</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
         <button class="upload-btn" onclick="document.getElementById('planner-master-input').click()" style="background:var(--accent);color:#fff">⬆ 儲位總表</button>
         <input type="file" id="planner-master-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerMasterUpload(event)">
-        <span id="planner-master-status" style="font-size:11px;color:var(--text3)">未上傳</span>
-        <button class="upload-btn" id="planner-master-clear-btn" onclick="clearPlannerMaster()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
+        <span id="planner-master-status" style="font-size:12px;color:var(--text3)">未上傳</span>
+        <button class="upload-btn" id="planner-master-clear-btn" onclick="clearPlannerMaster()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:12px;padding:4px 10px">✖</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
         <button class="upload-btn" onclick="document.getElementById('planner-overflow-input').click()" style="background:#784c96;color:#fff" title="XX/TX 溢位區 ERP 報表：與「儲位釋放」tab 共用——任一邊上傳一次，兩邊同步生效，重開頁自動還原。注入 STORAGE_MASTER 與走道報表，自動填入 config.overflow">⬆ 溢位區 XX/TX</button>
         <input type="file" id="planner-overflow-input" accept=".xlsx,.xls" style="display:none" onchange="handlePlannerOverflowUpload(event)">
-        <span id="planner-overflow-status" style="font-size:11px;color:var(--text3)">未上傳</span>
-        <button class="upload-btn" id="planner-overflow-clear-btn" onclick="clearPlannerOverflow()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:11px;padding:4px 10px">✖</button>
+        <span id="planner-overflow-status" style="font-size:12px;color:var(--text3)">未上傳</span>
+        <button class="upload-btn" id="planner-overflow-clear-btn" onclick="clearPlannerOverflow()" style="background:rgba(192,57,43,0.1);color:var(--red);border:1px solid var(--red);display:none;font-size:12px;padding:4px 10px">✖</button>
       </div>
     </div>
 
@@ -10774,12 +10774,12 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <div class="card-title" style="display:flex;align-items:center;justify-content:space-between">
         <span><span class="dot"></span>情境配置</span>
         <button id="pln-reset-btn" onclick="plannerResetConfig()" title="清除傳送的新品並還原情境配置至初始狀態"
-          style="background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:2px 7px;font-size:13px;color:var(--text2);line-height:1.4;display:flex;align-items:center;gap:4px"
+          style="background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:2px 7px;font-size:14px;color:var(--text2);line-height:1.4;display:flex;align-items:center;gap:4px"
           onmouseover="this.style.background='var(--hover)'" onmouseout="this.style.background='none'">
           ↺ 重設
         </button>
       </div>
-      <div id="planner-config-body" style="padding:6px 0;font-size:12px">
+      <div id="planner-config-body" style="padding:6px 0;font-size:13px">
         <div style="padding:24px;text-align:center;color:var(--text3)">請先上傳走道報表 + 儲位總表</div>
       </div>
     </div>
@@ -10804,16 +10804,14 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 <div class="tab-panel" id="tab-rackmap">
   <div style="padding:12px 16px">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px">
-      <span style="font-weight:700;font-size:15px;color:var(--accent)">1F 儲架平面圖</span>
+      <span style="font-weight:700;font-size:16px;color:var(--accent)">1F 儲架平面圖</span>
       <span id="rm-viewbar" style="display:flex;gap:4px;align-items:center;flex-wrap:wrap"></span>
-      <span id="rm-legend" style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;align-items:center;color:#555"></span>
-      <button onclick="rmExport()" style="font-size:12px;cursor:pointer;border:1px solid var(--border,#ccc);border-radius:5px;padding:4px 10px;background:var(--surface,#f7f7f7)">匯出 Excel</button>
-      <button onclick="rmSyncFromMaster()" style="font-size:12px;cursor:pointer;border:1px solid #2c6e49;color:#2c6e49;border-radius:5px;padding:4px 10px;background:#fff" title="以最新上傳的儲位總表更新各儲位擺法，架長會自動重算">↻ 依儲位總表更新擺法</button>
-      <span style="font-size:11px;color:#2c6e49">💡 可直接拖曳「架/柱」微調位置；所有編輯自動儲存。</span>
+      <span id="rm-legend" style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;align-items:center;color:#555"></span>
+      <!-- ★2026-07-21 移除：匯出 Excel／依儲位總表更新擺法／拖曳提示（儲架已定位，暫不使用；rmExport/rmSyncFromMaster 函式保留可日後接回） -->
     </div>
     <div style="display:flex;flex-direction:column;gap:10px;align-items:stretch">
       <div id="rm-canvas" style="width:100%;overflow:auto;max-height:70vh;border:1px solid var(--border,#ddd);border-radius:8px;background:#fff"></div>
-      <div id="rm-editor" style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;max-height:40vh;overflow:auto;background:var(--surface,#fafafa)"></div>
+      <!-- ★2026-07-21 移除 rm-editor 儲架編輯面板（儲架已定位，暫不使用） -->
       <div id="rm-compare" style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;background:var(--surface,#fafafa)"></div>
     </div>
   </div>
@@ -10822,7 +10820,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 <div id="fw26-schedule-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center">
   <div style="background:var(--bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);max-width:92vw;max-height:90vh;overflow:auto;padding:0;min-width:600px">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);border-radius:10px 10px 0 0;position:sticky;top:0;z-index:1">
-      <span style="font-weight:700;font-size:15px;color:var(--accent)">26FW 預計進倉時程</span>
+      <span style="font-weight:700;font-size:16px;color:var(--accent)">26FW 預計進倉時程</span>
       <button onclick="document.getElementById('fw26-schedule-modal').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3);line-height:1">✕</button>
     </div>
     <div style="padding:16px 20px" id="fw26-schedule-content"></div>
@@ -10858,8 +10856,10 @@ let RM=null,RM_SEL=null,RM_EDIT=null,RM_VIEW={mode:'all'},RM_HIT=[],RM_S=1,rmSup
 const RM_UNIT_CM_OVR={};   // 每號碼實體寬(cm)特例（2026-07-14 取消 A02/E08/E09=35：H架一架六格、架長仍175 → 每格=175/6≈29.17，與AB前段格線同步）
 const RM_LPOS={'C11回':177};                    // C11回 178-182 凸出走道外，177 對應對面 001                    // 定位用走道長特例：C11回 178-182 凸出走道外，177 對應 001
 const RM_FACE_UNIT_OVR={'E09回':35,'C08出':35,'C08回':35,'C10出':35,'C11出':35,'C09出':35};   // 2026-07-14 面別格寬特例：E09回為D架(5格/175cm)，格寬連續排列不留空格｜2026-07-15：C08兩面、C10出、C11出同為5格/架 → 比照E09回按比例填滿、缺號不留白｜2026-07-17：C09出改為5格/架
-const RM_CALIB_VER='v10_0717';   // ★ v10(2026-07-17)：儲位總表更新 — C09出改與C08出同構(9架×5格 LLLL×4+AAAA，001-053，缺6的倍數號)，回面不變；舊佈局自動遷移
+const RM_CALIB_VER='v11_0721';   // ★ v11(2026-07-21)：A02 大號面(回)末端補一架 061-065（出面同號舊架移除）；舊佈局自動遷移
+// v10(2026-07-17)：儲位總表更新 — C09出改與C08出同構(9架×5格 LLLL×4+AAAA，001-053，缺6的倍數號)，回面不變；舊佈局自動遷移
 function rmDSlots(lo){var a=[];for(var q=lo;q<lo+4;q++)a.push({q:q,lay:['D','D','D','D']});return a;} // 4格D材積儲位產生器（v5 E07出重繪用）
+function rmHSlots(lo,n){var a=[];for(var q=lo;q<lo+n;q++)a.push({q:q,lay:['H','H','H','H']});return a;} // n格H材積儲位產生器（v11 A02回補架用）
 function rmC9Slots(lo){var a=[];for(var q=lo;q<lo+4;q++)a.push({q:q,lay:['L','L','L','L']});a.push({q:lo+4,lay:['A','A','A','A']});return a;} // 5格 LLLL×4+AAAA 產生器（v10 C09出改架用）
 // ── 2026-07-05 實地柱位校正（Gordon 現場量測）──
 // ax=柱/截短「右緣」錨定位置（自走道口起算的號碼格數，實測換算）；未給 ax 者依自身號碼範圍推得。
@@ -10936,6 +10936,11 @@ const RM_CALIB=[
  {a:'C09',s:'出',m:{t:'架',r:'043-048'},repl:[{t:'架',r:'043-047',L:146,br:'133-137',s:rmC9Slots(43)}]},
  {a:'C09',s:'出',m:{t:'架',r:'049-054'},repl:[{t:'架',r:'049-053',L:146,br:'127-131',s:rmC9Slots(49)}]},
  {a:'C09',s:'出',m:{t:'截短',r:'055-090'},set:{r:'054-090',br:'090-126'}},
+ // ── 2026-07-21 v11：A02 大號面(回)末端補一架 061-065（Gordon 現場）──
+ //   出面原第13架 061-065 於現場已不存在（出面實為 001-060），改掛在回面 066-070 之後（圖上最左端）。
+ //   先移除出面舊架避免號碼重複，再插入回面新架；A02 設計格數維持 123（60+63）。
+ {a:'A02',s:'出',m:{t:'架',r:'061-065'},remove:1},
+ {a:'A02',s:'回',m:{t:'架',r:'066-070'},insAfter:{t:'架',r:'061-065',L:175,ba:'A03出',br:'059-063',nt:'2026-07-21 補建（大號面末端）',s:rmHSlots(61,5)}},
 ];
 function rmLpos(a,side){var k=RM_LPOS[a+side];return k!=null?k:rmAisleL(a);}
 function rmUnitCM(a){return RM_UNIT_CM_OVR[a]||175/rmUnitN(a);}
@@ -11185,12 +11190,7 @@ function rmStripSVG(a,side,px,py,S,mirror,blockW,stripH,withGap,parts){
     if(sel)g+='<rect x="'+(x-1).toFixed(1)+'" y="'+(py2-1)+'" width="'+(w+2).toFixed(1)+'" height="'+(stripH+2)+'" fill="none" stroke="#111" stroke-width="1.8"/>';
     parts.push(g+'</g>');
   });
-  // 末端「＋」（遠離走道端）：緊貼最後一個「可見」項目（截短已不繪製 → ＋改對齊實際架尾的空白處，圖4）
-  var pw=13;
-  var visEnd=rmVisEnd(geom);
-  var endcm=mirror?(blockW-visEnd-pw/S):visEnd;
-  var ex=px+endcm*S;
-  parts.push('<g class="rm-add" data-a="'+a+'" data-s="'+side+'" style="cursor:pointer"><rect x="'+ex.toFixed(1)+'" y="'+py+'" width="'+pw+'" height="'+stripH+'" rx="2" fill="#ffffff" stroke="#88a" stroke-dasharray="2,2"/><text x="'+(ex+pw/2).toFixed(1)+'" y="'+(py+stripH/2+3)+'" font-size="9" fill="#569" text-anchor="middle">＋</text><title>'+a+' '+side+'面 末端新增一架</title></g>');
+  // ★2026-07-21 移除：走道末端「＋」新增一架按鈕（儲架已定位，暫不使用）
   return geom;
 }
 function rmVisEnd(geom){ // 可見內容右緣（cm，排除不繪製的截短）
@@ -11202,6 +11202,9 @@ function rmBlockW(aisles,withGap){
   aisles.forEach(function(a){['出','回'].forEach(function(sd){w=Math.max(w,rmVisEnd(rmFaceGeom(a,sd,withGap)));});});
   return w+20;
 }
+// ★2026-07-21：面別上下對調特例 —— 預設 上=回(大號面)／下=出(小號面)；列於此表的走道反過來排。
+//   F02：出面(001-009)實體位於上方，故對調；儲位號碼與排序完全不動，只換上下兩條的繪製位置。
+const RM_FACE_FLIP={'F02':true};
 function rmBandSVG(a,px,py,S,mirror,blockW,stripH,withGap,labelSide,parts){
   // 上=回(大號)、下=出(小號)；標示灰框（走道名×2）貼走道側
   var lh=stripH*2+2;
@@ -11210,8 +11213,9 @@ function rmBandSVG(a,px,py,S,mirror,blockW,stripH,withGap,labelSide,parts){
     '<text x="'+(lx+16)+'" y="'+(py+stripH/2+3)+'" font-size="'+Math.min(9,stripH-3)+'" fill="#333" text-anchor="middle">'+a+'</text>'+
     '<text x="'+(lx+16)+'" y="'+(py+stripH+stripH/2+5)+'" font-size="'+Math.min(9,stripH-3)+'" fill="#333" text-anchor="middle">'+a+'</text>'+
     '<title>點擊放大檢視走道 '+a+'</title></g>');
-  rmStripSVG(a,'回',px,py,S,mirror,blockW,stripH,withGap,parts);            // 上=大號面
-  rmStripSVG(a,'出',px,py+stripH+2,S,mirror,blockW,stripH,withGap,parts);   // 下=小號面
+  var topSide=RM_FACE_FLIP[a]?'出':'回', botSide=RM_FACE_FLIP[a]?'回':'出';
+  rmStripSVG(a,topSide,px,py,S,mirror,blockW,stripH,withGap,parts);            // 上
+  rmStripSVG(a,botSide,px,py+stripH+2,S,mirror,blockW,stripH,withGap,parts);   // 下
   return lh;
 }
 function renderRackMap(){
@@ -11253,7 +11257,8 @@ function renderRackMap(){
     var S2=Math.max((designW2-2*margin2-lblW2)/bw,RM_VIEW.mode==='aisle'?0.42:0.18);RM_S=S2;
     W=Math.max(designW2,margin2*2+lblW2+bw*S2);
     var px=mirror?margin2:margin2+lblW2, y=30;
-    parts.push('<text x="'+(margin2+4)+'" y="18" font-size="13" font-weight="bold" fill="#333">'+(RM_VIEW.mode==='aisle'?('走道 '+vis[0]):(RM_VIEW.zone+' 區'))+'　<tspan font-size="10" fill="#888" font-weight="normal">上=大號面／下=小號面'+(mirror?'（001 在右、往左遞增）':'（001 在左、往右遞增）')+'</tspan></text>');
+    var flipHdr=(RM_VIEW.mode==='aisle'&&RM_FACE_FLIP[vis[0]]);   // ★2026-07-21：對調走道(如 F02)標題須同步反轉
+    parts.push('<text x="'+(margin2+4)+'" y="18" font-size="13" font-weight="bold" fill="#333">'+(RM_VIEW.mode==='aisle'?('走道 '+vis[0]):(RM_VIEW.zone+' 區'))+'　<tspan font-size="10" fill="#888" font-weight="normal">'+(flipHdr?'上=小號面／下=大號面':'上=大號面／下=小號面')+(mirror?'（001 在右、往左遞增）':'（001 在左、往右遞增）')+'</tspan></text>');
     vis.forEach(function(a){y+=rmBandSVG(a,px,y,S2,mirror,bw,stripH2,withGap,mirror?'right':'left',parts)+10;});
     H=y+8;
     if(withGap){var gg2=rmFaceGeom(vis[0],'出',true).gapX;
