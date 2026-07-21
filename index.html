@@ -2401,10 +2401,13 @@ function wkMerge(archive,rows,keyFn,decorate){
 
 // 目前庫內有哪些週（新→舊，未定日期排最後）
 function wkWeeks(){
+  // ★2026-07-21 Gordon：整週都已過去的週次不再列出（只看待排，過去的不列入參考）
+  const _t=new Date();
+  const _td=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
   const m={};
   FORECAST_ARCHIVE.forEach(r=>{const w=r._week||'NODATE';if(!m[w])m[w]=new Set();
     const ci=resolveContainerInfo(r);m[w].add(ci.importNo+'||'+ci.containerType);});
-  const ks=Object.keys(m).filter(k=>k!=='NODATE').sort().reverse();
+  const ks=Object.keys(m).filter(k=>k!=='NODATE'&&wkEnd(k)>=_td).sort().reverse();
   if(m['NODATE'])ks.push('NODATE');
   return ks.map(w=>({week:w,containers:m[w].size,
     rows:FORECAST_ARCHIVE.filter(r=>(r._week||'NODATE')===w).length}));
@@ -3048,24 +3051,35 @@ async function clearPlannerMaster(){
 //     live = 走道報表／溢位區報表實況已占用該商品編號
 // 兩者皆視為「已排入」，一律不再列入待排、不再送進新品引擎（避免同 SKU 排兩處）。
 function plnIsRealSlot(s){return !!plnParseCell(String(s||'').trim());}
+// ★2026-07-21 Gordon：XX/TX 溢位區＝「暫放區」，不是正式儲位。
+//   規劃錯誤時把新品先搬去 XX-011 暫放，系統原本會把它當成「已排入」而從待排清單消失，
+//   導致重排時漏掉。改為：儲位落在 XX-/TX- 任一格 → 一律視為「未排」，回到待排標準流程。
+function plnIsTempZoneSlot(s){
+  const t=String(s||'').trim().toUpperCase();
+  return t.startsWith('XX-')||t.startsWith('TX-');
+}
 function plnBuildPlacedIndex(){
-  const erpSlot={},liveSlot={};
+  const erpSlot={},liveSlot={},tempSlot={};   // ★tempSlot：XX/TX 暫放（不算已排入，僅供顯示提示）
+  const _take=(map,c,sl)=>{
+    if(!c||!plnIsRealSlot(sl))return;
+    if(plnIsTempZoneSlot(sl)){ if(!tempSlot[c])tempSlot[c]=sl; return; }   // ★暫放區不列入已排入
+    if(!map[c])map[c]=sl;
+  };
   // ① 庫存查詢總表（EPR 主報表）— 權威
   (typeof DB!=='undefined'?DB||[]:[]).forEach(r=>{
-    const c=String(r.商品編號||'').trim(),s=String(r.儲位||'').trim();
-    if(c&&plnIsRealSlot(s)&&!erpSlot[c])erpSlot[c]=s;
+    _take(erpSlot,String(r.商品編號||'').trim(),String(r.儲位||'').trim());
   });
   // ② 匯出儲位安排自己的「儲位」欄（ERP 偶爾會回填；非儲位格式如 'Z' 一律忽略）
   (typeof ARRANGE_DATA!=='undefined'?ARRANGE_DATA||[]:[]).forEach(r=>{
-    const c=String(r.code||'').trim(),s=String(r.slot||'').trim();
-    if(c&&plnIsRealSlot(s)&&!erpSlot[c])erpSlot[c]=s;
+    _take(erpSlot,String(r.code||'').trim(),String(r.slot||'').trim());
   });
   // ③ 走道報表／溢位區報表實況
   (typeof AISLE_REPORT_DATA!=='undefined'?AISLE_REPORT_DATA||[]:[]).forEach(r=>{
-    const c=String(r['商品編號']||'').trim(),s=String(r['儲位']||'').trim();
-    if(c&&plnIsRealSlot(s)&&!erpSlot[c]&&!liveSlot[c])liveSlot[c]=s;
+    const c=String(r['商品編號']||'').trim(),sl=String(r['儲位']||'').trim();
+    if(c&&erpSlot[c])return;
+    _take(liveSlot,c,sl);
   });
-  return {erpSlot,liveSlot};
+  return {erpSlot,liveSlot,tempSlot};
 }
 function plnIsPlacedCode(code,idx){
   const c=String(code||'').trim();
@@ -5411,6 +5425,10 @@ function plnRunNewEngine(config,initialCells){
       if(cs.info&&cs.info._isNewProduct)prePlaced.add(String(cs.sku));
       else occupiedCodes.add(String(cs.sku));
     });
+    // ★2026-07-21：XX/TX 暫放區的占用不算「已在架上」→ 從 occupiedCodes 移除，讓它回到待排
+    Object.values(cells).forEach(cs=>{
+      if(cs.sku&&plnIsTempZoneSlot(cs.cell))occupiedCodes.delete(String(cs.sku));
+    });
     const seen=new Set(); const dedup=[]; let dropped=0, consumed=0, already=0;
     for(const s of skus){ const code=String(s.code||'');
       if(code&&prePlaced.has(code)){consumed++;_placedCodes.add(code);continue;}
@@ -7392,8 +7410,13 @@ function renderArrangeCompare(){
   const forecastSection=document.getElementById('forecast-section');
   const forecastBody=document.getElementById('forecast-body');
 
-  // 預告進貨筆數
-  document.getElementById('forecast-count').textContent=FORECAST_DATA.length?FORECAST_DATA.length.toLocaleString():'—';
+  // 預告進貨筆數（★2026-07-21：與明細表一致，全部週次檢視時排除已過進倉日者）
+  {
+    const _t=new Date();
+    const _td=_t.getFullYear()+'-'+String(_t.getMonth()+1).padStart(2,'0')+'-'+String(_t.getDate()).padStart(2,'0');
+    const _n=FORECAST_DATA.filter(r=>!(r._ymd&&r._ymd<_td)).length;
+    document.getElementById('forecast-count').textContent=_n?_n.toLocaleString():'—';
+  }
 
   // 儲位安排為空：顯示初始畫面
   if(!ARRANGE_DATA||!ARRANGE_DATA.length){
@@ -7562,6 +7585,7 @@ function renderArrangeCompare(){
       const key=`${r.arrivalDate||'—'}||${_in}||${_ct}`;
       if(!groups[key])groups[key]={
         arrivalDate:r.arrivalDate||'—',
+        ymd:r._ymd||'',                       // ★2026-07-21：完整日期(YYYY-MM-DD)，供排序與過期判斷
         importNo:_in,
         containerType:_ct,
         styles:[],
@@ -7592,7 +7616,31 @@ function renderArrangeCompare(){
     });
 
     // 第二步：每個進倉單內，按類別統計
-    Object.entries(groups).forEach(([grpKey,grp])=>{
+    // ★2026-07-21 Gordon：預告進貨明細依進倉日「由近至遠」排序；進倉日早於今天者一律隱藏
+    //   （這張表只用來看「還沒進倉、待排的量」，過去的週次不列入參考）。
+    const _today=(()=>{const d=new Date();
+      return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})();
+    let _grpEntries=Object.entries(groups);
+    let _expiredN=0;
+    {
+      const _keep=[];
+      _grpEntries.forEach(e=>{ if(e[1].ymd&&e[1].ymd<_today)_expiredN++; else _keep.push(e); });
+      _grpEntries=_keep;
+    }
+    // 由近至遠；沒有進倉日者排最後；同日再依進口編號、櫃號穩定排序
+    _grpEntries.sort((x,y)=>{
+      const A=x[1].ymd||'9999-99-99', B=y[1].ymd||'9999-99-99';
+      if(A!==B)return A<B?-1:1;
+      const ia=String(x[1].importNo||''), ib=String(y[1].importNo||'');
+      if(ia!==ib)return ia<ib?-1:1;
+      return String(x[1].containerType||'')<String(y[1].containerType||'')?-1:1;
+    });
+    const _expNote=document.getElementById('forecast-expired-note');
+    if(_expNote){
+      _expNote.textContent=_expiredN?`已隱藏 ${_expiredN} 個已過進倉日的貨櫃`:'';
+      _expNote.title=_expiredN?'進倉日早於今天的貨櫃已進倉，不再列入待排清單':'';
+    }
+    _grpEntries.forEach(([grpKey,grp])=>{
       const catStats={};  // {類別: {skuCount, plannedSlots:Set, styles:Set (用於提示), unmatchedStyles:Set}}
       const catBoxes={};  // {類別: 箱數加總}
       const catSlotZones={};       // {類別: Set of 儲區首字（如 'C', 'D'）} — 來自預告進貨表 slot
@@ -7731,10 +7779,17 @@ function renderArrangeCompare(){
         html+=`<td style="padding:4px 8px;text-align:center;border-right:1px solid var(--border);${catColor}" title="${catTitle}">${cbHtml}<span style="cursor:default">${displayCat}</span></td>`;
         // SKU 數欄位：顯示「待排」；已排入另以灰字標註（2026-07-16）＋跨櫃重複提醒
         const _pendTxt=s.skuCount?String(s.skuCount):(s.placedCount?'0':'—');
+        // ★2026-07-21：標示此類別內有幾筆是「暫放在 XX/TX」被拉回待排的
+        let _tempN=0;
+        s.styles.forEach(st=>{(ARRANGE_DATA||[]).forEach(ar=>{
+          if(String(ar.code||'').substring(0,5)!==st)return;
+          if(_fcPlacedIdx.tempSlot&&_fcPlacedIdx.tempSlot[String(ar.code||'').trim()])_tempN++;
+        });});
+        const _tempTxt=_tempN?`<span style="color:#d4a017;font-size:9px;margin-left:3px;cursor:help" title="其中 ${_tempN} 筆目前暫放於 XX/TX 溢位區 → 視為未排，已計入待排數">(暫放 ${_tempN})</span>`:'';
         const _placedTxt=s.placedCount?`<span style="color:var(--text3);font-size:9px;margin-left:3px;cursor:help" title="已排入 ${s.placedCount} 筆（ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上）→ 不列入待排新品">(已排 ${s.placedCount})</span>`:'';
         const skuCell=dupAlert
-          ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${_pendTxt}${_placedTxt}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
-          : `${_pendTxt}${_placedTxt}`;
+          ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${_pendTxt}${_placedTxt}${_tempTxt}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
+          : `${_pendTxt}${_placedTxt}${_tempTxt}`;
         html+=`<td style="padding:4px 8px;text-align:right;border-right:1px solid var(--border)">${skuCell}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-weight:600;color:var(--accent);border-right:1px solid var(--border)">${zone}</td>`;
         html+=`<td style="padding:4px 8px;text-align:center;font-size:10px;color:var(--text2);border-right:1px solid var(--border)">${slots}</td>`;
@@ -10947,6 +11002,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
   <div id="forecast-section" style="padding:0 18px 14px;display:none">
     <div class="card">
       <div class="card-title" style="gap:6px;flex-wrap:wrap"><span class="dot"></span>預告進貨明細
+        <span id="forecast-expired-note" style="font-size:11px;font-weight:400;color:var(--text3);cursor:help"></span>
         <span style="flex:1"></span>
         <button id="forecast-export-btn" onclick="exportArrangeNewReport()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">匯出待排新品</button>
         <button id="forecast-send-planner-btn" onclick="sendToPlannerFromForecast()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">傳送至儲位調整</button>
