@@ -1850,17 +1850,17 @@ function renderCatPieChart(data){
   const total=items.reduce((s,d)=>s+d.value,0);
   // 版面：★2026-07-21 改為「高度隨標籤數自適應」—— 原本固定 H=300，類別少時上下留一大片空白。
   //   先算標籤堆疊所需高度，再決定畫布高與圓心 y，使圓餅永遠垂直置中且不留多餘空白。
-  const W=240,cx=120,r=50;
+  const W=240,cx=120,r=52;
   const meta=[];let ang=-Math.PI/2;
   items.forEach((d,i)=>{
     const frac=d.value/total,a2=ang+frac*2*Math.PI;
     meta.push({i,name:String(d.name),value:d.value,frac,a1:ang,a2,mid:(ang+a2)/2,col:CAT_PIE_COLORS[i%CAT_PIE_COLORS.length]});
     ang=a2;
   });
-  const fs=meta.length>20?5.8:meta.length>14?6.6:meta.length>8?7.2:8;
+  const fs=meta.length>20?6.8:meta.length>14?7.6:meta.length>8?8.4:9.2;   // ★2026-07-21 類別文字放大一級
   const RS=meta.filter(m=>Math.cos(m.mid)>=0),LS=meta.filter(m=>Math.cos(m.mid)<0);
   const nMax=Math.max(RS.length,LS.length);
-  const MAXH=400,MINH=2*r+16;                       // 下限＝圓餅直徑＋上下各 8 邊距
+  const MAXH=400,MINH=170;                           // ★下限＝對齊上方兩張圓環卡（118px 圓環＋3 列圖例）的內容高
   let step=fs*2.2;                                   // 標籤列距
   let H=Math.max(MINH,(nMax>1?step*(nMax-1):0)+fs+12);
   if(H>MAXH){H=MAXH;step=(MAXH-fs-12)/(nMax-1);}     // 類別過多時壓縮列距而非撐高卡片
@@ -1884,7 +1884,7 @@ function renderCatPieChart(data){
   let leaders='',labels='';
   meta.forEach(m=>{
     const right=Math.cos(m.mid)>=0;
-    const ex=right?175:65,tx=right?179:61;
+    const ex=right?177:63,tx=right?181:59;
     const p1x=cx+r*Math.cos(m.mid),p1y=cy+r*Math.sin(m.mid);
     const p2x=cx+(r+8)*Math.cos(m.mid),p2y=cy+(r+8)*Math.sin(m.mid);
     leaders+=`<polyline class="cp-ld" data-i="${m.i}" points="${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)} ${ex},${m.ly.toFixed(1)}" fill="none" stroke="${m.col}" stroke-width="0.7"/>`;
