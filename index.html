@@ -1381,11 +1381,20 @@ async function rfBuild(key){
   const t0=Date.now();
   try{
     const all=histEprDates().slice().sort();           // 升冪
-    const W=Math.max(3,RF_WINDOW|0);
+    const Wreq=Math.max(3,RF_WINDOW|0);
     if(!DB.length){RELEASE_FORECAST={ok:false,key,reason:'尚未上傳 EPR 報表'};return;}
-    if(all.length<W+2){RELEASE_FORECAST={ok:false,key,reason:'日報表只有 '+all.length+' 天，取樣視窗 '+W+' 天需至少 '+(W+2)+' 天'};return;}
+    // ★ 2026-07-22 Gordon：日報表天數不足時「無條件試跑、照樣呈現」，不再直接拒絕。
+    //   只有連 2 組日配對都湊不出來（< 3 天）才真的算不了 —— 日均銷量至少要兩次相鄰日相減。
+    if(all.length<3){RELEASE_FORECAST={ok:false,key,reason:'日報表只有 '+all.length+' 天，至少要 3 天才算得出日均銷量'};return;}
     const L=all.length-1;
-    const anchors=[7,14,21].map(b=>L-b).filter(a=>a>=W&&a>=1);
+    const W=Math.min(Wreq,L);                          // 視窗自動縮到現有天數
+    const clamped=W<Wreq;
+    // 回測基準日：天數夠 → L-7 / L-14 / L-21；不夠 → 退到 70%／50% 位置，至少留 2 天算日均、
+    //             至少留 1 天可觀測結果。仍湊不出來就沒有回測（k 一律 1，tooltip 會註明未校正）。
+    let anchors=[7,14,21].map(b=>L-b).filter(a=>a>=W&&a>=1);
+    if(!anchors.length){
+      anchors=[...new Set([Math.floor(L*0.7),Math.floor(L*0.5)])].filter(a=>a>=2&&a<L);
+    }
     const snapNeed=new Set([Math.max(0,L-W),L]);
     anchors.forEach(a=>{snapNeed.add(Math.max(0,a-W));snapNeed.add(a);});
     const from=Math.min.apply(null,[...snapNeed]);
@@ -1484,7 +1493,8 @@ async function rfBuild(key){
       let today=0;for(const sl of rows)if(sl.already)today++;
       agg[a]={today:today,Ts:Ts,colT:colT};
     });
-    RELEASE_FORECAST={ok:true,key:key,baseDate:all[L],nDates:all.length,W:W,
+    RELEASE_FORECAST={ok:true,key:key,baseDate:all[L],nDates:all.length,W:W,Wreq:Wreq,
+      clamped:clamped,lowConf:clamped||!anchors.length,
       anchors:anchors.map(a=>all[a]),byAisle:byAisle,agg:agg,bt:bt,ms:Date.now()-t0};
   }catch(e){
     console.warn('[儲位釋放預測] 建置失敗',e);
@@ -1497,13 +1507,18 @@ async function rfBuild(key){
 // 逐走道校正係數（依當前 N）
 function rfK(aisle,N){
   const F=RELEASE_FORECAST;const o=F&&F.bt&&F.bt[aisle];
-  if(!o)return {k:1,hit:null,sample:0};
-  const h=Math.max(1,Math.min(RF_MAX_H,N));
+  const top=Math.max(1,Math.min(RF_MAX_H,N));
+  if(!o)return {k:1,hit:null,sample:0,h:null};
+  // 日報表天數少時，N 日的回測結果根本觀測不到（pred/act 都是 0）。
+  // 往下找「最大的、樣本 ≥3 的可觀測天期」當校正依據 —— k 量的是日均銷量的系統性偏差，
+  // 大致與天期無關，用較短天期校正比完全不校正好；tooltip 會標明實際用了幾日。
+  let h=0;
+  for(let x=top;x>=1;x--){ if(o.pred[x]>=3){h=x;break;} }
+  if(!h)return {k:1,hit:null,sample:o.pred[top]||0,h:null};
   const p=o.pred[h],a=o.act[h];
-  if(p<3)return {k:1,hit:null,sample:p};
   const k=Math.max(0.5,Math.min(2,a/p));
   const hit=1-Math.abs(a-p)/Math.max(a,p,1);
-  return {k:k,hit:hit,sample:p};
+  return {k:k,hit:hit,sample:p,h:h};
 }
 // 升冪陣列中 ≤ x 的個數（二分搜尋）
 function rfCountLE(arr,x){let lo=0,hi=arr.length;while(lo<hi){const m=(lo+hi)>>1;if(arr[m]<=x)lo=m+1;else hi=m;}return lo;}
@@ -1516,7 +1531,7 @@ function rfStats(aisle){
   if(!a)return {today:0,futureRaw:0,future:0,cols:0,k:1,hit:null,sample:0};
   const fut=rfCountLE(a.Ts,N);
   const kk=rfK(aisle,N);
-  return {today:a.today,futureRaw:fut,future:Math.round(fut*kk.k),cols:rfCountLE(a.colT,N),k:kk.k,hit:kk.hit,sample:kk.sample};
+  return {today:a.today,futureRaw:fut,future:Math.round(fut*kk.k),cols:rfCountLE(a.colT,N),k:kk.k,hit:kk.hit,sample:kk.sample,kh:kk.h};
 }
 // 表格儲存格
 function rfCellHtml(prefix){
@@ -1527,17 +1542,19 @@ function rfCellHtml(prefix){
   if(!F.ok)return '<td class="num" style="padding:4px 5px;color:var(--text3);cursor:help" title="'+rfAttr(F.reason||'尚未建置')+'">—</td>';
   const st=rfStats(prefix);
   const far=RF_DAYS>14;
+  const low=!!F.lowConf;
   const tip=[
     '今日已可抽 '+num(st.today)+' 格（需到「儲位釋放」tab 抽出才真的空）',
-    RF_DAYS+' 日內新增 '+num(st.future)+' 格'+(st.k!==1?'（校正前 '+num(st.futureRaw)+'，k='+st.k.toFixed(2)+'）':'（未校正）'),
+    RF_DAYS+' 日內新增 '+num(st.future)+' 格'+(st.k!==1?'（校正前 '+num(st.futureRaw)+'，k='+st.k.toFixed(2)+(st.kh&&st.kh!==RF_DAYS?'，以 '+st.kh+' 日回測':'')+'）':'（未校正）'),
     '規劃可用 = 空儲位 + '+num(st.today+st.future)+' 格',
     '其中可成整欄 '+num(st.cols)+' 欄（該欄 4 層全空 → 才排得進一個主碼組）',
-    st.hit!=null?'回測命中率 '+pct(st.hit)+'（樣本 '+num(st.sample)+' 格）':'回測樣本不足（<3 格），未套用校正',
-    '取樣視窗 W='+F.W+' 日｜基準日 '+F.baseDate,
+    st.hit!=null?'回測命中率 '+pct(st.hit)+'（樣本 '+num(st.sample)+' 格'+(st.kh&&st.kh!==RF_DAYS?'，'+st.kh+' 日天期':'')+'）':'回測樣本不足（<3 格），未套用校正',
+    '取樣視窗 W='+F.W+' 日'+(F.clamped?'（設定 '+F.Wreq+' 日，但日報表只有 '+F.nDates+' 天 → 自動縮短）':'')+'｜基準日 '+F.baseDate,
+    low?'⚠ 日報表僅 '+F.nDates+' 天，日均銷量取樣期太短、回測樣本不足 → 數字僅供暫時參考，資料累積到 '+(F.Wreq+2)+' 天後會自動恢復正常精度':'',
     far?'⚠ 超過 14 日僅供趨勢參考：只有 '+F.nDates+' 天日報表、無去年同期':''
   ].filter(Boolean).join('\n');
-  const cls='num'+(!far&&st.future>0?' good':'');
-  return '<td class="'+cls+'" style="padding:4px 5px;cursor:help'+(far?';color:var(--text3);font-style:italic':'')+'" title="'+rfAttr(tip)+'">'+num(st.future)+'</td>';
+  const cls='num'+(low?' warn':(!far&&st.future>0?' good':''));
+  return '<td class="'+cls+'" style="padding:4px 5px;cursor:help'+(far?';color:var(--text3);font-style:italic':'')+'" title="'+rfAttr(tip)+'">'+num(st.future)+(low?'*':'')+'</td>';
 }
 // N（表頭）／W（統計列）編輯
 function editRfDays(g){
@@ -1569,8 +1586,12 @@ function rfRenderStatus(){
   if(!DB.length){el.textContent='—';el.style.color='var(--text3)';el.title='';return;}
   if(!F){el.textContent='待算';el.style.color='var(--text3)';el.title='';return;}
   if(!F.ok){el.textContent='無法建置';el.style.color='var(--red)';el.title=F.reason||'';return;}
-  el.textContent=F.baseDate+'（'+F.nDates+'天）';el.style.color='var(--green)';
-  el.title='基準日 '+F.baseDate+'\n可用日報表 '+F.nDates+' 天\n回測基準日：'+(F.anchors.length?F.anchors.join('、'):'無（歷史不足）')+'\n建置耗時 '+F.ms+' ms';
+  el.textContent=F.baseDate+'（'+F.nDates+'天'+(F.clamped?'，W→'+F.W:'')+'）'+(F.lowConf?' *':'');
+  el.style.color=F.lowConf?'var(--orange,#c07a2c)':'var(--green)';
+  el.title='基準日 '+F.baseDate+'\n可用日報表 '+F.nDates+' 天\n實際取樣視窗 W='+F.W+' 日'+(F.clamped?'（設定 '+F.Wreq+' 日，天數不足自動縮短）':'')
+    +'\n回測基準日：'+(F.anchors.length?F.anchors.join('、'):'無（歷史不足，k 一律 1）')
+    +(F.lowConf?'\n⚠ 低信心：數字後方標 * ，資料累積到 '+(F.Wreq+2)+' 天後自動恢復正常精度':'')
+    +'\n建置耗時 '+F.ms+' ms';
 }
 // 需要時建置（key 變了才重算：基準日 / W / DB 筆數）
 function rfEnsure(force){
