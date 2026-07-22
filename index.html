@@ -1394,7 +1394,7 @@ async function rfBuild(key){
     const cumSold=new Map(),cumAvail=new Map(),snaps={};
     const snapAt=[];                                    // 實際取到快照的 index（可能因缺日跳過）
     const nearestSnap=(idx)=>{let best=null;for(const i of snapAt){if(i<=idx&&(best===null||i>best))best=i;}return best!==null?snaps[best]:{sold:new Map(),avail:new Map()};};
-    let prevTot=null,mainSlots=null;
+    let prevTot=null,prevDate=null,mainSlots=null;
     const tracks=[];
     for(let i=from;i<=L;i++){
       let data=null;
@@ -1410,8 +1410,13 @@ async function rfBuild(key){
       }
       // ① 累計銷量（逐日配對）＋有效在架天數
       if(prevTot){day.forEach((v,code)=>{const pv=prevTot.get(code);if(pv!==undefined){const sold=pv-(v.st+v.pd);if(sold>0)cumSold.set(code,(cumSold.get(code)||0)+sold);}});}
-      day.forEach((v,code)=>{if(v.st>0)cumAvail.set(code,(cumAvail.get(code)||0)+1);});
-      const nt=new Map();day.forEach((v,code)=>nt.set(code,v.st+v.pd));prevTot=nt;
+      // ★ 缺日加權（2026-07-22 Gordon）：在架天數改加「與上一份報表的實際日曆天數差」。
+      //   休假沒上傳時，銷量橫跨整個缺口卻只 +1 天 → 日均被灌高、售罄天數被低估 → 太樂觀。
+      //   改加真實天數差後日均回到接近實際。只影響 st>0（有未來 T）的格；st=0 的格 T 不計、不受影響。
+      //   cap 45 防日期異常；floor 1 防重複/亂序日期。
+      const _gap=prevDate?Math.max(1,Math.min(45,Math.round((new Date(all[i])-new Date(prevDate))/86400000))):1;
+      day.forEach((v,code)=>{if(v.st>0)cumAvail.set(code,(cumAvail.get(code)||0)+_gap);});
+      const nt=new Map();day.forEach((v,code)=>nt.set(code,v.st+v.pd));prevTot=nt;prevDate=all[i];
       // ② 回測：既有 anchor 的追蹤格，看今天有沒有「新變成可抽」
       for(const tr of tracks){
         const off=i-tr.a;if(off<1||off>RF_MAX_H)continue;
