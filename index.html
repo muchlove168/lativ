@@ -6764,14 +6764,16 @@ function plannerRenderConfigUI(){
   plannerRenderStep(1,aisles,[],[],'',defaultMode);
   // ★ 掛載事件監聽: 任何 checkbox/radio/N 變更 → debounce 後重算所有 step 顯示數字
   const wrap=document.getElementById('pln-steps-wrap');
-  wrap.addEventListener('change',plannerHandleInternalBind);  // 內部整理: src/dst 互鎖 + 單選
-  wrap.addEventListener('change',plannerScheduleRefresh);
-  wrap.addEventListener('input',plannerMarkManualN);          // ★ 必須排在 refresh 之前（見下方註解）
-  wrap.addEventListener('input',plannerScheduleRefresh);
+  wrap.addEventListener('change',plannerHandleInternalBind);  // 內部整理: src/dst 互鎖 + 單選（UI 正確性，保留即時）
+  wrap.addEventListener('input',plannerMarkManualN);          // 標記 SKU數 為手動編輯（保留）
+  // ★2026-07-22 Gordon：不再對每個 change/input 自動重算（打字慢時會「搶先運算」）。
+  //   改為只在 SKU數 欄位按 ENTER 才確認並觸發重算（見 plannerHandleCommitKey）。
+  wrap.addEventListener('keydown',plannerHandleCommitKey);
   // ★ 初始套用挑選選項鎖定 (若預設已勾新品 src 則鎖死其他模式)
   const step1El=document.getElementById('pln-step-1');
   if(step1El&&typeof plannerUpdateSortModeLocks==='function')plannerUpdateSortModeLocks(step1El);
   plannerRefreshStepCounts();
+  plannerFocusN(1);                                // ★ 游標預設到 Step 1 的 SKU數
 }
 
 function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSortMode,defaultComplexity){
@@ -6836,6 +6838,7 @@ function plannerAddStep(){
   // 預設 source=第一個未被前步驟用過的, 但簡化: 預設全空, 讓使用者勾
   const defMode=aisles.length===1?'internal':'auto';
   plannerRenderStep(PLN_STEPS_COUNT,aisles,[],[],'',defMode);
+  plannerFocusN(PLN_STEPS_COUNT);                  // ★ 游標預設到新 step 的 SKU數
   plannerScheduleRefresh();
 }
 
@@ -6905,6 +6908,25 @@ let _plnRefreshTimer=null;
 function plannerScheduleRefresh(){
   if(_plnRefreshTimer)clearTimeout(_plnRefreshTimer);
   _plnRefreshTimer=setTimeout(()=>{_plnRefreshTimer=null;plannerRefreshStepCounts();},150);
+}
+
+// ★2026-07-22 Gordon：SKU數 欄位按 ENTER＝「這個 step 配置定案」→ 立即重算（不 debounce）。
+//   其餘欄位（來源/目的/挑選/複雜度）改完都不會自動算，一律等你到 SKU數 按 ENTER 才動。
+function plannerHandleCommitKey(e){
+  if(e.key!=='Enter')return;
+  const t=e.target;
+  if(!t||!t.dataset||t.dataset.grp!=='n')return;   // 只認 SKU數 欄位的 ENTER
+  e.preventDefault();
+  t.blur();                                        // 先觸發 change → 定案手動標記 / autofill 守門
+  if(_plnRefreshTimer){clearTimeout(_plnRefreshTimer);_plnRefreshTimer=null;}
+  plannerRefreshStepCounts();                      // 立即重算
+}
+// ★ 開始配置某 step 時，游標預設到該 step 的 SKU數（配合 ENTER 提交流程）
+function plannerFocusN(idx){
+  setTimeout(()=>{
+    const el=document.querySelector(`#pln-step-${idx} input[data-grp="n"]`);
+    if(el){try{el.focus();el.select();}catch(e){}}
+  },0);
 }
 
 // ═══ 內部整理 / 新品: src/dst 互鎖 + 單選 ═══
