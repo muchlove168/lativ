@@ -729,6 +729,21 @@ let RF_DAYS = 7, RF_WINDOW = 14;
 let RELEASE_FORECAST = null;   // 建置結果（不落地，重開頁背景重算 → 不汙染整包匯出）
 let RF_BUILDING = false;
 const RF_MAX_H = 30;           // 回測可評估的最大天期
+// ★ ②③ 持久逐走道校正（2026-07-22 Gordon）：把每天的真回測比值以 EWMA 滾進一個
+//   跨報表滾動仍保留的係數，越用越準、全自動。獨立 IDB key，不進 hist_epr 索引 →
+//   不影響銷售比對／歷史下載／備份日期選單；核心公式（N天內幾格售罄）完全不動。
+let RF_CAL = null;             // {ver, updated:'基準日', aisles:{[走道]:{K,n}}}
+const RF_CAL_KEY = 'rf_cal_v1';
+const RF_CAL_ALPHA = 0.3;      // EWMA 平滑係數（越大越跟最近、越小越穩）
+async function rfCalLoad(){
+  if(RF_CAL)return RF_CAL;
+  try{const c=await idbGet(RF_CAL_KEY);RF_CAL=(c&&c.aisles)?c:{ver:1,updated:'',aisles:{}};}
+  catch(e){RF_CAL={ver:1,updated:'',aisles:{}};}
+  return RF_CAL;
+}
+async function rfCalSave(){try{await idbPut(RF_CAL_KEY,RF_CAL);}catch(e){}}
+// 手動重置（console 呼叫）：rfResetCalibration()
+function rfResetCalibration(){RF_CAL={ver:1,updated:'',aisles:{}};rfCalSave().then(()=>{try{RELEASE_FORECAST=null;rfEnsure(true);}catch(e){}});console.log('[釋放校正] 已重置，將於下次建置重新累積');}
 function rfLoadPrefs(){try{const a=parseInt(localStorage.getItem('lativ_rf_days'));if(a>0)RF_DAYS=a;const b=parseInt(localStorage.getItem('lativ_rf_window'));if(b>=3)RF_WINDOW=b;}catch(e){}}
 function rfSavePrefs(){try{localStorage.setItem('lativ_rf_days',String(RF_DAYS));localStorage.setItem('lativ_rf_window',String(RF_WINDOW));}catch(e){}}
 
@@ -1494,6 +1509,24 @@ async function rfBuild(key){
     RELEASE_FORECAST={ok:true,key:key,baseDate:all[L],nDates:all.length,W:W,Wreq:Wreq,
       clamped:clamped,lowConf:clamped||!anchors.length,
       anchors:anchors.map(a=>all[a]),byAisle:byAisle,agg:agg,bt:bt,ms:Date.now()-t0};
+    // ★ ③ 每日回測 → 持久 EWMA 校正（每個新基準日只更新一次）
+    try{
+      await rfCalLoad();
+      if(RF_CAL.updated!==all[L]){
+        const topH=Math.min(RF_MAX_H,14);              // 14 日內才是可信的量化回測範圍
+        Object.keys(bt).forEach(a=>{
+          const o=bt[a];let h=0;
+          for(let x=topH;x>=1;x--){ if(o.pred[x]>=3){h=x;break;} }   // 樣本 <3 這條走道今天不更新
+          if(!h)return;
+          const r=Math.max(0.3,Math.min(3,o.act[h]/o.pred[h]));      // 這天的真回測比值
+          const c=RF_CAL.aisles[a]||(RF_CAL.aisles[a]={K:r,n:0});
+          c.K=(c.n===0)?r:Math.max(0.4,Math.min(2.5,RF_CAL_ALPHA*r+(1-RF_CAL_ALPHA)*c.K));
+          c.n++;
+        });
+        RF_CAL.updated=all[L];
+        await rfCalSave();
+      }
+    }catch(e){console.warn('[釋放校正] 更新失敗',e);}
   }catch(e){
     console.warn('[儲位釋放預測] 建置失敗',e);
     RELEASE_FORECAST={ok:false,key:key,reason:'建置失敗：'+(e&&e.message||e)};
@@ -1506,17 +1539,19 @@ async function rfBuild(key){
 function rfK(aisle,N){
   const F=RELEASE_FORECAST;const o=F&&F.bt&&F.bt[aisle];
   const top=Math.max(1,Math.min(RF_MAX_H,N));
-  if(!o)return {k:1,hit:null,sample:0,h:null};
-  // 日報表天數少時，N 日的回測結果根本觀測不到（pred/act 都是 0）。
-  // 往下找「最大的、樣本 ≥3 的可觀測天期」當校正依據 —— k 量的是日均銷量的系統性偏差，
-  // 大致與天期無關，用較短天期校正比完全不校正好；tooltip 會標明實際用了幾日。
-  let h=0;
-  for(let x=top;x>=1;x--){ if(o.pred[x]>=3){h=x;break;} }
-  if(!h)return {k:1,hit:null,sample:o.pred[top]||0,h:null};
-  const p=o.pred[h],a=o.act[h];
-  const k=Math.max(0.5,Math.min(2,a/p));
-  const hit=1-Math.abs(a-p)/Math.max(a,p,1);
-  return {k:k,hit:hit,sample:p,h:h};
+  // ── 現行 in-window k（當前報表窗內回測）──
+  let winK=1,hit=null,sample=0,hh=null;
+  if(o){
+    let h=0;
+    for(let x=top;x>=1;x--){ if(o.pred[x]>=3){h=x;break;} }
+    if(h){const p=o.pred[h],a=o.act[h];winK=Math.max(0.5,Math.min(2,a/p));hit=1-Math.abs(a-p)/Math.max(a,p,1);sample=p;hh=h;}
+    else sample=o.pred[top]||0;
+  }
+  // ── ③ 持久 EWMA 校正：信心加權平滑過渡（n 越多越信任持久 K；n=0 → 純現行）──
+  let k=winK;
+  const c=RF_CAL&&RF_CAL.aisles&&RF_CAL.aisles[aisle];
+  if(c&&c.n>0){const w=Math.min(1,c.n/5);k=w*c.K+(1-w)*winK;}
+  return {k:k,hit:hit,sample:sample,h:hh};
 }
 // 升冪陣列中 ≤ x 的個數（二分搜尋）
 function rfCountLE(arr,x){let lo=0,hi=arr.length;while(lo<hi){const m=(lo+hi)>>1;if(arr[m]<=x)lo=m+1;else hi=m;}return lo;}
