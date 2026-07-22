@@ -311,14 +311,7 @@
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 總可用儲位</span><span class="sku-stat-val" id="s-2f-avail">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 已用</span><span class="sku-stat-val" id="s-2f-used">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 空儲位</span><span class="sku-stat-val good" id="s-2f-empty">—</span></div>
-        <div class="sku-stat-cell" style="margin-left:auto" title="日均銷量的取樣視窗（天）。快賣完的 SKU 會斷碼，日均一律除以「該期間銷售庫存>0 的天數」而非視窗長度。改動會重算整份預測。">
-          <span class="sku-stat-label">釋放預測取樣</span>
-          <span class="sku-stat-val"><span id="rf-w" class="editable threshold-label" onclick="editRfWindow()" style="padding:0 3px;font-weight:700">14</span> 日</span>
-        </div>
-        <div class="sku-stat-cell">
-          <span class="sku-stat-label">預測基準</span><span class="sku-stat-val" id="rf-status" style="font-size:12px">—</span>
-        </div>
-        <div class="sku-stat-cell">
+        <div class="sku-stat-cell" style="margin-left:auto">
           <button class="toggle-btn" id="btn-show-hidden" onclick="toggleHiddenAisles()">👁 顯示停用走道</button>
         </div>
         <div class="sku-stat-cell">
@@ -1543,18 +1536,8 @@ function rfCellHtml(prefix){
   const st=rfStats(prefix);
   const far=RF_DAYS>14;
   const low=!!F.lowConf;
-  const tip=[
-    '今日已可抽 '+num(st.today)+' 格（需到「儲位釋放」tab 抽出才真的空）',
-    RF_DAYS+' 日內新增 '+num(st.future)+' 格'+(st.k!==1?'（校正前 '+num(st.futureRaw)+'，k='+st.k.toFixed(2)+(st.kh&&st.kh!==RF_DAYS?'，以 '+st.kh+' 日回測':'')+'）':'（未校正）'),
-    '規劃可用 = 空儲位 + '+num(st.today+st.future)+' 格',
-    '其中可成整欄 '+num(st.cols)+' 欄（該欄 4 層全空 → 才排得進一個主碼組）',
-    st.hit!=null?'回測命中率 '+pct(st.hit)+'（樣本 '+num(st.sample)+' 格'+(st.kh&&st.kh!==RF_DAYS?'，'+st.kh+' 日天期':'')+'）':'回測樣本不足（<3 格），未套用校正',
-    '取樣視窗 W='+F.W+' 日'+(F.clamped?'（設定 '+F.Wreq+' 日，但日報表只有 '+F.nDates+' 天 → 自動縮短）':'')+'｜基準日 '+F.baseDate,
-    low?'⚠ 日報表僅 '+F.nDates+' 天，日均銷量取樣期太短、回測樣本不足 → 數字僅供暫時參考，資料累積到 '+(F.Wreq+2)+' 天後會自動恢復正常精度':'',
-    far?'⚠ 超過 14 日僅供趨勢參考：只有 '+F.nDates+' 天日報表、無去年同期':''
-  ].filter(Boolean).join('\n');
   const cls='num'+(low?' warn':(!far&&st.future>0?' good':''));
-  return '<td class="'+cls+'" style="padding:4px 5px;cursor:help'+(far?';color:var(--text3);font-style:italic':'')+'" title="'+rfAttr(tip)+'">'+num(st.future)+(low?'*':'')+'</td>';
+  return '<td class="'+cls+'" style="padding:4px 5px'+(far?';color:var(--text3);font-style:italic':'')+'">'+num(st.future)+(low?'*':'')+'</td>';
 }
 // N（表頭）／W（統計列）編輯
 function editRfDays(g){
@@ -1562,7 +1545,7 @@ function editRfDays(g){
   const span=document.getElementById('rf-d-'+(g||'g1'))||document.getElementById('rf-d-g1')||document.getElementById('rf-d-g2')||document.getElementById('rf-d-g3');
   if(!span)return;
   const input=document.createElement('input');input.type='number';input.className='inline-edit';input.min='1';input.max=String(RF_MAX_H);input.value=RF_DAYS;
-  input.onblur=()=>{const v=parseInt(input.value)||RF_DAYS;RF_DAYS=Math.max(1,Math.min(RF_MAX_H,v));rfSavePrefs();renderSKUTables();};
+  input.onblur=()=>{const v=parseInt(input.value)||RF_DAYS;RF_DAYS=Math.max(1,Math.min(RF_MAX_H,v));span.textContent=RF_DAYS;rfSavePrefs();renderSKUTables();};
   input.onkeydown=e=>{if(e.key==='Enter')input.blur();};
   span.innerHTML='';span.appendChild(input);input.focus();input.select();
 }
