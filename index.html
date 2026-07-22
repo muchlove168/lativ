@@ -278,6 +278,7 @@
             <thead><tr>
               <th style="text-align:left !important">走道</th><th>可用儲位</th><th>已用</th><th>空儲位</th>
               <th>低庫存≤<span id="thr-g1" onclick="editThreshold('g1')" class="editable threshold-label" style="padding:0 2px;font-weight:700">3</span></th>
+              <th title="未來 N 天內預估會釋放的儲位數（不含今日已可抽）｜判定同「儲位釋放」tab：未到量&lt;10、未抓貨=0、銷售庫存=0，含當季及過季｜點數字可改天數">釋放≤<span id="rf-d-g1" onclick="editRfDays('g1')" class="editable threshold-label" style="padding:0 2px;font-weight:700">7</span>日</th>
               <th title="新品SKU數 ÷ 已用儲位（佔格視角）">新品SKU比</th>
             </tr></thead><tbody></tbody>
           </table>
@@ -287,6 +288,7 @@
             <thead><tr>
               <th style="text-align:left !important">走道</th><th>可用儲位</th><th>已用</th><th>空儲位</th>
               <th>低庫存≤<span id="thr-g2" onclick="editThreshold('g2')" class="editable threshold-label" style="padding:0 2px;font-weight:700">3</span></th>
+              <th title="未來 N 天內預估會釋放的儲位數（不含今日已可抽）｜判定同「儲位釋放」tab：未到量&lt;10、未抓貨=0、銷售庫存=0，含當季及過季｜點數字可改天數">釋放≤<span id="rf-d-g2" onclick="editRfDays('g2')" class="editable threshold-label" style="padding:0 2px;font-weight:700">7</span>日</th>
               <th title="新品SKU數 ÷ 已用儲位（佔格視角）">新品SKU比</th>
             </tr></thead><tbody></tbody>
           </table>
@@ -296,6 +298,7 @@
             <thead><tr>
               <th style="text-align:left !important">走道</th><th>可用儲位</th><th>已用</th><th>空儲位</th>
               <th>低庫存≤<span id="thr-g3" onclick="editThreshold('g3')" class="editable threshold-label" style="padding:0 2px;font-weight:700">3</span></th>
+              <th title="未來 N 天內預估會釋放的儲位數（不含今日已可抽）｜判定同「儲位釋放」tab：未到量&lt;10、未抓貨=0、銷售庫存=0，含當季及過季｜點數字可改天數">釋放≤<span id="rf-d-g3" onclick="editRfDays('g3')" class="editable threshold-label" style="padding:0 2px;font-weight:700">7</span>日</th>
               <th title="新品SKU數 ÷ 已用儲位（佔格視角）">新品SKU比</th>
             </tr></thead><tbody></tbody>
           </table>
@@ -308,7 +311,14 @@
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 總可用儲位</span><span class="sku-stat-val" id="s-2f-avail">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 已用</span><span class="sku-stat-val" id="s-2f-used">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 空儲位</span><span class="sku-stat-val good" id="s-2f-empty">—</span></div>
-        <div class="sku-stat-cell" style="margin-left:auto">
+        <div class="sku-stat-cell" style="margin-left:auto" title="日均銷量的取樣視窗（天）。快賣完的 SKU 會斷碼，日均一律除以「該期間銷售庫存>0 的天數」而非視窗長度。改動會重算整份預測。">
+          <span class="sku-stat-label">釋放預測取樣</span>
+          <span class="sku-stat-val"><span id="rf-w" class="editable threshold-label" onclick="editRfWindow()" style="padding:0 3px;font-weight:700">14</span> 日</span>
+        </div>
+        <div class="sku-stat-cell">
+          <span class="sku-stat-label">預測基準</span><span class="sku-stat-val" id="rf-status" style="font-size:12px">—</span>
+        </div>
+        <div class="sku-stat-cell">
           <button class="toggle-btn" id="btn-show-hidden" onclick="toggleHiddenAisles()">👁 顯示停用走道</button>
         </div>
         <div class="sku-stat-cell">
@@ -721,6 +731,14 @@ let showHiddenAisles = false;
 const DIRTY = { sku:true, sales:true, fw26:true, db:true, xx:true, reloc:true };
 let THRESHOLDS = { g1:3, g2:3, g3:3, g4:3 };
 
+// ★ 2026-07-22 儲位釋放預測（Gordon）：N=預測天數（表頭可編輯）、W=日均取樣視窗（統計列可編輯）
+let RF_DAYS = 7, RF_WINDOW = 14;
+let RELEASE_FORECAST = null;   // 建置結果（不落地，重開頁背景重算 → 不汙染整包匯出）
+let RF_BUILDING = false;
+const RF_MAX_H = 30;           // 回測可評估的最大天期
+function rfLoadPrefs(){try{const a=parseInt(localStorage.getItem('lativ_rf_days'));if(a>0)RF_DAYS=a;const b=parseInt(localStorage.getItem('lativ_rf_window'));if(b>=3)RF_WINDOW=b;}catch(e){}}
+function rfSavePrefs(){try{localStorage.setItem('lativ_rf_days',String(RF_DAYS));localStorage.setItem('lativ_rf_window',String(RF_WINDOW));}catch(e){}}
+
 let XX_DB = [];
 let ZZ_DB = [];
 let XX_CAPACITY = {};
@@ -1086,6 +1104,7 @@ async function clearAllData(){
 
 function renderAll(){
   renderSKUTables();
+  try{rfEnsure();}catch(e){}
   renderFW26Stats();renderFW26CatTable();renderFW26Table();
   try{refreshSidePanelCharts();}catch(e){}
   if(!DB.length)return;
@@ -1308,6 +1327,260 @@ function buildCache(){
 // ============================================================
 // SKU TABLE RENDERING (unchanged)
 // ============================================================
+
+// ════════════════════════════════════════════════════════════
+// ★ 儲位釋放預測（2026-07-22 Gordon）
+//   需求：排新品要規畫未來一個月，各儲區環環相扣 → 必須先知道「各走道未來 N 天會釋放幾格」。
+//   判定邏輯＝完全沿用「儲位釋放」tab 的 getXXStatus()：
+//       未到量 < 10 且 未抓貨 = 0 且 銷售庫存 = 0；
+//       季別 gate：下季新品→不抽；當季→抽(當季)；過季→抽。
+//       ★ Gordon 指定「包含當季及過季」→ 兩者都算釋放。
+//   預測＝把「銷售庫存 = 0」從今天推到 N 天後：
+//       日均銷量 v = Σ max(0, Δ(銷售庫存+未到量)) ÷ 有效在架天數
+//                    ├ 分子沿用銷售比對 / rollup 同一條逐日配對公式
+//                    └ 分母是「該期間銷售庫存 > 0 的天數」，不是視窗長度 W。
+//                      快賣完的 SKU 最後幾天常斷碼、日銷被壓低，除以 W 會低估速度、
+//                      把售罄日推太後面 → 必須除以有效在架天數。
+//       預估售罄天數 T = 今日銷售庫存 ÷ v      （v = 0 → T = ∞：呆貨不會自然釋放，
+//                                                它是靠過季移倉手動清掉的，模型不該假裝預測得到）
+//       釋放判定：未到量 < 10 且 季別 ≠ 下季新品 且 0 < T ≤ N
+//   ★ Gordon 決策（2026-07-22）：
+//       ① W 可調，預設 14 天（統計列點一下就能改）
+//       ② 回測校正係數 k 自動套用到顯示值
+//       ③「N日釋放」不含「今日已可抽」，只看未來新增；今日數放 tooltip
+//   回測：以 L-7 / L-14 / L-21 為基準日各跑一次。同一份 T 陣列可一次評估 h=1..30 全部天期
+//         （T ≤ h 就是 h 天內的預測），實際值則在後續日期逐日偵測「新變成可抽」的格子。
+//         逐走道 k(N) = Σ實際 ÷ Σ預測，clamp 0.5~2.0；預測樣本 < 3 筆 → k = 1 不校正。
+//   已知限制（已與 Gordon 說明）：
+//     · 未抓貨 = 0 無法預測（當日訂單快照）→ 預測時忽略此條件，會略微高估。
+//     · 「可釋放」≠「已變空」：要到儲位釋放 tab 抽出搬到 XX/TX 才真的空 → 這欄是「可規劃量」。
+//     · 只有 40 天日報表、無去年同期 → N > 14 的數字改灰並標註「趨勢參考」。
+//   效能：上傳 ERP 報表時算一次，把每格的 T 算好；改 N 只是重數「T ≤ N 有幾筆」→ 瞬間。
+//         不寫入 IDB（避免月底整包匯出檔變大），重開頁在背景重算。
+// ════════════════════════════════════════════════════════════
+const RF_SLOT_RE=/^([A-Z]\d{2})-(\d{3})-(\d)$/;   // C02-136-1；XX-011 / TX-011 不符 → 自動排除
+function rfSlotAisle(slot){const m=RF_SLOT_RE.exec(String(slot||'').trim());return m?m[1]:'';}
+function rfYield(){return new Promise(r=>setTimeout(r,0));}
+function rfAttr(t){return String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');}
+// 下季新品（如當季 26SS 時的 26FW）→ 永不釋放
+function rfIsNextSeason(code){
+  const cur=(CACHE&&CACHE.newSeason&&CACHE.newSeason.label)||'26SS';
+  const ci=SEASON_ORDER.findIndex(x=>x.label===cur);
+  const si=SEASON_ORDER.findIndex(x=>x.label===getSeasonFromCode(code));
+  return si>=0&&ci>=0&&si<ci;
+}
+// getXXStatus 的數值版（不需要整列 DB row）：true = 抽 或 抽(當季)
+function rfPullable(code,stock,pend,ungrab){
+  if(rfIsNextSeason(code))return false;
+  return (pend||0)<10 && (ungrab||0)===0 && (stock||0)===0;
+}
+
+async function rfBuild(key){
+  RF_BUILDING=true;
+  rfRenderStatus();
+  const t0=Date.now();
+  try{
+    const all=histEprDates().slice().sort();           // 升冪
+    const W=Math.max(3,RF_WINDOW|0);
+    if(!DB.length){RELEASE_FORECAST={ok:false,key,reason:'尚未上傳 EPR 報表'};return;}
+    if(all.length<W+2){RELEASE_FORECAST={ok:false,key,reason:'日報表只有 '+all.length+' 天，取樣視窗 '+W+' 天需至少 '+(W+2)+' 天'};return;}
+    const L=all.length-1;
+    const anchors=[7,14,21].map(b=>L-b).filter(a=>a>=W&&a>=1);
+    const snapNeed=new Set([Math.max(0,L-W),L]);
+    anchors.forEach(a=>{snapNeed.add(Math.max(0,a-W));snapNeed.add(a);});
+    const from=Math.min.apply(null,[...snapNeed]);
+    const cumSold=new Map(),cumAvail=new Map(),snaps={};
+    const snapAt=[];                                    // 實際取到快照的 index（可能因缺日跳過）
+    const nearestSnap=(idx)=>{let best=null;for(const i of snapAt){if(i<=idx&&(best===null||i>best))best=i;}return best!==null?snaps[best]:{sold:new Map(),avail:new Map()};};
+    let prevTot=null,mainSlots=null;
+    const tracks=[];
+    for(let i=from;i<=L;i++){
+      let data=null;
+      try{data=await idbGet(HIST_EPR_PREFIX+all[i]);}catch(e){}
+      if(!data||!data.rows||!data.rows.length)continue;  // 缺日 → 跳過（等於把兩天併一天算，日均仍是「每有效在架日」單位）
+      const ix={};(data.cols||[]).forEach((c,k)=>{ix[c]=k;});
+      const iCode=ix['商品編號'],iSt=ix['銷售庫存'],iPd=ix['未到量'],iUg=ix['未抓貨'],iSlot=ix['儲位'];
+      if(iCode===undefined||iSt===undefined)continue;
+      const day=new Map();
+      for(const a of data.rows){
+        const code=String(a[iCode]||'').trim();if(!code)continue;
+        day.set(code,{st:+a[iSt]||0,pd:iPd!==undefined?(+a[iPd]||0):0,ug:iUg!==undefined?(+a[iUg]||0):0,slot:iSlot!==undefined?String(a[iSlot]||'').trim():''});
+      }
+      // ① 累計銷量（逐日配對）＋有效在架天數
+      if(prevTot){day.forEach((v,code)=>{const pv=prevTot.get(code);if(pv!==undefined){const sold=pv-(v.st+v.pd);if(sold>0)cumSold.set(code,(cumSold.get(code)||0)+sold);}});}
+      day.forEach((v,code)=>{if(v.st>0)cumAvail.set(code,(cumAvail.get(code)||0)+1);});
+      const nt=new Map();day.forEach((v,code)=>nt.set(code,v.st+v.pd));prevTot=nt;
+      // ② 回測：既有 anchor 的追蹤格，看今天有沒有「新變成可抽」
+      for(const tr of tracks){
+        const off=i-tr.a;if(off<1||off>RF_MAX_H)continue;
+        for(const sl of tr.slots){
+          if(sl.already||sl.hitOff)continue;
+          const v=day.get(sl.code);
+          if(!v){sl.hitOff=off;continue;}                // 從報表消失 = 已下架
+          if(rfPullable(sl.code,v.st,v.pd,v.ug))sl.hitOff=off;
+        }
+      }
+      // ③ 需要的快照
+      if(snapNeed.has(i)){snaps[i]={sold:new Map(cumSold),avail:new Map(cumAvail)};snapAt.push(i);}
+      // ④ anchor（含主預測日 L）→ 算每格的 T
+      if(i===L||anchors.indexOf(i)>=0){
+        const s0=nearestSnap(i-W);
+        const slots=[];
+        day.forEach((v,code)=>{
+          const aisle=rfSlotAisle(v.slot);if(!aisle)return;
+          const already=rfPullable(code,v.st,v.pd,v.ug);
+          const sold=(cumSold.get(code)||0)-(s0.sold.get(code)||0);
+          const av=(cumAvail.get(code)||0)-(s0.avail.get(code)||0);
+          const vel=av>0?sold/av:0;
+          let T=Infinity;
+          if(!already&&(v.pd||0)<10&&!rfIsNextSeason(code)&&vel>0)T=v.st/vel;
+          slots.push({code:code,slot:v.slot,aisle:aisle,already:already,T:T,vel:vel,st:v.st});
+        });
+        if(i===L)mainSlots=slots;
+        if(anchors.indexOf(i)>=0)tracks.push({a:i,slots:slots});
+      }
+      await rfYield();
+    }
+    if(!mainSlots){RELEASE_FORECAST={ok:false,key,reason:'讀不到最新日報表'};return;}
+    // ── 回測彙總：逐走道 × 逐天期 的 預測數 / 實際數（只統計可觀測的天期）──
+    const bt={};
+    for(const tr of tracks){
+      const maxH=Math.min(RF_MAX_H,L-tr.a);
+      for(const sl of tr.slots){
+        if(sl.already)continue;
+        const o=bt[sl.aisle]||(bt[sl.aisle]={pred:new Array(RF_MAX_H+1).fill(0),act:new Array(RF_MAX_H+1).fill(0)});
+        for(let h=1;h<=maxH;h++){
+          if(sl.T<=h)o.pred[h]++;
+          if(sl.hitOff&&sl.hitOff<=h)o.act[h]++;
+        }
+      }
+    }
+    const byAisle={};
+    for(const sl of mainSlots){(byAisle[sl.aisle]||(byAisle[sl.aisle]=[])).push(sl);}
+    // ★ 預彙總：rfStats 每次渲染都會被呼叫（60 條走道 × 2 次），若每次重掃全部儲位，
+    //   25,000 SKU 規模下光是改一次 N 就要幾百 ms。改成 build 期先算好兩個排序陣列，
+    //   之後查詢只是二分搜尋：
+    //     Ts   = 各格的預估售罄天數 T（升冪；已可抽與 T=∞ 不入列）→ N 日新增 = 二分搜尋 T ≤ N 的個數
+    //     colT = 各「欄」變成 4 層全空所需的天數（＝該欄非已可抽格的 T 最大值；
+    //            全部已可抽 → 0；有呆貨/未到量卡住 → ∞ 不入列）→ 可成整欄 = 二分搜尋
+    const agg={};
+    Object.keys(byAisle).forEach(a=>{
+      const rows=byAisle[a];const Ts=[];const occ={},colMax={},colAll={};
+      for(const sl of rows){
+        const col=sl.slot.substring(0,7);
+        occ[col]=(occ[col]||0)+1;
+        if(sl.already){if(colAll[col]===undefined)colAll[col]=true;continue;}
+        colAll[col]=false;
+        if(isFinite(sl.T)){Ts.push(sl.T);colMax[col]=Math.max(colMax[col]||0,sl.T);}
+        else colMax[col]=Infinity;
+      }
+      const colT=[];
+      Object.keys(occ).forEach(c=>{
+        if(colAll[c]===true){colT.push(0);return;}          // 整欄都已可抽 → 現在就是整欄
+        const mx=colMax[c];
+        if(mx!==undefined&&isFinite(mx))colT.push(mx);       // 該欄最慢的一格釋放日 = 整欄成形日
+      });
+      Ts.sort((x,y)=>x-y);colT.sort((x,y)=>x-y);
+      let today=0;for(const sl of rows)if(sl.already)today++;
+      agg[a]={today:today,Ts:Ts,colT:colT};
+    });
+    RELEASE_FORECAST={ok:true,key:key,baseDate:all[L],nDates:all.length,W:W,
+      anchors:anchors.map(a=>all[a]),byAisle:byAisle,agg:agg,bt:bt,ms:Date.now()-t0};
+  }catch(e){
+    console.warn('[儲位釋放預測] 建置失敗',e);
+    RELEASE_FORECAST={ok:false,key:key,reason:'建置失敗：'+(e&&e.message||e)};
+  }finally{
+    RF_BUILDING=false;
+  }
+}
+
+// 逐走道校正係數（依當前 N）
+function rfK(aisle,N){
+  const F=RELEASE_FORECAST;const o=F&&F.bt&&F.bt[aisle];
+  if(!o)return {k:1,hit:null,sample:0};
+  const h=Math.max(1,Math.min(RF_MAX_H,N));
+  const p=o.pred[h],a=o.act[h];
+  if(p<3)return {k:1,hit:null,sample:p};
+  const k=Math.max(0.5,Math.min(2,a/p));
+  const hit=1-Math.abs(a-p)/Math.max(a,p,1);
+  return {k:k,hit:hit,sample:p};
+}
+// 升冪陣列中 ≤ x 的個數（二分搜尋）
+function rfCountLE(arr,x){let lo=0,hi=arr.length;while(lo<hi){const m=(lo+hi)>>1;if(arr[m]<=x)lo=m+1;else hi=m;}return lo;}
+// 逐走道統計（今日已可抽 / N 日新增 / 可成整欄）
+function rfStats(aisle){
+  const F=RELEASE_FORECAST;
+  if(!F||!F.ok)return null;
+  const N=Math.max(1,RF_DAYS|0);
+  const a=F.agg&&F.agg[aisle];
+  if(!a)return {today:0,futureRaw:0,future:0,cols:0,k:1,hit:null,sample:0};
+  const fut=rfCountLE(a.Ts,N);
+  const kk=rfK(aisle,N);
+  return {today:a.today,futureRaw:fut,future:Math.round(fut*kk.k),cols:rfCountLE(a.colT,N),k:kk.k,hit:kk.hit,sample:kk.sample};
+}
+// 表格儲存格
+function rfCellHtml(prefix){
+  const pad='style="padding:4px 5px"';
+  if(!DB.length)return '<td class="num" '+pad+'>—</td>';
+  const F=RELEASE_FORECAST;
+  if(!F)return '<td class="num" style="padding:4px 5px;color:var(--text3)" title="計算中…">…</td>';
+  if(!F.ok)return '<td class="num" style="padding:4px 5px;color:var(--text3);cursor:help" title="'+rfAttr(F.reason||'尚未建置')+'">—</td>';
+  const st=rfStats(prefix);
+  const far=RF_DAYS>14;
+  const tip=[
+    '今日已可抽 '+num(st.today)+' 格（需到「儲位釋放」tab 抽出才真的空）',
+    RF_DAYS+' 日內新增 '+num(st.future)+' 格'+(st.k!==1?'（校正前 '+num(st.futureRaw)+'，k='+st.k.toFixed(2)+'）':'（未校正）'),
+    '規劃可用 = 空儲位 + '+num(st.today+st.future)+' 格',
+    '其中可成整欄 '+num(st.cols)+' 欄（該欄 4 層全空 → 才排得進一個主碼組）',
+    st.hit!=null?'回測命中率 '+pct(st.hit)+'（樣本 '+num(st.sample)+' 格）':'回測樣本不足（<3 格），未套用校正',
+    '取樣視窗 W='+F.W+' 日｜基準日 '+F.baseDate,
+    far?'⚠ 超過 14 日僅供趨勢參考：只有 '+F.nDates+' 天日報表、無去年同期':''
+  ].filter(Boolean).join('\n');
+  const cls='num'+(!far&&st.future>0?' good':'');
+  return '<td class="'+cls+'" style="padding:4px 5px;cursor:help'+(far?';color:var(--text3);font-style:italic':'')+'" title="'+rfAttr(tip)+'">'+num(st.future)+'</td>';
+}
+// N（表頭）／W（統計列）編輯
+function editRfDays(g){
+  // ★ 點哪張表就在哪張表就地編輯（三張表共用同一個 N，blur 後一起重繪）
+  const span=document.getElementById('rf-d-'+(g||'g1'))||document.getElementById('rf-d-g1')||document.getElementById('rf-d-g2')||document.getElementById('rf-d-g3');
+  if(!span)return;
+  const input=document.createElement('input');input.type='number';input.className='inline-edit';input.min='1';input.max=String(RF_MAX_H);input.value=RF_DAYS;
+  input.onblur=()=>{const v=parseInt(input.value)||RF_DAYS;RF_DAYS=Math.max(1,Math.min(RF_MAX_H,v));rfSavePrefs();renderSKUTables();};
+  input.onkeydown=e=>{if(e.key==='Enter')input.blur();};
+  span.innerHTML='';span.appendChild(input);input.focus();input.select();
+}
+function editRfWindow(){
+  const span=document.getElementById('rf-w');if(!span)return;
+  const input=document.createElement('input');input.type='number';input.className='inline-edit';input.min='3';input.max='40';input.value=RF_WINDOW;
+  input.onblur=()=>{
+    const v=parseInt(input.value)||RF_WINDOW;const nw=Math.max(3,Math.min(40,v));
+    span.textContent=nw;
+    if(nw!==RF_WINDOW){RF_WINDOW=nw;rfSavePrefs();RELEASE_FORECAST=null;renderSKUTables();rfEnsure(true);}
+    else{rfSavePrefs();renderSKUTables();}
+  };
+  input.onkeydown=e=>{if(e.key==='Enter')input.blur();};
+  span.innerHTML='';span.appendChild(input);input.focus();input.select();
+}
+function rfRenderStatus(){
+  const el=document.getElementById('rf-status');if(!el)return;
+  const w=document.getElementById('rf-w');if(w&&!w.querySelector('input'))w.textContent=RF_WINDOW;
+  const F=RELEASE_FORECAST;
+  if(RF_BUILDING){el.textContent='計算中…';el.style.color='var(--text3)';el.title='正在讀取日報表計算每個 SKU 的日均銷量';return;}
+  if(!DB.length){el.textContent='—';el.style.color='var(--text3)';el.title='';return;}
+  if(!F){el.textContent='待算';el.style.color='var(--text3)';el.title='';return;}
+  if(!F.ok){el.textContent='無法建置';el.style.color='var(--red)';el.title=F.reason||'';return;}
+  el.textContent=F.baseDate+'（'+F.nDates+'天）';el.style.color='var(--green)';
+  el.title='基準日 '+F.baseDate+'\n可用日報表 '+F.nDates+' 天\n回測基準日：'+(F.anchors.length?F.anchors.join('、'):'無（歷史不足）')+'\n建置耗時 '+F.ms+' ms';
+}
+// 需要時建置（key 變了才重算：基準日 / W / DB 筆數）
+function rfEnsure(force){
+  const dates=histEprDates();
+  const key=(dates[0]||'')+'|'+RF_WINDOW+'|'+DB.length;
+  if(RF_BUILDING)return;
+  if(!force&&RELEASE_FORECAST&&RELEASE_FORECAST.key===key){rfRenderStatus();return;}
+  rfBuild(key).then(()=>{try{renderSKUTables();}catch(e){}rfRenderStatus();});
+}
+
 // ★ 標題 tooltip helper：顯示各區小計（按 zoneOrder 順序）
 function setHeaderTooltips(tableId,zoneTotals,zoneOrder,threshold){
   const headRow=document.querySelector('#'+tableId+' thead tr');
@@ -1318,7 +1591,14 @@ function setHeaderTooltips(tableId,zoneTotals,zoneOrder,threshold){
   headRow.cells[2].title=hasData?fmt('used','已用'):'';
   headRow.cells[3].title=hasData?fmt('empty','空儲位'):'';
   headRow.cells[4].title=hasData?fmt('low','低庫存(≤'+threshold+')'):'';
-  for(let i=1;i<=4;i++)headRow.cells[i].style.cursor='help';
+  if(headRow.cells.length>=7){
+    const F=RELEASE_FORECAST;
+    headRow.cells[5].title=hasData?((F&&F.ok)?fmt('rel',RF_DAYS+'日釋放'):'尚未建置預測'):'';
+    // 表頭天數 span 與 RF_DAYS 同步（點擊編輯後其他兩張表也要跟著變）
+    const sp=headRow.cells[5].querySelector('span');
+    if(sp&&!sp.querySelector('input'))sp.textContent=RF_DAYS;
+  }
+  for(let i=1;i<=5;i++)if(headRow.cells[i])headRow.cells[i].style.cursor='help';
 }
 
 // ★ 查某 zone 的當前空儲位（掃所有 4 個 group）
@@ -1345,8 +1625,8 @@ function renderMergedGroup(tableId,groupId,zoneLetters){
     const aisles=AISLE_CONFIG[groupId].filter(a=>a.走道.startsWith(zoneLetter)).sort((a,b)=>parseInt(b.走道.replace(/\D/g,''))-parseInt(a.走道.replace(/\D/g,'')));
     const visibleAisles=aisles.filter(a=>{const used=DB.length>0?countByAisle(a.走道):0;return!(a.可用===0&&used===0&&!showHiddenAisles);});
     if(!visibleAisles.length)return;
-    const sepTr=document.createElement('tr');sepTr.className='sku-zone-sep';sepTr.innerHTML='<td colspan="6" style="text-align:center !important">'+zoneLetter+' 區</td>';tbody.appendChild(sepTr);
-    let zAvail=0,zUsed=0,zEmpty=0,zLow=0;
+    const sepTr=document.createElement('tr');sepTr.className='sku-zone-sep';sepTr.innerHTML='<td colspan="7" style="text-align:center !important">'+zoneLetter+' 區</td>';tbody.appendChild(sepTr);
+    let zAvail=0,zUsed=0,zEmpty=0,zLow=0,zRel=0;
     aisles.forEach(row=>{
       const prefix=row['走道'],avail=row['可用'];
       const used=DB.length>0?countByAisle(prefix):0;const empty=avail-used;
@@ -1355,17 +1635,18 @@ function renderMergedGroup(tableId,groupId,zoneLetters){
       const newRatio=used>0?newSKU/used:0;const isHidden=(avail===0&&used===0);
       if(isHidden&&!showHiddenAisles)return;
       totalAvail+=avail;totalUsed+=used;
-      zAvail+=avail;zUsed+=used;zEmpty+=empty;zLow+=lowStock;
+      const _rfSt=(DB.length>0&&RELEASE_FORECAST&&RELEASE_FORECAST.ok)?rfStats(prefix):null;
+      zAvail+=avail;zUsed+=used;zEmpty+=empty;zLow+=lowStock;zRel+=_rfSt?_rfSt.future:0;
       const emptyColor=empty<0?'bad':empty<10?'warn':'good';const lowClass=lowStock>0?'warn':'';
       // avail=0 但有 SKU（空儲位為負）→ 整列反色警示
       const needsConfig=avail===0&&used>0;
       const tr=document.createElement('tr');
       if(needsConfig) tr.style.cssText='background:#c0392b;color:#fff;font-weight:700';
       else if(isHidden) tr.style.cssText='opacity:0.35;background:#f8f5f0';
-      tr.innerHTML='<td style="text-align:left !important;font-weight:500;padding:4px 5px">'+prefix+'</td>'+'<td class="num editable" style="padding:4px 5px" ondblclick="editAvail(\''+groupId+'\',\''+prefix+'\',this)">'+num(avail)+'</td>'+'<td class="num" style="padding:4px 5px">'+(DB.length>0?num(used):'—')+'</td>'+'<td class="num" style="padding:4px 5px;'+(empty<0?'color:'+(needsConfig?'#ffdddd':'var(--red)'):'')+'\">'+(DB.length>0?num(empty):'—')+'</td>'+'<td class="num '+lowClass+'" style="padding:4px 5px">'+(DB.length>0?num(lowStock):'—')+'</td>'+'<td class="pct" style="padding:4px 5px">'+(DB.length>0?(used>0?pct(newRatio):'0.0%'):'—')+'</td>';
+      tr.innerHTML='<td style="text-align:left !important;font-weight:500;padding:4px 5px">'+prefix+'</td>'+'<td class="num editable" style="padding:4px 5px" ondblclick="editAvail(\''+groupId+'\',\''+prefix+'\',this)">'+num(avail)+'</td>'+'<td class="num" style="padding:4px 5px">'+(DB.length>0?num(used):'—')+'</td>'+'<td class="num" style="padding:4px 5px;'+(empty<0?'color:'+(needsConfig?'#ffdddd':'var(--red)'):'')+'\">'+(DB.length>0?num(empty):'—')+'</td>'+'<td class="num '+lowClass+'" style="padding:4px 5px">'+(DB.length>0?num(lowStock):'—')+'</td>'+rfCellHtml(prefix)+'<td class="pct" style="padding:4px 5px">'+(DB.length>0?(used>0?pct(newRatio):'0.0%'):'—')+'</td>';
       tbody.appendChild(tr);
     });
-    zoneTotals[zoneLetter]={avail:zAvail,used:zUsed,empty:zEmpty,low:zLow};
+    zoneTotals[zoneLetter]={avail:zAvail,used:zUsed,empty:zEmpty,low:zLow,rel:zRel};
   });
   return{avail:totalAvail,used:totalUsed,zoneTotals:zoneTotals};
 }
@@ -1384,26 +1665,28 @@ function renderSKUTables(){
     const lAisles=AISLE_CONFIG['g4'].filter(a=>a.走道.startsWith('L')).sort((a,b)=>parseInt(b.走道.replace(/\D/g,''))-parseInt(a.走道.replace(/\D/g,'')));
     const lVisible=lAisles.filter(a=>{const used=DB.length>0?countByAisle(a.走道):0;return!(a.可用===0&&used===0&&!showHiddenAisles);});
     if(lVisible.length){
-      const sepTr=document.createElement('tr');sepTr.className='sku-zone-sep';sepTr.innerHTML='<td colspan="6" style="text-align:center !important">L 區</td>';g34tbody.appendChild(sepTr);
-      let lAvail=0,lUsed=0,lEmpty=0,lLow=0;
+      const sepTr=document.createElement('tr');sepTr.className='sku-zone-sep';sepTr.innerHTML='<td colspan="7" style="text-align:center !important">L 區</td>';g34tbody.appendChild(sepTr);
+      let lAvail=0,lUsed=0,lEmpty=0,lLow=0,lRel=0;
       lAisles.forEach(row=>{
         const prefix=row['走道'],avail=row['可用'];const used=DB.length>0?countByAisle(prefix):0;const empty=avail-used;
         const lowStock=DB.length>0?countLowStock(prefix,thr4):0;const newSKU=DB.length>0?count26FWByAisle(prefix):0;const newRatio=used>0?newSKU/used:0;const isHidden=(avail===0&&used===0);
         if(isHidden&&!showHiddenAisles)return;const emptyColor=empty<0?'bad':empty<10?'warn':'good';const lowClass=lowStock>0?'warn':'';
         const needsConfig=avail===0&&used>0;
-        lAvail+=avail;lUsed+=used;lEmpty+=empty;lLow+=lowStock;
+        const _rfStL=(DB.length>0&&RELEASE_FORECAST&&RELEASE_FORECAST.ok)?rfStats(prefix):null;
+        lAvail+=avail;lUsed+=used;lEmpty+=empty;lLow+=lowStock;lRel+=_rfStL?_rfStL.future:0;
         const tr=document.createElement('tr');
         if(needsConfig) tr.style.cssText='background:#c0392b;color:#fff;font-weight:700';
         else if(isHidden) tr.style.cssText='opacity:0.35;background:#f8f5f0';
-        tr.innerHTML='<td style="text-align:left !important;font-weight:500;padding:4px 5px">'+prefix+'</td>'+'<td class="num editable" style="padding:4px 5px" ondblclick="editAvail(\'g4\',\''+prefix+'\',this)">'+num(avail)+'</td>'+'<td class="num" style="padding:4px 5px">'+(DB.length>0?num(used):'—')+'</td>'+'<td class="num" style="padding:4px 5px;'+(empty<0?'color:'+(needsConfig?'#ffdddd':'var(--red)'):'')+'\">'+(DB.length>0?num(empty):'—')+'</td>'+'<td class="num '+lowClass+'" style="padding:4px 5px">'+(DB.length>0?num(lowStock):'—')+'</td>'+'<td class="pct" style="padding:4px 5px">'+(DB.length>0?(used>0?pct(newRatio):'0.0%'):'—')+'</td>';
+        tr.innerHTML='<td style="text-align:left !important;font-weight:500;padding:4px 5px">'+prefix+'</td>'+'<td class="num editable" style="padding:4px 5px" ondblclick="editAvail(\'g4\',\''+prefix+'\',this)">'+num(avail)+'</td>'+'<td class="num" style="padding:4px 5px">'+(DB.length>0?num(used):'—')+'</td>'+'<td class="num" style="padding:4px 5px;'+(empty<0?'color:'+(needsConfig?'#ffdddd':'var(--red)'):'')+'\">'+(DB.length>0?num(empty):'—')+'</td>'+'<td class="num '+lowClass+'" style="padding:4px 5px">'+(DB.length>0?num(lowStock):'—')+'</td>'+rfCellHtml(prefix)+'<td class="pct" style="padding:4px 5px">'+(DB.length>0?(used>0?pct(newRatio):'0.0%'):'—')+'</td>';
         g34tbody.appendChild(tr);
       });
-      r3.zoneTotals['L']={avail:lAvail,used:lUsed,empty:lEmpty,low:lLow};
+      r3.zoneTotals['L']={avail:lAvail,used:lUsed,empty:lEmpty,low:lLow,rel:lRel};
     }
   }
   const z34=[...z3,...zoneLettersForGroup('g4',['L'])];
   setHeaderTooltips('tbl-g34-merged',r3.zoneTotals,z34,THRESHOLDS['g3']);
   renderSKUStats();renderFWSkuTable();renderFW26MiniSummary();if(DB.length>0)renderSeasonSKUTable();
+  try{rfRenderStatus();}catch(e){}
 }
 function renderSKUStats(){
   let a1f=0,u1f=0,a2f=0,u2f=0;
@@ -10749,7 +11032,7 @@ const EMBEDDED_FW26_LOOKUP = {"742900110":"POLO","742900120":"POLO","742900130":
 const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","POLO","2026-08-19"],["742900210","純棉長袖polo衫-男","麻灰","POLO","2026-08-19"],["742900310","純棉長袖polo衫-男","橄欖綠","POLO","2026-08-19"],["742900410","純棉長袖polo衫-男","深灰藍","POLO","2026-08-19"],["742900510","純棉長袖polo衫-男","深咖啡","POLO","2026-08-19"],["742900610","純棉長袖polo衫-男","藏青","POLO","2026-08-19"],["742900710","純棉長袖polo衫-男","深麻灰","POLO","2026-08-19"],["742900810","純棉長袖polo衫-男","黑色","POLO","2026-08-19"],["742910110","棉質彈性長袖polo衫-女","白色","POLO","2026-08-19"],["742910210","棉質彈性長袖polo衫-女","粉色","POLO","2026-08-19"],["742910310","棉質彈性長袖polo衫-女","紫紅","POLO","2026-08-19"],["742910410","棉質彈性長袖polo衫-女","藏青","POLO","2026-08-19"],["742910510","棉質彈性長袖polo衫-女","黑色","POLO","2026-08-19"],["743030110","heatup圓領短袖上衣-男","米白","發熱衣","2026-08-08"],["743040110","heatup圓領九分袖上衣-男","米白","發熱衣","2026-08-08"],["743040210","heatup圓領九分袖上衣-男","麻灰","發熱衣","2026-08-08"],["743040310","heatup圓領九分袖上衣-男","麻花藍","發熱衣","2026-08-08"],["743040410","heatup圓領九分袖上衣-男","深綠","發熱衣","2026-08-08"],["743040510","heatup圓領九分袖上衣-男","咖啡","發熱衣","2026-08-08"],["743040610","heatup圓領九分袖上衣-男","藏青","發熱衣","2026-08-08"],["743040710","heatup圓領九分袖上衣-男","深麻灰","發熱衣","2026-08-08"],["743040810","heatup圓領九分袖上衣-男","黑色","發熱衣","2026-08-08"],["743090110","heatup U領背心-女","米白","發熱衣","2026-08-08"],["743090210","heatup U領背心-女","淺灰粉","發熱衣","2026-08-08"],["743090310","heatup U領背心-女","可可咖","發熱衣","2026-08-08"],["743090410","heatup U領背心-女","深藍","發熱衣","2026-08-08"],["743090510","heatup U領背心-女","黑色","發熱衣","2026-08-08"],["743150110","heatup立領長袖上衣-女","米白","發熱衣","2026-08-08"],["743150210","heatup立領長袖上衣-女","粉紫","發熱衣","2026-08-08"],["743150310","heatup立領長袖上衣-女","玫紅","發熱衣","2026-08-08"],["743150410","heatup立領長袖上衣-女","深酒紅","發熱衣","2026-08-08"],["743150510","heatup立領長袖上衣-女","深藍","發熱衣","2026-08-08"],["743150610","heatup立領長袖上衣-女","深麻灰","發熱衣","2026-08-08"],["743150710","heatup立領長袖上衣-女","黑色","發熱衣","2026-08-08"],["745600110","heatup輕磨毛圓領九分袖上衣-男","米白","發熱衣","2026-08-15"],["745600210","heatup輕磨毛圓領九分袖上衣-男","淺灰","發熱衣","2026-08-15"],["745600310","heatup輕磨毛圓領九分袖上衣-男","麻花藍","發熱衣","2026-08-15"],["745600410","heatup輕磨毛圓領九分袖上衣-男","深綠","發熱衣","2026-08-15"],["745600510","heatup輕磨毛圓領九分袖上衣-男","棕色","發熱衣","2026-08-15"],["745600610","heatup輕磨毛圓領九分袖上衣-男","藏青","發熱衣","2026-08-15"],["745600710","heatup輕磨毛圓領九分袖上衣-男","深麻灰","發熱衣","2026-08-15"],["745600810","heatup輕磨毛圓領九分袖上衣-男","黑色","發熱衣","2026-08-15"],["745690110","heatup輕磨毛圓領長袖上衣-女","米白","發熱衣","2026-08-15"],["745690210","heatup輕磨毛圓領長袖上衣-女","暖灰","發熱衣","2026-08-15"],["745690310","heatup輕磨毛圓領長袖上衣-女","淺粉桔","發熱衣","2026-08-15"],["745690410","heatup輕磨毛圓領長袖上衣-女","珊瑚紅","發熱衣","2026-08-15"],["745690510","heatup輕磨毛圓領長袖上衣-女","深紫","發熱衣","2026-08-15"],["745690610","heatup輕磨毛圓領長袖上衣-女","藍綠","發熱衣","2026-08-15"],["745690710","heatup輕磨毛圓領長袖上衣-女","深藏青","發熱衣","2026-08-15"],["745690810","heatup輕磨毛圓領長袖上衣-女","可可咖","發熱衣","2026-08-15"],["745690910","heatup輕磨毛圓領長袖上衣-女","深麻灰","發熱衣","2026-08-15"],["745691010","heatup輕磨毛圓領長袖上衣-女","黑色","發熱衣","2026-08-15"],["743160110","heatup Bra背心-女","米白","BRA","2026-08-08"],["743160210","heatup Bra背心-女","淺灰粉","BRA","2026-08-08"],["743160310","heatup Bra背心-女","可可咖","BRA","2026-08-08"],["743160410","heatup Bra背心-女","深麻灰","BRA","2026-08-08"],["743160510","heatup Bra背心-女","黑色","BRA","2026-08-08"],["754300110","Bra長版背心-女","白色","BRA","2026-07-18"],["754300210","Bra長版背心-女","粉色","BRA","2026-07-18"],["754300310","Bra長版背心-女","黑色","BRA","2026-07-18"],["748380110","素色褲襪-童","白色","襪子","2026-09-04"],["750720110","Miffy提花中筒襪-女","米白","襪子","2026-07-10"],["752020110","素色堆堆襪-女","米白","襪子","2026-08-09"],["742530110","迪士尼系列Fleece家居套裝-女","淡粉","套裝組","2026-09-05"],["747860110","Fleece條紋家居套裝-男","淡藍","套裝組","2026-08-22"],["747230110","Miffy Fleece家居毯-中性毯","水綠","套裝組","2026-10-03"]];
 
 (async function init(){
-  loadAisleConfig();loadManualEdits();loadXXCapacity();loadXXZoneConfig();loadPackagingRulesConfig();
+  loadAisleConfig();loadManualEdits();loadXXCapacity();loadXXZoneConfig();loadPackagingRulesConfig();rfLoadPrefs();
   // ★ R4：applyRmDerivedAvail() 不在此呼叫 — RM_DATA 定義於後方 rackmap script，改於該區塊尾端執行
   let restored=false;
   try{restored=await loadEPRData();if(restored)console.log('EPR restored from IndexedDB');}catch(e){console.warn('EPR restore failed:',e);}
