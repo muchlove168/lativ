@@ -6743,6 +6743,7 @@ function plannerRenderConfigUI(){
   const wrap=document.getElementById('pln-steps-wrap');
   wrap.addEventListener('change',plannerHandleInternalBind);  // 內部整理: src/dst 互鎖 + 單選
   wrap.addEventListener('change',plannerScheduleRefresh);
+  wrap.addEventListener('input',plannerMarkManualN);          // ★ 必須排在 refresh 之前（見下方註解）
   wrap.addEventListener('input',plannerScheduleRefresh);
   // ★ 初始套用挑選選項鎖定 (若預設已勾新品 src 則鎖死其他模式)
   const step1El=document.getElementById('pln-step-1');
@@ -6858,6 +6859,24 @@ function plannerCollectStepConfig(idx){
   return cfg;
 }
 
+// ★2026-07-22 除錯（Gordon：情境配置的 SKU數 改不動）
+//   【症狀】手改自動帶入的 SKU數，數字會自己跳回原值，且「有時候」才成功。
+//   【根因】把「使用者手動改過」標記成 data-auto='0' 的只有 change 事件監聽器
+//           （plannerHandleInternalBind），但 <input type="number"> 的 change 要等
+//           失焦 / 按 Enter / 點微調鈕才觸發。打字期間只有 input 事件，而 input 監聽器
+//           掛的是 plannerScheduleRefresh → 150ms 後跑 plannerRefreshStepCounts
+//           → plannerAutoFillN，此時 data-auto 還是 '1' → 直接把剛打的數字覆寫回自動值。
+//           打字只要停頓超過 150ms 就會被吃掉；打很快又立刻失焦（change 先跑）才偶爾成功
+//           —— 正是「有時候改不成功」。
+//   【修正】① input 當下就標記手動（本函式，且監聽順序排在 refresh 之前）
+//           ② plannerAutoFillN 對「正在編輯（有焦點）」的欄位一律不覆寫（雙保險）
+//           ③ 值沒變就不寫回 DOM，避免游標跳到字尾
+//   註：SKU數 仍需觸發 refresh —— 後續 step 的來源/目的數字是拿本 step 的 nToPick 模擬出來的。
+function plannerMarkManualN(e){
+  const t=e&&e.target;
+  if(t&&t.dataset&&t.dataset.grp==='n')t.dataset.auto='0';
+}
+
 // ═══ 即時計數 (來源 SKU / 目標空格): 含跨 step 模擬 ═══
 let _plnRefreshTimer=null;
 function plannerScheduleRefresh(){
@@ -6900,6 +6919,8 @@ function plannerAutoFillN(stepEl){
   const nEl=stepEl.querySelector('input[data-grp="n"]');
   if(!nEl)return;
   if(nEl.dataset.auto==='0')return;                 // 使用者手動指定過 → 不覆寫
+  // ★2026-07-22：欄位正在被編輯（有焦點）→ 一律不覆寫，任何殘留路徑都不會再吃掉打到一半的數字
+  try{ if(nEl.ownerDocument&&nEl.ownerDocument.activeElement===nEl)return; }catch(err){}
   let sum=0,unknown=false;
   stepEl.querySelectorAll('input[data-grp="src"]:checked').forEach(cb=>{
     const a=cb.value;
@@ -6926,7 +6947,8 @@ function plannerAutoFillN(stepEl){
     });
     if(!capUnknown&&cap<sum)sum=cap;
   }
-  nEl.value=sum>0?String(sum):'';
+  const next=sum>0?String(sum):'';
+  if(nEl.value!==next)nEl.value=next;               // ★2026-07-22：值沒變就不寫回，避免游標跳到字尾
   nEl.title='自動帶入＝來源走道 SKU 總數，並以目的走道空格數封頂；想少放直接改，改過後就不再自動更新（除非再變動來源/目的走道）';
 }
 
