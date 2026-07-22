@@ -6080,16 +6080,36 @@ function plnRunNewEngine(config,initialCells){
           //   把同架後面的色擠到更遠的架（7516601 佔走 175 → 7517201 只能掉到 169）。
           //   改為：Pass1 每個色只准用「自己主碼那一架」的溢出欄；Pass2 才把剩下的就近安置。
           //   壓力測試 500 組隨機情境：跨架色組 3510 → 554（-84%），較差 0 組，容量不受影響。
+          // ★2026-07-22 修正（Gordon C02 案）★
+          //   【症狀】主碼在 C02-136/137/138 的三個色，其 150/160 溢出碼被排到 6 架外的
+          //          C02-169 / C02-170，且第一個色拿到最尾端的 170、後面的色反而在 169（順序顛倒）。
+          //   【根因 1｜赤字架流離】舊「Pass1 只准用本架溢出欄 → Pass2 撿剩」在「本架溢出欄已被舊貨
+          //          占滿」的赤字架上失效：Pass1 讓每一架先把自己的溢出欄用好用滿，等 Pass2 才輪到
+          //          赤字架的色時，鄰近溢出欄已全部消化完，只剩走道最尾端的殘欄。
+          //          C02 實況：架19(133~138) 的溢出欄 133/134 已滿、主碼欄只剩 136~138；
+          //          架20~24 各自「4 主碼欄 + 8 溢出格」剛好自給自足；架25 只剩 169(4格)+170(2格)。
+          //          → 架19 的三個色被丟到 6 架外，違反本函式「不離主碼超過一架」的設計意圖。
+          //   【根因 2｜順序顛倒】候選欄排序把「密度（剩餘層少者先填）」排在「離主碼近」之前，
+          //          使 4 格全空的 169 輸給只剩 2 格的 170 → 佇列第一個色拿到最尾端的欄。
+          //   【修正】① 逐架接力（carry）取代 Pass1/Pass2：依架號升冪掃描，每一架先服務上一架帶下來
+          //          的色，再服務自己的色；放不下就整組帶到下一架。赤字架的色向後借一架，被借走容量
+          //          的架再往後借，逐架推進 → 任何色都不會被丟到走道另一端。
+          //          ② 掃描階段一律「整組放同一欄」（fitWhole），放不下整組就整組往後帶，不在中途拆欄。
+          //          ③ 密度降到「離主碼近」之後（僅作最後把關，不再壓過就近）。
+          //          ④ 掃描後仍未安置者（含尾端赤字、需反向借位）才回到原本的全池就近 fillFrom，
+          //             最後才是 placeOverflowSafe，行為與舊版一致。
+          //   實測 C02：最遠架距 6→1、實體欄距 max 34→3 / 平均 6.83→2.04、溢出欄順序倒退 7→0，
+          //            主碼欄配置完全不變、138 格全滿不變。
+          const ovSort=(g,need)=>{ const mr=rackOf(g.mc); return (a,b)=>
+              (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
+              || ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
+              || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
+              || ((emptyLayers(b).length>=need?1:0)-(emptyLayers(a).length>=need?1:0))
+              || (Math.abs(a-g.mc)-Math.abs(b-g.mc))
+              || (emptyLayers(a).length-emptyLayers(b).length) || (a-b); };
           const fillFrom=(g,remain,pool)=>{
-            const mr=rackOf(g.mc);
             while(remain.length){
-              const cands=pool.filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7))
-                .sort((a,b)=> (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
-                  || ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
-                  || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
-                  || ((emptyLayers(b).length>=remain.length?1:0)-(emptyLayers(a).length>=remain.length?1:0))
-                  || (emptyLayers(a).length-emptyLayers(b).length)
-                  || (Math.abs(a-g.mc)-Math.abs(b-g.mc)) || (a-b));
+              const cands=pool.filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7)).sort(ovSort(g,remain.length));
               if(!cands.length)break;
               const col=cands[0]; const before=remain.length;
               for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
@@ -6097,17 +6117,38 @@ function plnRunNewEngine(config,initialCells){
             }
             return remain;
           };
-          // Pass 1：限定主碼所在架的溢出欄
-          const carry=[];
+          // 整組放同一欄；本架放不下整組 → 原封不動回傳（交由呼叫端帶到下一架）
+          const fitWhole=(g,items,pool)=>{
+            const cands=pool.filter(c=>emptyLayers(c).length>=items.length&&!physAdjConflict(c,g.donor.color7)).sort(ovSort(g,items.length));
+            if(!cands.length)return items;
+            const col=cands[0], remain=items.slice();
+            for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
+            return remain;
+          };
+          // ── 逐架接力掃描（色已依主碼欄升冪排序）──
+          const byRack=new Map(); const noRack=[];
           for(const g of ovGroups){
-            const own=allPool.filter(c=>rackOf(c)===rackOf(g.mc));
-            const left=own.length?fillFrom(g,g.items.slice(),own):g.items.slice();
-            if(left.length)carry.push({g,left});
+            const r=rackOf(g.mc);
+            if(r<0){ noRack.push({g,items:g.items.slice()}); continue; }   // 無主碼欄（純溢出殘色）→ 直接走全池就近
+            if(!byRack.has(r))byRack.set(r,[]);
+            byRack.get(r).push({g,items:g.items.slice()});
           }
-          // Pass 2：剩餘者開放全部溢出欄，依架距就近安置
-          for(const cg of carry){
-            const rest=fillFrom(cg.g,cg.left,allPool);
-            for(const sku of rest){ if(!placeOverflowSafe({donor:cg.g.donor,sku}))failed.push({kc:cg.g.donor.kc,n:cg.g.donor.ku.n,reason:'NO_XXL_SLOT',cat:cg.g.donor.ku.cat}); }
+          const rackIdxs=[...new Set([...byRack.keys(),...allPool.map(rackOf)])].filter(r=>r>=0).sort((a,b)=>a-b);
+          let carry=[];
+          for(const ri of rackIdxs){
+            const pool=allPool.filter(c=>rackOf(c)===ri);
+            const list=carry.concat(byRack.get(ri)||[]); carry=[];
+            for(const it of list){
+              // 接力上限：掃描階段最多向後接力 3 架；再遠就繼續帶著，最後交給全池就近
+              // （可反向借位）處理，避免少數色一路往走道尾端漂。
+              if(pool.length&&Math.abs(ri-rackOf(it.g.mc))<=3){ const left=fitWhole(it.g,it.items,pool); if(!left.length)continue; it.items=left; }
+              carry.push(it);
+            }
+          }
+          // ── 尾端仍未安置（需反向借位／不得已拆欄）→ 全池就近，最後 placeOverflowSafe ──
+          for(const it of carry.concat(noRack)){
+            const rest=fillFrom(it.g,it.items,allPool);
+            for(const sku of rest){ if(!placeOverflowSafe({donor:it.g.donor,sku}))failed.push({kc:it.g.donor.kc,n:it.g.donor.ku.n,reason:'NO_XXL_SLOT',cat:it.g.donor.ku.cat}); }
           }
         }
       }
