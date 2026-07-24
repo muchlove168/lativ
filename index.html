@@ -1617,7 +1617,7 @@ function rfCellHtml(prefix){
     +(st.hit!=null?'（回測命中率 '+Math.round(st.hit*100)+'%、樣本 '+num(st.sample)+' 格）':'（樣本<3，未校正）')
     +'\n退貨緩衝 '+Math.round(RF_RETURN_RATE*100)+'% · 抗爆量截頂 '+RF_WINSOR+'×'
     +(far?'\n＊>14 天為趨勢參考':(low?'\n＊低信心（資料累積中）':''));
-  return '<td class="'+cls+'" style="padding:4px 5px;cursor:help'+(far?';color:var(--text3);font-style:italic':'')+'" title="'+rfAttr(tip)+'">'+num(st.future)+(low?'*':'')+'</td>';
+  return '<td class="'+cls+'" style="padding:4px 5px;cursor:help'+(far?';color:var(--text3);font-style:italic':'')+'" title="'+rfAttr(tip)+'">'+num(st.future)+'</td>';
 }
 // N（表頭）／W（統計列）編輯
 function editRfDays(g){
