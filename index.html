@@ -7939,7 +7939,8 @@ function renderArrangeCompare(){
           zoneTd=`<td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--accent)">${zone}</td>`;
         }
         // ★ 2026-07-16：SKU 數 = 待排；已排入另以灰字標註，避免看起來「數字沒動」
-        const _pl=s.placedCount?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上 → 不列入待排">(已排 ${s.placedCount})</span>`:'';
+        // ★ 2026-07-25 Gordon：待排=0（已排完儲位）不再顯示「(已排 XX)」灰字，避免全排完後仍留噪訊
+        const _pl=(s.skuCount&&s.placedCount)?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上 → 不列入待排">(已排 ${s.placedCount})</span>`:'';
         tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td><td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}${_pl}</td>`+zoneTd;
         catBody.appendChild(tr);
       });
@@ -7949,7 +7950,7 @@ function renderArrangeCompare(){
         const styles=[...new Set(newSeasonUnmatched.map(r=>String(r.code||'').substring(0,5)))];
         const _umPlaced=newSeasonUnmatched.filter(r=>plnIsPlacedCode(r.code,_pIdx)).length;
         const _umPend=newSeasonUnmatched.length-_umPlaced;
-        const _umPl=_umPlaced?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 或走道報表顯示已排入 → 不列入待排">(已排 ${_umPlaced})</span>`:'';
+        const _umPl=(_umPend&&_umPlaced)?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 或走道報表顯示已排入 → 不列入待排">(已排 ${_umPlaced})</span>`:'';
         const tr=document.createElement('tr');
         tr.style.borderBottom='1px solid var(--border)';
         tr.style.background='rgba(192,57,43,0.04)';
@@ -8208,8 +8209,9 @@ function renderArrangeCompare(){
             dupInThisCat.push(`款號 ${st} (${skuNum} 筆) 也出現於：${otherContainers.join('、')||'其他櫃'}`);
           }
         });
-        const dupAlert=dupInThisCat.length>0?`⚠`:'';
-        const dupTitle=dupInThisCat.length>0?'⚠ 跨櫃重複款號（可能重複計算）\n'+dupInThisCat.join('\n'):'';
+        // ★ 2026-07-25 Gordon：待排=0（已排完儲位）→ 無待排量可重複計算，跨櫃重複 ⚠️ 不再顯示（如再次進倉列）
+        const dupAlert=(dupInThisCat.length>0&&s.skuCount>0)?`⚠`:'';
+        const dupTitle=(dupInThisCat.length>0&&s.skuCount>0)?'⚠ 跨櫃重複款號（可能重複計算）\n'+dupInThisCat.join('\n'):'';
 
         let html='';
         if(idx===0){
@@ -8238,7 +8240,8 @@ function renderArrangeCompare(){
           if(_fcPlacedIdx.tempSlot&&_fcPlacedIdx.tempSlot[String(ar.code||'').trim()])_tempN++;
         });});
         const _tempTxt=_tempN?`<span style="color:#d4a017;font-size:9px;margin-left:3px;cursor:help" title="其中 ${_tempN} 筆目前暫放於 XX/TX 溢位區 → 視為未排，已計入待排數">(暫放 ${_tempN})</span>`:'';
-        const _placedTxt=s.placedCount?`<span style="color:var(--text3);font-size:9px;margin-left:3px;cursor:help" title="已排入 ${s.placedCount} 筆（ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上）→ 不列入待排新品">(已排 ${s.placedCount})</span>`:'';
+        // ★ 2026-07-25 Gordon：待排=0（已排完儲位）不再顯示「(已排 XX)」灰字（如申洲列 童中袋 0 (已排336)）
+        const _placedTxt=(s.skuCount&&s.placedCount)?`<span style="color:var(--text3);font-size:9px;margin-left:3px;cursor:help" title="已排入 ${s.placedCount} 筆（ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上）→ 不列入待排新品">(已排 ${s.placedCount})</span>`:'';
         const skuCell=dupAlert
           ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${_pendTxt}${_placedTxt}${_tempTxt}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
           : `${_pendTxt}${_placedTxt}${_tempTxt}`;
