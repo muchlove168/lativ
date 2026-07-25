@@ -308,9 +308,11 @@
         <div class="sku-stat-cell"><span class="sku-stat-label">1F 總可用儲位</span><span class="sku-stat-val" id="s-1f-avail">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">1F 已用</span><span class="sku-stat-val" id="s-1f-used">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">1F 空儲位</span><span class="sku-stat-val good" id="s-1f-empty">—</span></div>
+        <div class="sku-stat-cell" title="未來 N 天內（同「儲位釋放預測」設定的天數）1F 各走道預估會釋放的儲位加總。判定同儲位釋放：未到量<10、未抓貨=0、銷售庫存=0，含當季及過季。需系統已存≥3天日報表"><span class="sku-stat-label">1F 預計釋放<span id="s-1f-release-d" style="color:var(--text3);font-weight:400"></span></span><span class="sku-stat-val" id="s-1f-release">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 總可用儲位</span><span class="sku-stat-val" id="s-2f-avail">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 已用</span><span class="sku-stat-val" id="s-2f-used">—</span></div>
         <div class="sku-stat-cell"><span class="sku-stat-label">2F 空儲位</span><span class="sku-stat-val good" id="s-2f-empty">—</span></div>
+        <div class="sku-stat-cell" title="未來 N 天內（同「儲位釋放預測」設定的天數）2F 各走道預估會釋放的儲位加總。判定同儲位釋放：未到量<10、未抓貨=0、銷售庫存=0，含當季及過季。需系統已存≥3天日報表"><span class="sku-stat-label">2F 預計釋放<span id="s-2f-release-d" style="color:var(--text3);font-weight:400"></span></span><span class="sku-stat-val" id="s-2f-release">—</span></div>
         <div class="sku-stat-cell" style="margin-left:auto">
           <button class="toggle-btn" id="btn-show-hidden" onclick="toggleHiddenAisles()">👁 顯示停用走道</button>
         </div>
@@ -694,7 +696,7 @@
 <div id="backup-pick-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9998;align-items:center;justify-content:center">
   <div style="background:var(--bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);width:340px;max-width:92vw;padding:0">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border);background:var(--surface);border-radius:10px 10px 0 0">
-      <span style="font-weight:700;font-size:15px;color:var(--accent)">📂 從備份檔挑選單日報表</span>
+      <span style="font-weight:700;font-size:15px;color:var(--accent)">📂 從每月備份檔挑選單日報表</span>
       <button onclick="document.getElementById('backup-pick-modal').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3)">✕</button>
     </div>
     <div style="padding:14px 18px;display:flex;flex-direction:column;gap:10px">
@@ -707,6 +709,27 @@
     <div style="padding:10px 18px 14px;display:flex;gap:8px;justify-content:flex-end">
       <button onclick="backupPickDownload()" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:var(--font)">⬇ 下載 .xlsx</button>
       <button onclick="backupPickCompare()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">載入至銷售比對</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 2026-07-25 匯出單月日報表 Modal -->
+<div id="monthly-export-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9998;align-items:center;justify-content:center">
+  <div style="background:var(--bg);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,0.25);width:360px;max-width:92vw;padding:0">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border);background:var(--surface);border-radius:10px 10px 0 0">
+      <span style="font-weight:700;font-size:15px;color:var(--accent)">📦 匯出單月日報表</span>
+      <button onclick="document.getElementById('monthly-export-modal').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3)">✕</button>
+    </div>
+    <div style="padding:14px 18px;display:flex;flex-direction:column;gap:10px">
+      <label style="font-size:13px;color:var(--text2)">選擇月份
+        <select id="monthly-export-select" onchange="monthlyExportPreview()" style="display:block;width:100%;margin-top:4px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:14px;font-family:var(--font)"></select>
+      </label>
+      <div id="monthly-export-info" style="font-size:12px;color:var(--text3);line-height:1.5"></div>
+      <div style="font-size:11px;color:var(--text3);border-top:1px dashed var(--border);padding-top:8px;line-height:1.5">此檔只含所選月份的每日報表（＋當月彙總），跨月不重疊，方便逐月留存。<br>可用「📂 從每月備份檔挑日期」直接讀取任一天；也可「匯入」累積長期趨勢（合併、不覆蓋其他資料）。</div>
+    </div>
+    <div style="padding:10px 18px 14px;display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="document.getElementById('monthly-export-modal').style.display='none'" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:var(--font)">取消</button>
+      <button onclick="confirmMonthlyExport()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">⬇ 匯出此月</button>
     </div>
   </div>
 </div>
@@ -1055,7 +1078,7 @@ async function handleUpload(event){
     // ★ 2026-07-17 階段 0：日報表存檔後同步更新長期彙總（該日所屬的週+月，冪等重算）
     try{await rollupUpdateForDate(_histKey);}catch(e){console.warn('Rollup update failed:',e);}
     try{populateCompareHistSelect();}catch(e){}
-    checkMonthlyAutoSave();
+    checkMonthlyAutoSave(_histKey);
     ensureAislesFromDB();
     Object.keys(DIRTY).forEach(k=>DIRTY[k]=true);
     renderAll();
@@ -1598,6 +1621,20 @@ function rfStats(aisle){
   const kk=rfK(aisle,N);
   return {today:a.today,futureRaw:fut,future:Math.round(fut*kk.k),cols:rfCountLE(a.colT,N),k:kk.k,hit:kk.hit,sample:kk.sample,kh:kk.h};
 }
+// ★ 2026-07-25 Gordon #2：逐樓層「未來 ≤RF_DAYS 日預計釋放儲位」加總（沿用儲位釋放預測引擎，各走道 rfStats.future 依樓層彙總）
+//   樓層對應同 renderSlotData 的 floorMap：A~F=1F、P/L/M=2F。RF 未建置或無資料 → 回 null（顯示 —）。
+function rfFloorRelease(){
+  const F=RELEASE_FORECAST;
+  if(!F||!F.ok||!F.agg)return null;
+  const fl={A:'1F',B:'1F',C:'1F',D:'1F',E:'1F',F:'1F',P:'2F',L:'2F',M:'2F'};
+  let f1=0,f2=0;
+  Object.keys(F.agg).forEach(a=>{
+    const st=rfStats(a);if(!st)return;
+    const floor=fl[(a[0]||'').toUpperCase()];
+    if(floor==='1F')f1+=st.future;else if(floor==='2F')f2+=st.future;
+  });
+  return {f1,f2,days:Math.max(1,RF_DAYS|0)};
+}
 // 表格儲存格
 function rfCellHtml(prefix){
   const pad='style="padding:4px 5px"';
@@ -1780,6 +1817,13 @@ function renderSKUStats(){
   const e1=document.getElementById('s-1f-empty');if(e1){e1.textContent=DB.length>0?num(a1f-u1f):'—';e1.className=DB.length>0&&(a1f-u1f)<50?'sku-stat-val warn':'sku-stat-val good';}
   setText('s-2f-avail',num(a2f));setText('s-2f-used',DB.length>0?num(u2f):'—');
   const e2=document.getElementById('s-2f-empty');if(e2){e2.textContent=DB.length>0?num(a2f-u2f):'—';e2.className=DB.length>0&&(a2f-u2f)<20?'sku-stat-val warn':'sku-stat-val good';}
+  // ★ 2026-07-25 Gordon #2：1F／2F 未來 ≤N 日預計釋放（沿用儲位釋放預測，各走道 future 依樓層加總）
+  const rfFl=(typeof rfFloorRelease==='function')?rfFloorRelease():null;
+  const rfDays=rfFl?rfFl.days:(Math.max(1,RF_DAYS|0));
+  const d1=document.getElementById('s-1f-release-d');if(d1)d1.textContent=' ≤'+rfDays+'日';
+  const d2=document.getElementById('s-2f-release-d');if(d2)d2.textContent=' ≤'+rfDays+'日';
+  const r1=document.getElementById('s-1f-release');if(r1){r1.textContent=rfFl?num(rfFl.f1):'—';r1.className='sku-stat-val'+(rfFl&&rfFl.f1>0?' good':'');}
+  const r2=document.getElementById('s-2f-release');if(r2){r2.textContent=rfFl?num(rfFl.f2):'—';r2.className='sku-stat-val'+(rfFl&&rfFl.f2>0?' good':'');}
 }
 
 let FW26_CATS=[
@@ -2356,6 +2400,160 @@ async function clearCompareData(){
   document.getElementById('compare-status').textContent='';
   document.getElementById('compare-clear-btn').style.display='none';
   renderSalesCompare();
+}
+
+// ════════════════════════════════════════════════════════════
+// ★ 2026-07-25 Gordon #4：出貨統計匯入 ＋ 兩日期區間銷售對比
+//   目的：每天一早的 ERP SKU 總表(庫存快照)推導的期間銷售，會被「進貨誤差」干擾；
+//         用實打實的「匯出出貨統計」逐日出貨量去對照，擋住這些誤差、看真實銷售件數。
+//   ‧ 兩個日期都可從系統已存日期挑（不再限「已存日 → 當前」）。
+//   ‧ 出貨統計每日銷售量(Gordon 定義) = 店配完成數量(當日)件數 + 宅配件數 + 前一日 店配完成數量(預做隔日)件數
+//     （現場當天宅配(下午)出完後，下班前會先預做隔天上午的店配 → 那批算前一天的產出）
+//   ‧ 區間[起始,結束) 實際銷售 = Σ 各日銷售量（D 從起始日到結束日前一天；對應兩份晨間快照間的庫存下降）。
+//   ════════════════════════════════════════════════════════════
+let SHIPMENT_STATS=null;   // {rows:{'YYYY-MM-DD':{storeToday,home,prepickNext}}, dates:[...], months:[...]}
+
+// 出貨統計 xlsx → aoa(header:1) → 逐日 map。以表頭雙列文字定位欄位（抗欄位位移）。
+function shipmentParseAoa(aoa){
+  if(!aoa||aoa.length<3)return {rows:{},dates:[]};
+  const row0=aoa[0]||[],row1=aoa[1]||[];
+  const findGroup=(label)=>{for(let c=0;c<row0.length;c++){if(String(row0[c]||'').replace(/\s/g,'')===label)return c;}return -1;};
+  // 各群組件數欄＝群組起始欄 +1（子欄序：包裹數,件數,…）
+  const gToday=findGroup('店配完成數量(當日)');
+  const gHome=findGroup('宅配');
+  const gPre=findGroup('店配完成數量(預做隔日)');
+  const cToday=gToday>=0?gToday+1:13;   // fallback：已驗證的固定索引
+  const cHome=gHome>=0?gHome+1:15;
+  const cPre=gPre>=0?gPre+1:21;
+  const rows={};const dates=[];
+  for(let i=2;i<aoa.length;i++){
+    const r=aoa[i]||[];const dcell=String(r[0]||'').trim();
+    const md=dcell.match(/^(\d{4}-\d{2}-\d{2})/);
+    if(!md)continue;            // 跳過「合計」「平均」等非日期列
+    const d=md[1];
+    const n=(x)=>{const v=+x;return isFinite(v)?v:0;};   // '-'／空 → 0
+    rows[d]={storeToday:n(r[cToday]),home:n(r[cHome]),prepickNext:n(r[cPre])};
+    dates.push(d);
+  }
+  dates.sort();
+  return {rows,dates,cols:{cToday,cHome,cPre}};
+}
+// 前一日 YYYY-MM-DD
+function shipmentPrevDay(d){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()-1);return t.toISOString().slice(0,10);}
+// 區間[start,end) 出貨統計實際銷售總量。start<end，皆 YYYY-MM-DD。
+function shipmentWindowTotal(rows,start,end){
+  if(!rows||!start||!end||start>=end)return {total:0,days:[],missing:[],perDay:[]};
+  let total=0;const days=[],missing=[],perDay=[];
+  const cur=new Date(start+'T00:00:00Z');const endD=new Date(end+'T00:00:00Z');
+  while(cur<endD){
+    const d=cur.toISOString().slice(0,10);
+    const today=rows[d];const prev=rows[shipmentPrevDay(d)];
+    if(!today){missing.push(d);}
+    const v=(today?(today.storeToday+today.home):0)+(prev?prev.prepickNext:0);
+    total+=v;days.push(d);perDay.push({date:d,sold:v,hasData:!!today});
+    cur.setUTCDate(cur.getUTCDate()+1);
+  }
+  return {total,days,missing,perDay};
+}
+// 兩份晨間快照(earlier→later)間的 ERP 推導期間銷售（沿用銷售比對公式）。
+function periodSoldTotal(startRows,endRows){
+  const sMap={},eMap={};
+  (startRows||[]).forEach(r=>{sMap[r.商品編號]=r;});
+  (endRows||[]).forEach(r=>{eMap[r.商品編號]=r;});
+  const codes=new Set([...Object.keys(sMap),...Object.keys(eMap)]);
+  let total=0;
+  codes.forEach(code=>{
+    const s=sMap[code],e=eMap[code];
+    const sSell=s?(+s.銷售庫存||0):0,sPur=s?(+s.總進貨量||0):0;
+    const eSell=e?(+e.銷售庫存||0):0,ePur=e?(+e.總進貨量||0):0;
+    let sold;
+    if(s&&!e)sold=sSell;                       // 期末已下架 → 以期初銷售庫存為上限
+    else sold=(sSell-eSell)+(ePur-sPur);       // 標準：庫存下降 + 期間進貨
+    if(sold>0)total+=sold;
+  });
+  return total;
+}
+
+async function handleShipmentUpload(event){
+  const file=event.target.files[0];if(!file){return;}
+  showLoading('讀取出貨統計中...');
+  try{
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:'array'});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+    const parsed=shipmentParseAoa(aoa);
+    if(!parsed.dates.length){hideLoading();alert('讀不到出貨統計的日期列（請確認是「匯出出貨統計」報表）');event.target.value='';return;}
+    const months=[...new Set(parsed.dates.map(d=>d.slice(0,7)))].sort();
+    SHIPMENT_STATS={rows:parsed.rows,dates:parsed.dates,months};
+    try{await idbPut('shipment_stats',SHIPMENT_STATS);}catch(e){}
+    hideLoading();
+    renderShipmentStatus();
+    try{intervalRefreshAvailability();}catch(e){}
+    alert(`✓ 已匯入出貨統計\n\n涵蓋 ${parsed.dates.length} 天：${parsed.dates[0]} ～ ${parsed.dates[parsed.dates.length-1]}\n月份：${months.join('、')}`);
+  }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
+  event.target.value='';
+}
+async function loadShipmentStats(){try{const s=await idbGet('shipment_stats');if(s&&s.rows)SHIPMENT_STATS=s;}catch(e){}}
+function renderShipmentStatus(){
+  const el=document.getElementById('ship-status');if(!el)return;
+  if(!SHIPMENT_STATS||!SHIPMENT_STATS.dates.length){el.textContent='尚未匯入出貨統計';el.style.color='var(--text3)';return;}
+  const d=SHIPMENT_STATS.dates;
+  el.innerHTML=`已匯入 <b>${d.length}</b> 天出貨統計（${d[0]} ～ ${d[d.length-1]}）`;el.style.color='var(--green)';
+}
+// 兩個日期下拉：填入系統已存日期
+function intervalRefreshAvailability(){
+  const s=document.getElementById('iv-start'),e=document.getElementById('iv-end');
+  if(!s||!e)return;
+  const dates=histEprDates();            // 新→舊
+  const opt=(d)=>`<option value="${d}">${d}</option>`;
+  const sv=s.value,ev=e.value;
+  s.innerHTML='<option value="">起始日</option>'+dates.slice().reverse().map(opt).join('');   // 舊→新
+  e.innerHTML='<option value="">結束日</option>'+dates.map(opt).join('');                      // 新→舊
+  if(sv&&dates.includes(sv))s.value=sv;
+  if(ev&&dates.includes(ev))e.value=ev;
+  const note=document.getElementById('iv-avail-note');
+  if(note)note.textContent=dates.length?`系統已存 ${dates.length} 天完整報表可選`:'尚無完整報表（上傳 ERP 後逐日存下才可選）';
+}
+async function runIntervalCompare(){
+  const start=document.getElementById('iv-start').value;
+  const end=document.getElementById('iv-end').value;
+  const out=document.getElementById('iv-result');
+  if(!start||!end){out.innerHTML='<span style="color:var(--red)">請選擇起始日與結束日</span>';return;}
+  if(start>=end){out.innerHTML='<span style="color:var(--red)">起始日必須早於結束日</span>';return;}
+  showLoading('計算區間銷售中...');
+  try{
+    const [sData,eData]=await Promise.all([idbGet(HIST_EPR_PREFIX+start),idbGet(HIST_EPR_PREFIX+end)]);
+    if(!sData||!sData.rows||!sData.rows.length){hideLoading();out.innerHTML='<span style="color:var(--red)">系統內沒有 '+start+' 的完整報表</span>';return;}
+    if(!eData||!eData.rows||!eData.rows.length){hideLoading();out.innerHTML='<span style="color:var(--red)">系統內沒有 '+end+' 的完整報表</span>';return;}
+    const startRows=histEprToCompareRows(sData),endRows=histEprToCompareRows(eData);
+    const erpTotal=periodSoldTotal(startRows,endRows);
+    // 出貨統計實際
+    let shipHtml='';
+    const win=SHIPMENT_STATS?shipmentWindowTotal(SHIPMENT_STATS.rows,start,end):null;
+    hideLoading();
+    // 區間天數（[start,end)）
+    const nDays=Math.round((new Date(end+'T00:00:00Z')-new Date(start+'T00:00:00Z'))/86400000);
+    let html=`<div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-end">`;
+    html+=`<div><div style="font-size:11px;color:var(--text3)">區間</div><div style="font-size:14px;font-weight:700">${start} → ${end}<span style="font-size:11px;color:var(--text3);font-weight:400"> · ${nDays} 天</span></div></div>`;
+    html+=`<div><div style="font-size:11px;color:var(--text3)">ERP 庫存推導總銷</div><div style="font-size:20px;font-weight:800;color:var(--accent)">${num(erpTotal)}</div></div>`;
+    if(win){
+      const diff=win.total-erpTotal;
+      const pct=erpTotal>0?(diff/erpTotal*100):0;
+      const ratio=erpTotal>0?(win.total/erpTotal):0;
+      html+=`<div><div style="font-size:11px;color:var(--text3)">出貨統計實際總銷</div><div style="font-size:20px;font-weight:800;color:var(--green)">${num(win.total)}</div></div>`;
+      html+=`<div><div style="font-size:11px;color:var(--text3)">差異（實際−推導）</div><div style="font-size:18px;font-weight:800;color:${Math.abs(pct)>10?'var(--red)':'var(--text)'}">${diff>=0?'+':''}${num(diff)}<span style="font-size:12px;font-weight:600;color:var(--text3)"> （${pct>=0?'+':''}${pct.toFixed(1)}%）</span></div></div>`;
+      html+=`<div><div style="font-size:11px;color:var(--text3)">校正係數（實際/推導）</div><div style="font-size:18px;font-weight:800;color:var(--text2)">${ratio?ratio.toFixed(3):'—'}</div></div>`;
+      html+=`</div>`;
+      if(win.missing.length){
+        html+=`<div style="margin-top:8px;font-size:12px;color:var(--orange)">⚠ 區間內有 ${win.missing.length} 天缺出貨統計資料（${win.missing.slice(0,6).join('、')}${win.missing.length>6?'…':''}）→ 實際銷售被低估，請補匯入涵蓋這些日期的出貨統計。</div>`;
+      }
+      html+=`<div style="margin-top:6px;font-size:11px;color:var(--text3);line-height:1.6">推導＝兩份晨間庫存快照差（含期間進貨補正）；實際＝區間各日「店配當日+宅配+前一日店配預做隔日」加總。<br>差異若明顯，多半是 ERP 快照的進貨/未到量誤差 → 以出貨統計的實際值為準更可靠。</div>`;
+    }else{
+      html+=`</div><div style="margin-top:8px;font-size:12px;color:var(--text3)">（尚未匯入出貨統計，僅顯示 ERP 庫存推導值。匯入後可比對實際出貨、擋住進貨誤差。）</div>`;
+    }
+    out.innerHTML=html;
+  }catch(err){hideLoading();out.innerHTML='<span style="color:var(--red)">計算失敗：'+err.message+'</span>';}
 }
 
 function renderSalesCompare(){
@@ -4866,7 +5064,7 @@ function plnPackScatteredLow(cells,selected,config){
  *   本骨架依 §5a/§1.6 把最低/次低明確定義為「純找空洞、不主動位移」(displacement 只在高等級)，
  *   故新 'match' 與現行 plnRunEngine 不會逐字節相同——差異 = 現行多了連續打包/位移，屬規格分級要求。
  * ═══════════════════════════════════════════════════════════════════════════ */
-const PLN_COMPLEXITY_LEVELS = ['sort','match','color','kuan','consolidate','micro','auto'];
+const PLN_COMPLEXITY_LEVELS = ['sort','match','color','kuan','consolidate','auto'];
 
 function plnLayoutVol(layout){
   const v=PLN_LAYOUT_VOLUME[layout];
@@ -4986,7 +5184,6 @@ function plnDispatchComplexity(config, ctx){
     case 'color':       res=plnComplexityConcentrate(config, ctx, {byKuan:false}); break;
     case 'kuan':        res=plnComplexityConcentrate(config, ctx, {byKuan:true}); break;
     case 'consolidate': res=plnComplexityConsolidate(config, ctx); break;
-    case 'micro':       res=plnComplexityColorMicro(config, ctx); break;  // ★ §5a-micro (Gordon 2026-07-25)
     case 'auto':        res=plnComplexityAuto(config, ctx); break;   // ★ §5b (Gordon 2026-07-05)
     default:
       throw new Error('plnDispatchComplexity: 未知複雜度等級 "'+lvl+'"（合法值：'+PLN_COMPLEXITY_LEVELS.join('/')+'）');
@@ -5275,176 +5472,6 @@ function plnComplexityConcentrate(config, ctx, opt){
 
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells,
           complexity:config.complexity, strategy:(byKuan?'以款集中':'以色集中')};
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
- * ★★★ §5a-micro 新增等級＝以色集中·就地騰位（Gordon 2026-07-25 拍板）★★★
- * ───────────────────────────────────────────────────────────────────────────
- * 情境：目的走道(如 A09)本身高庫存、幾乎無整欄空著（空位是散在各欄的 1~3 層）。
- *   ‧ 'color' 以色集中：只肯用「已空 ≥N 層」的欄 → 此情境找不到 → 全降級找洞塞→散開。
- *   ‧ 'consolidate' 集中連續空位：借內部整理大搬出連續空位 → 高庫存 A09 不適合大動。
- *   本等級＝折衷：對每個 ≥3 碼色組，挑「用最少次位移就能湊出整欄」的目的欄，
- *   把該欄少數佔用者小幅挪到走道內其他空洞（§置換 INTERNAL_DISPLACEMENT），
- *   再把整組排入（同色同欄不同層）。
- * 規則（Gordon 2026-07-25 確認）：
- *   1. 以色(7碼)為單位；>4 碼沿用 §5a-split 4+1（4碼主組進一欄、溢出碼走找洞塞_匹配）。
- *   2. 選欄優先序：位移次數少(=挑原本就缺幾層的欄) → 不拆已成群色欄 → 碼對層 → 大材積
- *      → 目的走道內部集中度 → 欄號。
- *   3. 位移上限＝排入 SKU 數 ×0.5（向上取整）；某色組在預算內湊不出整欄 → 降級找洞塞_匹配。
- *   4. 被挪佔用者：非成群、銷售低者優先挪；落到走道內其他空洞（層對應優先）；立即 locked 防連鎖。
- *      新品(§1.6)/locked 佔用者不挪。
- *   ‧ 零回歸：本函式僅在 config.complexity==='micro' 時觸發，不影響其餘五級與自動。
- * ═══════════════════════════════════════════════════════════════════════════ */
-function plnComplexityColorMicro(config, ctx){
-  const {cells, selected, capacity, deficit, xxSalesMax}=ctx;
-  const moves=ctx.moves||[];
-  const geo=config.aisleGeometry||plnGetAisleGeometry();
-  const dests=config.destination||[];
-  const failed=[];
-
-  // ── 來源正規化（帶來源位置，供集中度距離計分）──
-  const rows=selected.map(r=>{
-    const sku=String(r['商品編號']||'');
-    const srcCell=plnFindSkuCell(cells,sku,config.source);
-    const src=srcCell?cells[srcCell]:null;
-    return {sku, size:r['尺寸'], raw:r, srcAisle:src?src.aisle:null, srcCol:src?src.col:null};
-  }).filter(r=>r.sku);
-
-  // ── 依色(color7)分組；≥3 碼 = 集中色(4+1 切塊)，<3 碼 = 零散（同 plnComplexityConcentrate）──
-  const colorMap=new Map();
-  rows.forEach(r=>{ const c=plnSkuKuanSe(r.sku); if(!colorMap.has(c))colorMap.set(c,[]); colorMap.get(c).push(r); });
-  const groupedColors=[]; const scattered=[];
-  for(const [c7, crows] of colorMap){
-    if(crows.length<3){ scattered.push(...crows); continue; }
-    const sorted=[...crows].sort((a,b)=>
-      PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku) || a.sku.localeCompare(b.sku));
-    for(let i=0;i<sorted.length;i+=4){
-      const chunk=sorted.slice(i,i+4);
-      if(chunk.length>=3) groupedColors.push({color7:c7, rows:chunk});
-      else scattered.push(...chunk);
-    }
-  }
-
-  // §位移預算（Gordon 2026-07-25）：置換總數 ≤ 排入 SKU 數 ×0.5
-  const dispCap=Math.ceil(rows.length*0.5);
-  let dispUsed=0;
-
-  // 目的走道內部集中度（同 plnComplexityConcentrate）：離同款(5碼)既有欄越近越好
-  const nearestKuanCol=(a,col,kuan5)=>{
-    let best=null;
-    Object.values(cells).forEach(cs=>{
-      if(cs.aisle!==a||!cs.sku)return;
-      if(String(cs.sku).substring(0,5)!==kuan5)return;
-      const d=Math.abs(cs.col-col); if(best==null||d<best)best=d;
-    });
-    return best==null?500:best;
-  };
-  const distSum=(crows,a,col)=>crows.reduce((s,r)=>{
-    if(r.srcAisle===a)
-      return s+(geo[a]?plnAisleDistance(r.srcCol,col,geo[a].min,geo[a].max):Math.abs(r.srcCol-col));
-    return s+nearestKuanCol(a,col,String(r.sku).substring(0,5));
-  },0);
-
-  // 該欄可動佔用層（排除新品 §1.6；locked 已由 plnColState 歸入 locked 不計入 occupied）
-  const movableOcc=(a,col,occ)=>occ.filter(L=>
-    !(((cells[plnCellId(a,col,L)].info)||{})._isNewProduct===true));
-
-  // 評估一欄：能否以 need(=N-空層) 次位移容納色組；回傳評分或 null
-  function evalColumn(a,col,crows){
-    const N=crows.length;
-    const st=plnColState(cells,a,col);
-    const free=st.empty; const occM=movableOcc(a,col,st.occupied);
-    if(free.length+occM.length<N)return null;             // 含 locked/新品 卡住 → 塞不下
-    const need=Math.max(0,N-free.length);
-    if(need>dispCap-dispUsed)return null;                 // 超位移預算
-    const occCell=st.occupied.length?cells[plnCellId(a,col,st.occupied[0])]:null;
-    const breaks=(need>0 && occCell && plnClusterGroupSales(cells,occCell)>0)?1:0;
-    const anyL=free.length?free[0]:occM[0];
-    const layout=(cells[plnCellId(a,col,anyL)]||{}).layout||'';
-    const cand=[...free,...occM].sort((x,y)=>x-y).slice(0,N);
-    const asg=plnAssignColorToColumn(cand,crows);
-    const matched=asg?asg.matched:0;
-    return {aisle:a, col, score:[need, breaks, N-matched, -plnLayoutVol(layout), distSum(crows,a,col), col]};
-  }
-
-  // 規劃並排入一色組到 (a,col)：先位移少數佔用者→再排入。安置不了佔用者→回傳 false（降級）。
-  function planAndPlace(a,col,crows){
-    const N=crows.length;
-    const st=plnColState(cells,a,col);
-    const free=[...st.empty]; const occM=movableOcc(a,col,st.occupied);
-    const need=Math.max(0,N-free.length);
-    // 選要位移的佔用層：非成群優先 → 銷售低 → 層號
-    const occInfo=occM.map(L=>{ const cc=cells[plnCellId(a,col,L)];
-      return {L, grp:plnClusterGroupSales(cells,cc)>0?1:0,
-        sales:Number(((cc.info||{})['銷售庫存'])||0)}; });
-    occInfo.sort((x,y)=>(x.grp-y.grp)||(x.sales-y.sales)||(x.L-y.L));
-    const dispLayers=occInfo.slice(0,need).map(d=>d.L);
-    const freeAfter=[...free, ...dispLayers].sort((x,y)=>x-y);
-    const groupCells=new Set(freeAfter.map(L=>plnCellId(a,col,L)));
-    // 規劃 rehome（先算好再套用，避免部分變動殘留）
-    const usedDest=new Set(); const rehome=[];
-    for(const L of dispLayers){
-      const srcId=plnCellId(a,col,L); const cc=cells[srcId];
-      const tL=plnGetTargetLayer(cc.sku,(cc.info||{})['尺寸']);
-      let best=null,bk=null;
-      Object.values(cells).forEach(cs=>{
-        if(cs.sku||cs.locked)return;
-        if(!dests.includes(cs.aisle))return;
-        if(groupCells.has(cs.cell)||usedDest.has(cs.cell))return;
-        const lm=(tL!=null && cs.layer===tL)?0:1;
-        const same=cs.aisle===a?0:1;
-        const dist=(cs.aisle===a && geo[a])?plnAisleDistance(col,cs.col,geo[a].min,geo[a].max):999;
-        const key=[lm,same,dist,cs.col,cs.layer];
-        if(bk===null||plnCmpScoreArr(key,bk)<0){ bk=key; best=cs; }
-      });
-      if(!best)return false;                              // 無處安置 → 放棄本欄（降級找洞塞）
-      usedDest.add(best.cell);
-      rehome.push({src:srcId, sku:cc.sku, info:cc.info, dst:best.cell});
-    }
-    // 套用位移（§置換 INTERNAL_DISPLACEMENT）
-    rehome.forEach(rm=>{
-      moves.push({phase:'INTERNAL_DISPLACEMENT',sku:rm.sku,src:rm.src,dst:rm.dst,dstLayout:(cells[rm.dst]||{}).layout||''});
-      cells[rm.dst].sku=rm.sku; cells[rm.dst].info=rm.info; cells[rm.dst].locked=true;
-      cells[rm.src].sku=null; cells[rm.src].info=null;
-    });
-    dispUsed+=rehome.length;
-    // 排入色組（碼序對層；freeAfter 現已全空、剛好 N 層）
-    const asg=plnAssignColorToColumn(freeAfter,crows);
-    Object.entries(asg.assign).forEach(([sku,L])=>{
-      const dstId=plnCellId(a,col,L);
-      const srcCell=plnFindSkuCell(cells,sku,config.source);
-      let srcInfo=null;
-      if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
-      cells[dstId].sku=sku; cells[dstId].info=srcInfo; cells[dstId].locked=true;
-      moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstId,dstLayout:(cells[dstId]||{}).layout||''});
-    });
-    return true;
-  }
-
-  // ── 主迴圈：大色組先（較難安置），同大小以 color7 穩定 ──
-  groupedColors.sort((a,b)=> b.rows.length-a.rows.length || a.color7.localeCompare(b.color7));
-  for(const gc of groupedColors){
-    let best=null,bestScore=null;
-    for(const a of dests){
-      for(const col of plnValidCols(cells,a)){
-        const ev=evalColumn(a,col,gc.rows);
-        if(!ev)continue;
-        if(bestScore===null||plnCmpScoreArr(ev.score,bestScore)<0){ bestScore=ev.score; best=ev; }
-      }
-    }
-    if(!best){ scattered.push(...gc.rows); continue; }     // 無可負擔欄 → 降級找洞塞
-    const ok=planAndPlace(best.aisle,best.col,gc.rows);
-    if(!ok){ scattered.push(...gc.rows); continue; }       // 佔用者安置不了 → 降級找洞塞
-  }
-
-  // ── 零散 SKU + 降級色組 → 找洞塞_匹配 ──
-  if(scattered.length){
-    const hf=plnFindHoleFill(config, {cells, selected:scattered.map(r=>r.raw), capacity, deficit, xxSalesMax, moves}, {match:true});
-    (hf.failed||[]).forEach(f=>failed.push(f));
-  }
-
-  return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells,
-          complexity:config.complexity, strategy:'以色集中·就地騰位', microDisp:dispUsed};
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -7038,7 +7065,6 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
           <option value="color" ${defaultComplexity==='color'?'selected':''}>中等 · 以色集中</option>
           <option value="kuan" ${defaultComplexity==='kuan'?'selected':''}>次高 · 以款集中</option>
           <option value="consolidate" ${defaultComplexity==='consolidate'?'selected':''}>最高 · 集中連續空位</option>
-          <option value="micro" ${defaultComplexity==='micro'?'selected':''}>就地騰位 · 以色集中(高庫存目的走道)</option>
         </select>
       </div>
       <span style="color:var(--text2)">SKU數</span>
@@ -8656,7 +8682,7 @@ function renderFW26ScheduleTable(){
   const numBase=tdBase+';font-weight:600';
 
   let html=`<table style="border-collapse:collapse;width:100%;border:1px solid ${borderClr}"><thead>`;
-  html+=`<tr><th style="${thBase};text-align:center!important;font-size:14px" colspan="${months.length+3}">26FW 預計進倉</th></tr>`;
+  // ★ 2026-07-25 Gordon：移除「26FW 預計進倉」合併標題列（圖2紅框）
   html+=`<tr><th style="${thBase};text-align:left!important">SKU</th>`;
   months.forEach((m,i)=>{html+=`<th style="${thBase};color:${monthClr}">${monthLabel(m)}</th>`;});
   html+=`<th style="${thBase}">總計</th><th style="${thBase}">預計儲區</th></tr></thead><tbody>`;
@@ -8685,9 +8711,7 @@ function renderFW26ScheduleTable(){
   html+=`<td style="${tdBase};font-size:11px;color:${textLight}">100%</td><td style="${tdBase}"></td></tr>`;
 
   html+=`</tbody></table>`;
-  if(arrivedSet.size>0){
-    html+=`<div style="font-size:11px;color:${textLight};margin-top:8px">＊ 數量為未進倉 SKU 數（已從資料庫比對扣除已進倉商品）</div>`;
-  }
+  // ★ 2026-07-25 Gordon：移除表格下方「＊ 數量為未進倉 SKU 數…」備註行
 
   document.getElementById('fw26-schedule-content').innerHTML=html;
 }
@@ -10001,6 +10025,9 @@ const SLOT_SEASON_HIST=(()=>{
 })();
 function saveSlotSeasonHist(){try{localStorage.setItem('slot_season_hist',JSON.stringify(SLOT_SEASON_HIST));}catch(e){}}
 let SLOT_MONTHLY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_2026');if(s){const o=JSON.parse(s);if(Object.keys(o).length>0)return o;}}catch(e){}return {1:28624,2:29476,3:29373,4:26521};})();
+// ★ 2026-07-25：記錄每月底 SKU 數是「哪一天的報表」設定的（{月:'YYYY-MM-DD'}）。
+//   用途：當月一律顯示最新一天（後上傳的日期覆寫前一天）；跨月後自然停止更新＝鎖定於該月最後上傳日。
+let SLOT_MONTHLY_DAY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_day_2026');if(s){const o=JSON.parse(s);if(o&&typeof o==='object')return o;}}catch(e){}return {};})();
 let SLOT_SEASON_2026=(()=>{try{return JSON.parse(localStorage.getItem('slot_season_2026')||'{"春夏":17777}');}catch(e){return {"春夏":17777};}})();
 
 function exportSlotData(){
@@ -10301,23 +10328,42 @@ function loadSlotConfig(){
   const saved=localStorage.getItem('slot_zones');
   if(saved){try{const arr=JSON.parse(saved);arr.forEach((a,i)=>{if(SLOT_ZONES[i])SLOT_ZONES[i].aisles=a;});}catch(e){}}
 }
-function checkMonthlyAutoSave(){
+// ★ 2026-07-25 Gordon #1：每月底 SKU 數改為「當月顯示最新一天、跨月鎖定」。
+//   舊行為：只有在系統日＝當月最後一天上傳時才寫入 → 當月整月都顯示「—」，月底才跳一個值。
+//   新行為：
+//     • 依「報表本身的日期」(reportDateStr，取自檔名；無則系統日) 判定所屬月份，較用系統日精確。
+//     • 若報表月份＝今天的當月 → 一律更新為該報表的 DB.length（顯示當月最新一天）；
+//       以日期比較，後上傳的日 ≥ 已存日才覆寫，避免回頭載入舊日壓過新日。
+//     • 若報表月份已是過去月份 → 不動（跨月即鎖定；該月最後一次上傳的值就是月底值）。
+//       僅在該月「完全沒有值」時允許補登一次（backfill 舊月缺漏），且同樣取最新日。
+function checkMonthlyAutoSave(reportDateStr){
   if(!DB.length)return;
+  const rd=(reportDateStr&&/^\d{4}-\d{2}-\d{2}$/.test(reportDateStr))?reportDateStr:new Date().toISOString().slice(0,10);
+  const y=+rd.slice(0,4),month=+rd.slice(5,7);
   const now=new Date();
-  const lastDay=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-  const year=now.getFullYear(),month=now.getMonth()+1;
-  // 每次上傳 ERP 若為當月最後一天，同步更新每月底 SKU（同天重傳則覆蓋）
-  if(now.getDate()===lastDay){
-    if(year===2026){
+  const curY=now.getFullYear(),curM=now.getMonth()+1;
+  const isCurrentMonth=(y===curY&&month===curM);
+  const isPastMonth=(y<curY)||(y===curY&&month<curM);
+
+  if(y===2026){
+    const prevDay=SLOT_MONTHLY_DAY_2026[month]||'';
+    const hasVal=(SLOT_MONTHLY_2026[month]!=null&&SLOT_MONTHLY_2026[month]!==''&&+SLOT_MONTHLY_2026[month]>0);
+    // 當月：一律追蹤最新一天；過去月份：僅在尚無值時補登（不覆寫已鎖定的月底值）
+    const allow = isCurrentMonth ? (!prevDay||rd>=prevDay) : (isPastMonth ? (!hasVal&&(!prevDay||rd>=prevDay)) : false);
+    if(allow){
       SLOT_MONTHLY_2026[month]=DB.length;
-      localStorage.setItem('slot_monthly_2026',JSON.stringify(SLOT_MONTHLY_2026));
-    } else if(SLOT_MONTHLY_HIST[year]){
-      SLOT_MONTHLY_HIST[year][month-1]=DB.length;
-      // 同步存入 localStorage 供後續使用
+      SLOT_MONTHLY_DAY_2026[month]=rd;
+      try{localStorage.setItem('slot_monthly_2026',JSON.stringify(SLOT_MONTHLY_2026));}catch(e){}
+      try{localStorage.setItem('slot_monthly_day_2026',JSON.stringify(SLOT_MONTHLY_DAY_2026));}catch(e){}
+    }
+  } else if(SLOT_MONTHLY_HIST[y]){
+    // 非 2026（歷史年份）：一律屬過去 → 沿用月底邏輯，僅在該月最後一天上傳時寫入（實務上不會再觸發）
+    const lastDay=new Date(y,month,0).getDate();
+    if(+rd.slice(8,10)===lastDay){
+      SLOT_MONTHLY_HIST[y][month-1]=DB.length;
       try{localStorage.setItem('slot_monthly_hist',JSON.stringify(SLOT_MONTHLY_HIST));}catch(e){}
     }
   }
-  // 無論是否最後一天，只要上傳當日已是月末則更新；若非月末則不更新
 }
 function updateSeasonSKUFromFW26(){
   if(!FW26_FILTER_DATA.length)return;
@@ -10470,7 +10516,9 @@ function renderSlotData(){
   const mBody=document.getElementById('slot-monthly-body');
   const mFoot=document.getElementById('slot-monthly-foot');
   if(mHead)mHead.innerHTML=`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">月份</th>`+allYears.map(y=>`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">${y}</th>`).join('');
-  if(mBody)mBody.innerHTML=months.map((m,i)=>`<tr><td style="padding:4px 8px;font-weight:600;text-align:center">${m}</td>${allYears.map(y=>{const v=y===2026?SLOT_MONTHLY_2026[i+1]:SLOT_MONTHLY_HIST[y]?.[i];return`<td style="padding:4px 8px;text-align:center;font-size:11px">${v!=null?num(v):'—'}</td>`;}).join('')}</tr>`).join('');
+  // ★ 2026-07-25：當月（今天所屬 2026 月份）以斜體＋tooltip 標示為「最新一天、跨月後鎖定」
+  const _now=new Date();const _liveY=_now.getFullYear(),_liveM=_now.getMonth()+1;
+  if(mBody)mBody.innerHTML=months.map((m,i)=>`<tr><td style="padding:4px 8px;font-weight:600;text-align:center">${m}</td>${allYears.map(y=>{const v=y===2026?SLOT_MONTHLY_2026[i+1]:SLOT_MONTHLY_HIST[y]?.[i];const isLive=(y===2026&&_liveY===2026&&(i+1)===_liveM);const liveDay=isLive?(SLOT_MONTHLY_DAY_2026[i+1]||''):'';return`<td style="padding:4px 8px;text-align:center;font-size:11px${isLive?';font-style:italic;color:var(--accent)':''}"${isLive?` title="當月最新一天${liveDay?'（'+liveDay+'）':''}，跨月後鎖定為月底值"`:''}>${v!=null?num(v):'—'}</td>`;}).join('')}</tr>`).join('');
   if(mFoot){
     const avgs=allYears.map(y=>{
       let vals;
@@ -11167,6 +11215,74 @@ async function backupPickCompare(){
   renderSalesCompare();
 }
 
+// ════════════════════════════════════════════════════════════
+// ★ 2026-07-25 Gordon #9：匯出單月日報表
+//   痛點：整包「📤 匯出」含滾動近 40 天（HIST_EPR_MAX_DAYS），相鄰月匯出檔會重疊約 10 天。
+//   解法：只封存所選「單一日曆月」的每日完整報表（＋當月彙總 rollup_mo_）成一個乾淨檔，
+//         逐月留存不重疊。檔案為 lativ_backup_v2 相容格式：
+//         ‧「📂 從每月備份檔挑日期」可直接讀（讀 idbAll 內 hist_epr_*）
+//         ‧「匯入」也安全：idbRestoreAll 是 os.put（合併、不清空），只會補上該月資料＋合併彙總，
+//           不會刪掉其他月份或其他設定。
+// ════════════════════════════════════════════════════════════
+function monthlyAvailableMonths(){
+  // 系統已存完整報表的日期 → 去重成 YYYY-MM，最新在前
+  return [...new Set(histEprDates().map(d=>d.slice(0,7)))].sort().reverse();
+}
+function openMonthlyExport(){
+  const months=monthlyAvailableMonths();
+  if(!months.length){alert('系統內目前沒有任何每日完整報表可匯出。\n（上傳 ERP 報表後才會逐日存下完整報表）');return;}
+  const sel=document.getElementById('monthly-export-select');
+  sel.innerHTML='';
+  months.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;sel.appendChild(o);});
+  // 預設：上個月（若有存檔），否則選最新有資料的月份
+  const now=new Date();const lastM=new Date(now.getFullYear(),now.getMonth()-1,1);
+  const lastKey=lastM.getFullYear()+'-'+String(lastM.getMonth()+1).padStart(2,'0');
+  sel.value=months.includes(lastKey)?lastKey:months[0];
+  monthlyExportPreview();
+  document.getElementById('monthly-export-modal').style.display='flex';
+}
+function monthlyExportPreview(){
+  const m=document.getElementById('monthly-export-select').value;
+  const days=histEprDates().filter(d=>d.slice(0,7)===m).sort();
+  const info=document.getElementById('monthly-export-info');
+  if(!days.length){info.textContent='此月份無完整報表';return;}
+  info.innerHTML=`此月共 <b>${days.length}</b> 天完整報表：${days[0]} ～ ${days[days.length-1]}`;
+}
+async function confirmMonthlyExport(){
+  const m=document.getElementById('monthly-export-select').value;
+  if(!m){alert('請先選擇月份');return;}
+  const days=histEprDates().filter(d=>d.slice(0,7)===m).sort();
+  if(!days.length){alert('此月份無完整報表可匯出');return;}
+  showLoading('封存 '+m+' 的每日報表中...');
+  try{
+    const idbAll={};
+    let got=0;
+    for(const d of days){
+      try{const v=await idbGet(HIST_EPR_PREFIX+d);if(v&&v.rows&&v.rows.length){idbAll[HIST_EPR_PREFIX+d]=v;got++;}}catch(e){}
+    }
+    // 帶入當月彙總（rollup_mo_YYYY-MM）供匯入時合併長期趨勢；沒有就略過
+    let rollupMo=0;
+    try{const rm=await idbGet(ROLLUP_MO_PREFIX+m);if(rm){idbAll[ROLLUP_MO_PREFIX+m]=rm;rollupMo=1;}}catch(e){}
+    if(!got){hideLoading();alert('讀取失敗：此月份沒有可封存的完整報表');return;}
+    const pkg={
+      __version:'lativ_backup_v2',
+      __exportedAt:new Date().toISOString(),
+      __monthlyArchive:m,                 // 標記：單月封存檔（供辨識，不影響讀取/匯入）
+      __exportedFrom:navigator.userAgent.substring(0,100),
+      idbAll:idbAll,
+    };
+    const blob=new Blob([JSON.stringify(pkg)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;a.download=`lativ_月報表_${m.replace('-','')}.json`;a.click();
+    URL.revokeObjectURL(url);
+    hideLoading();
+    document.getElementById('monthly-export-modal').style.display='none';
+    const sizeMB=(blob.size/1024/1024).toFixed(2);
+    alert(`✓ 已匯出 ${m} 單月日報表！\n\n檔名：lativ_月報表_${m.replace('-','')}.json\n大小：${sizeMB} MB\n\n包含：\n• 每日完整報表：${got} 天（${days[0]} ～ ${days[days.length-1]}）\n• 當月彙總：${rollupMo?'有':'無'}\n\n此檔跨月不重疊，可用「📂 從每月備份檔挑日期」讀取任一天。`);
+  }catch(err){hideLoading();alert('匯出失敗：'+err.message);}
+}
+
 // 銷售比對：系統已存日期下拉選單
 function populateCompareHistSelect(){
   const sel=document.getElementById('compare-hist-select');if(!sel)return;
@@ -11178,9 +11294,15 @@ function populateCompareHistSelect(){
   sel.disabled=!dates.length;
   sel.title=dates.length?('系統已存 '+dates.length+' 天完整報表'):'尚無完整報表存檔（此功能上線後匯入的報表才會存）';
   try{rollupUpdateStatusUI();}catch(e){}
+  try{intervalRefreshAvailability();}catch(e){}   // ★ #4：同步區間對比日期下拉
+  try{renderShipmentStatus();}catch(e){}
 }
-function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIST_MAX_DAYS);const cutStr=cutoff.toISOString().slice(0,10);Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)).forEach(k=>{if(k.replace(HIST_PREFIX,'')<cutStr)localStorage.removeItem(k);});}
-function histList(){return Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)).map(k=>k.replace(HIST_PREFIX,'')).sort().reverse();}
+function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIST_MAX_DAYS);const cutStr=cutoff.toISOString().slice(0,10);Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)&&/^\d{4}-\d{2}-\d{2}$/.test(k.slice(HIST_PREFIX.length))).forEach(k=>{if(k.slice(HIST_PREFIX.length)<cutStr)localStorage.removeItem(k);});}
+// ★ 2026-07-25：只認 YYYY-MM-DD 形態的歷史 key。
+//   根因：完整報表索引 key「lativ_hist_epr_dates」落在 HIST_PREFIX(lativ_hist_) 命名空間內，
+//   舊寫法會把它 strip 成一筆假日期「epr_dates」混進歷史下拉選單（圖4）。
+//   加日期形態 guard 即可濾掉，且防止未來任何非日期 key 再洩漏；不動索引 key 本身（下載該日報表需要它）。
+function histList(){return Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)&&/^\d{4}-\d{2}-\d{2}$/.test(k.slice(HIST_PREFIX.length))).map(k=>k.slice(HIST_PREFIX.length)).sort().reverse();}
 function histExport(){const dates=histList();if(!dates.length){alert('沒有歷史記錄可匯出');return;}const all={};dates.forEach(d=>{try{all[d]=JSON.parse(localStorage.getItem(HIST_PREFIX+d));}catch(e){}});const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`lativ_history_${dates[0].slice(0,7).replace('-','')}.json`;a.click();URL.revokeObjectURL(url);}
 function histImport(file){if(!file)return;const reader=new FileReader();reader.onload=e=>{try{const all=JSON.parse(e.target.result);let count=0;Object.entries(all).forEach(([d,snap])=>{localStorage.setItem(HIST_PREFIX+d,JSON.stringify(snap));count++;});histUpdateUI();alert(`已匯入 ${count} 筆歷史記錄`);}catch(err){alert('匯入失敗：'+err.message);}};reader.readAsText(file);}
 
@@ -11424,6 +11546,9 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       document.getElementById('compare-clear-btn').style.display='inline-flex';
     }
   }catch(e){}
+  // ★ 2026-07-25 #4：載入出貨統計 + 初始化區間對比日期下拉
+  try{await loadShipmentStats();renderShipmentStatus();}catch(e){}
+  try{intervalRefreshAvailability();}catch(e){}
   // 載入 儲位調整建議 tab 的資料
   try{
     const ar=await idbGet('aisle_report_rows');
@@ -11701,8 +11826,9 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
       <option value="">— 或選擇系統已存日期 —</option>
     </select>
     <button class="upload-btn" onclick="var d=document.getElementById('compare-hist-select').value;if(d)histDownloadEPR(d);else alert('請先在左側下拉選單選擇日期');" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="將選定日期的完整 ERP 報表下載回電腦 (.xlsx)">⬇ 下載該日報表</button>
-    <button class="upload-btn" onclick="document.getElementById('backup-pick-input').click()" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="開啟月底匯出的 lativ_backup json，直接挑某一天的報表（不匯入、不影響目前資料）">📂 從備份檔挑日期</button>
+    <button class="upload-btn" onclick="document.getElementById('backup-pick-input').click()" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="開啟每月底匯出的 lativ_backup json，直接挑某一天的報表（不匯入、不影響目前資料）">📂 從每月備份檔挑日期</button>
     <input type="file" id="backup-pick-input" accept=".json" style="display:none" onchange="backupPickFile(this.files[0]);this.value=''">
+    <button class="upload-btn" onclick="openMonthlyExport()" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="只把某一個月份的每日報表封存成一個乾淨檔案（不像整包匯出會含滾動40天、跨月重疊）。此檔可用左邊『從每月備份檔挑日期』讀取">📦 匯出單月日報表</button>
     <span id="rollup-status" style="font-size:12px;color:var(--text3);border:1px dashed var(--border);border-radius:4px;padding:3px 8px"></span>
     <span id="compare-status" style="font-size:13px;color:var(--text3)"></span>
     <span style="font-size:13px;color:var(--text3);margin-left:8px">→ 與當前 ERP 比對</span>
@@ -11762,6 +11888,26 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
         <span id="cmp-page-info" style="color:var(--text3)"></span>
         <span style="margin-left:auto;color:var(--text3)">每頁 <input type="number" min="10" step="50" value="100" onchange="cmpSetPageSize(this.value)" style="width:64px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)"> 筆</span>
       </div>
+    </div>
+
+    <!-- ★ 2026-07-25 Gordon #4：兩日期區間銷售對比（含出貨統計校正） -->
+    <div class="card" id="interval-card" style="margin-top:14px">
+      <div class="card-title" style="gap:8px;flex-wrap:wrap">
+        <span class="dot"></span>區間銷售對比（含出貨統計校正）
+        <span style="font-size:11px;color:var(--text3);font-weight:400">挑兩個系統已存日期，比對 ERP 庫存推導 vs 出貨統計實際</span>
+      </div>
+      <div style="padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;border-bottom:1px solid var(--border)">
+        <select id="iv-start" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font);background:var(--surface);color:var(--text);cursor:pointer"><option value="">起始日</option></select>
+        <span style="color:var(--text3)">→</span>
+        <select id="iv-end" style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font);background:var(--surface);color:var(--text);cursor:pointer"><option value="">結束日</option></select>
+        <button onclick="runIntervalCompare()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">▶ 計算區間</button>
+        <span style="width:1px;height:22px;background:var(--border);margin:0 4px"></span>
+        <button class="upload-btn" onclick="document.getElementById('shipment-file-input').click()" style="background:var(--surface2);color:var(--text2);border:1px solid var(--border)" title="匯入 ERP 的「匯出出貨統計」報表（含店配/宅配逐日件數），供區間實際銷售對照">⬆ 匯入出貨統計</button>
+        <input type="file" id="shipment-file-input" accept=".xlsx,.xls" style="display:none" onchange="handleShipmentUpload(event)">
+        <span id="ship-status" style="font-size:12px;color:var(--text3)">尚未匯入出貨統計</span>
+        <span id="iv-avail-note" style="font-size:11px;color:var(--text3);margin-left:auto"></span>
+      </div>
+      <div id="iv-result" style="padding:14px;font-size:13px;color:var(--text3);min-height:40px">選擇起始日與結束日後按「▶ 計算區間」。</div>
     </div>
 
     <!-- 階段1：過季款色 1F/2F 調換排名 -->
@@ -11877,7 +12023,7 @@ const EMBEDDED_FW26_STATIC = [["742900110","純棉長袖polo衫-男","白色","P
 <!-- ★ 2026-07-24 Gordon：改為可拖曳浮動視窗（不再是全螢幕遮罩），切到儲位總覽 tab 比對走道空儲位時視窗會留著、不消失 -->
 <div id="fw26-schedule-modal" style="display:none;position:fixed;top:80px;left:calc(50% - 320px);z-index:9999;background:var(--bg);border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.3);border:1px solid var(--border);max-width:92vw;min-width:600px;flex-direction:column">
   <div id="fw26-schedule-header" onmousedown="fw26DragStart(event)" style="display:flex;align-items:center;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--border);background:var(--surface);border-radius:10px 10px 0 0;cursor:move;user-select:none;flex:0 0 auto">
-    <span style="font-weight:700;font-size:16px;color:var(--accent);pointer-events:none">⠿ 26FW 預計進倉時程<span style="font-weight:400;font-size:11px;color:var(--text3);margin-left:8px">（可拖曳，切換分頁不會消失）</span></span>
+    <span style="font-weight:700;font-size:16px;color:var(--accent);pointer-events:none">⠿ 26FW 預計進倉時程</span>
     <button onclick="document.getElementById('fw26-schedule-modal').style.display='none'" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text3);line-height:1;flex:0 0 auto">✕</button>
   </div>
   <div style="padding:16px 20px;overflow:auto;max-height:calc(85vh - 52px)" id="fw26-schedule-content"></div>
