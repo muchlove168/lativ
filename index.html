@@ -2593,9 +2593,13 @@ function renderSalesCompare(){
   });
   body.innerHTML='';
   body.appendChild(frag);
-  if(filtered.length>MAX){
+  // ★ 2026-07-25 修正：MAX 未定義（2026-07-18 分頁改版遺留的截斷提示）→ 選過去日期做銷售比對時
+  //   filtered 有資料就會執行到此行拋 ReferenceError，被 compareLoadStored 的 try/catch 顯示為「載入失敗：MAX is not defined」。
+  //   分頁模式的總數已由 pager 顯示，不需截斷提示；非分頁(TOP)模式上限 99999，超過才提示（實務上幾乎不會觸發）。
+  const _CMP_CAP=99999;
+  if(!pageMode && filtered.length>_CMP_CAP){
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td colspan="11" style="padding:8px;text-align:center;color:var(--text3);font-size:11px;background:var(--surface2)">⚠ 結果共 ${filtered.length.toLocaleString()} 筆，已顯示前 ${MAX.toLocaleString()} 筆</td>`;
+    tr.innerHTML=`<td colspan="11" style="padding:8px;text-align:center;color:var(--text3);font-size:11px;background:var(--surface2)">⚠ 結果共 ${filtered.length.toLocaleString()} 筆，已顯示前 ${_CMP_CAP.toLocaleString()} 筆</td>`;
     body.appendChild(tr);
   }
 }
