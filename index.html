@@ -7938,10 +7938,9 @@ function renderArrangeCompare(){
         }else{
           zoneTd=`<td style="padding:6px 10px;text-align:center;font-weight:700;color:var(--accent)">${zone}</td>`;
         }
-        // ★ 2026-07-16：SKU 數 = 待排；已排入另以灰字標註，避免看起來「數字沒動」
-        // ★ 2026-07-25 Gordon：待排=0（已排完儲位）不再顯示「(已排 XX)」灰字，避免全排完後仍留噪訊
-        const _pl=(s.skuCount&&s.placedCount)?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上 → 不列入待排">(已排 ${s.placedCount})</span>`:'';
-        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td><td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}${_pl}</td>`+zoneTd;
+        // ★ 2026-07-16：SKU 數 = 待排（已排入不列入）
+        // ★ 2026-07-25 Gordon：各類別預計儲區表格「SKU 數」欄一律不顯示「(已排 XX)」灰字（全部週次檢視亦同）
+        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600">${cat}</td><td style="padding:6px 10px;text-align:right;color:var(--text2)">${s.skuCount.toLocaleString()}</td>`+zoneTd;
         catBody.appendChild(tr);
       });
       // ★ 新增「未匹配」列（僅 74/75 開頭）
@@ -7950,12 +7949,12 @@ function renderArrangeCompare(){
         const styles=[...new Set(newSeasonUnmatched.map(r=>String(r.code||'').substring(0,5)))];
         const _umPlaced=newSeasonUnmatched.filter(r=>plnIsPlacedCode(r.code,_pIdx)).length;
         const _umPend=newSeasonUnmatched.length-_umPlaced;
-        const _umPl=(_umPend&&_umPlaced)?`<span style="color:var(--text3);font-size:10px;margin-left:4px" title="ERP 或走道報表顯示已排入 → 不列入待排">(已排 ${_umPlaced})</span>`:'';
+        // ★ 2026-07-25 Gordon：未匹配列同樣不顯示「(已排 XX)」
         const tr=document.createElement('tr');
         tr.style.borderBottom='1px solid var(--border)';
         tr.style.background='rgba(192,57,43,0.04)';
         tr.title='款號：'+styles.join(', ');
-        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600;color:var(--red)">未匹配</td><td style="padding:6px 10px;text-align:right;color:var(--red)">${_umPend.toLocaleString()}${_umPl}</td><td style="padding:6px 10px;text-align:center;color:var(--text3)">—</td>`;
+        tr.innerHTML=`<td style="padding:6px 10px;text-align:left;font-weight:600;color:var(--red)">未匹配</td><td style="padding:6px 10px;text-align:right;color:var(--red)">${_umPend.toLocaleString()}</td><td style="padding:6px 10px;text-align:center;color:var(--text3)">—</td>`;
         catBody.appendChild(tr);
         _umPendForTotal=_umPend;
       }
