@@ -5075,7 +5075,7 @@ function plnPackScatteredLow(cells,selected,config){
  *   本骨架依 §5a/§1.6 把最低/次低明確定義為「純找空洞、不主動位移」(displacement 只在高等級)，
  *   故新 'match' 與現行 plnRunEngine 不會逐字節相同——差異 = 現行多了連續打包/位移，屬規格分級要求。
  * ═══════════════════════════════════════════════════════════════════════════ */
-const PLN_COMPLEXITY_LEVELS = ['sort','match','color','kuan','consolidate','auto'];
+const PLN_COMPLEXITY_LEVELS = ['sort','match','color','kuan','consolidate','micro','auto'];
 
 function plnLayoutVol(layout){
   const v=PLN_LAYOUT_VOLUME[layout];
@@ -5195,6 +5195,7 @@ function plnDispatchComplexity(config, ctx){
     case 'color':       res=plnComplexityConcentrate(config, ctx, {byKuan:false}); break;
     case 'kuan':        res=plnComplexityConcentrate(config, ctx, {byKuan:true}); break;
     case 'consolidate': res=plnComplexityConsolidate(config, ctx); break;
+    case 'micro':       res=plnComplexityColorMicro(config, ctx); break;  // ★ §5a-micro 就地騰位(Gordon 2026-07-25)
     case 'auto':        res=plnComplexityAuto(config, ctx); break;   // ★ §5b (Gordon 2026-07-05)
     default:
       throw new Error('plnDispatchComplexity: 未知複雜度等級 "'+lvl+'"（合法值：'+PLN_COMPLEXITY_LEVELS.join('/')+'）');
@@ -5484,6 +5485,177 @@ function plnComplexityConcentrate(config, ctx, opt){
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells,
           complexity:config.complexity, strategy:(byKuan?'以款集中':'以色集中')};
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * ★★★ §5a-micro 新增等級＝以色集中·就地騰位（Gordon 2026-07-25 拍板）★★★
+ * ───────────────────────────────────────────────────────────────────────────
+ * 情境：目的走道(如 A09)本身高庫存、幾乎無整欄空著（空位是散在各欄的 1~3 層）。
+ *   ‧ 'color' 以色集中：只肯用「已空 ≥N 層」的欄 → 此情境找不到 → 全降級找洞塞→散開。
+ *   ‧ 'consolidate' 集中連續空位：借內部整理大搬出連續空位 → 高庫存 A09 不適合大動。
+ *   本等級＝折衷：對每個 ≥3 碼色組，挑「用最少次位移就能湊出整欄」的目的欄，
+ *   把該欄少數佔用者小幅挪到走道內其他空洞（§置換 INTERNAL_DISPLACEMENT），
+ *   再把整組排入（同色同欄不同層）。
+ * 規則（Gordon 2026-07-25 確認）：
+ *   1. 以色(7碼)為單位；>4 碼沿用 §5a-split 4+1（4碼主組進一欄、溢出碼走找洞塞_匹配）。
+ *   2. 選欄優先序：位移次數少(=挑原本就缺幾層的欄) → 不拆已成群色欄 → 碼對層 → 大材積
+ *      → 目的走道內部集中度 → 欄號。
+ *   3. 位移上限＝排入 SKU 數 ×0.5（向上取整）；某色組在預算內湊不出整欄 → 降級找洞塞_匹配。
+ *   4. 被挪佔用者：非成群、銷售低者優先挪；落到走道內其他空洞（層對應優先）；立即 locked 防連鎖。
+ *      新品(§1.6)/locked 佔用者不挪。
+ *   ‧ 零回歸：本函式僅在 config.complexity==='micro' 時觸發，不影響其餘五級與自動。
+ * ═══════════════════════════════════════════════════════════════════════════ */
+function plnComplexityColorMicro(config, ctx){
+  const {cells, selected, capacity, deficit, xxSalesMax}=ctx;
+  const moves=ctx.moves||[];
+  const geo=config.aisleGeometry||plnGetAisleGeometry();
+  const dests=config.destination||[];
+  const failed=[];
+
+  // ── 來源正規化（帶來源位置，供集中度距離計分）──
+  const rows=selected.map(r=>{
+    const sku=String(r['商品編號']||'');
+    const srcCell=plnFindSkuCell(cells,sku,config.source);
+    const src=srcCell?cells[srcCell]:null;
+    return {sku, size:r['尺寸'], raw:r, srcAisle:src?src.aisle:null, srcCol:src?src.col:null};
+  }).filter(r=>r.sku);
+
+  // ── 依色(color7)分組；≥3 碼 = 集中色(4+1 切塊)，<3 碼 = 零散（同 plnComplexityConcentrate）──
+  const colorMap=new Map();
+  rows.forEach(r=>{ const c=plnSkuKuanSe(r.sku); if(!colorMap.has(c))colorMap.set(c,[]); colorMap.get(c).push(r); });
+  const groupedColors=[]; const scattered=[];
+  for(const [c7, crows] of colorMap){
+    if(crows.length<3){ scattered.push(...crows); continue; }
+    const sorted=[...crows].sort((a,b)=>
+      PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku) || a.sku.localeCompare(b.sku));
+    for(let i=0;i<sorted.length;i+=4){
+      const chunk=sorted.slice(i,i+4);
+      if(chunk.length>=3) groupedColors.push({color7:c7, rows:chunk});
+      else scattered.push(...chunk);
+    }
+  }
+
+  // §位移預算（Gordon 2026-07-25）：置換總數 ≤ 排入 SKU 數 ×0.5
+  const dispCap=Math.ceil(rows.length*0.5);
+  let dispUsed=0;
+
+  // 目的走道內部集中度（同 plnComplexityConcentrate）：離同款(5碼)既有欄越近越好
+  const nearestKuanCol=(a,col,kuan5)=>{
+    let best=null;
+    Object.values(cells).forEach(cs=>{
+      if(cs.aisle!==a||!cs.sku)return;
+      if(String(cs.sku).substring(0,5)!==kuan5)return;
+      const d=Math.abs(cs.col-col); if(best==null||d<best)best=d;
+    });
+    return best==null?500:best;
+  };
+  const distSum=(crows,a,col)=>crows.reduce((s,r)=>{
+    if(r.srcAisle===a)
+      return s+(geo[a]?plnAisleDistance(r.srcCol,col,geo[a].min,geo[a].max):Math.abs(r.srcCol-col));
+    return s+nearestKuanCol(a,col,String(r.sku).substring(0,5));
+  },0);
+
+  // 該欄可動佔用層（排除新品 §1.6；locked 已由 plnColState 歸入 locked 不計入 occupied）
+  const movableOcc=(a,col,occ)=>occ.filter(L=>
+    !(((cells[plnCellId(a,col,L)].info)||{})._isNewProduct===true));
+
+  // 評估一欄：能否以 need(=N-空層) 次位移容納色組；回傳評分或 null
+  function evalColumn(a,col,crows){
+    const N=crows.length;
+    const st=plnColState(cells,a,col);
+    const free=st.empty; const occM=movableOcc(a,col,st.occupied);
+    if(free.length+occM.length<N)return null;             // 含 locked/新品 卡住 → 塞不下
+    const need=Math.max(0,N-free.length);
+    if(need>dispCap-dispUsed)return null;                 // 超位移預算
+    const occCell=st.occupied.length?cells[plnCellId(a,col,st.occupied[0])]:null;
+    const breaks=(need>0 && occCell && plnClusterGroupSales(cells,occCell)>0)?1:0;
+    const anyL=free.length?free[0]:occM[0];
+    const layout=(cells[plnCellId(a,col,anyL)]||{}).layout||'';
+    const cand=[...free,...occM].sort((x,y)=>x-y).slice(0,N);
+    const asg=plnAssignColorToColumn(cand,crows);
+    const matched=asg?asg.matched:0;
+    return {aisle:a, col, score:[need, breaks, N-matched, -plnLayoutVol(layout), distSum(crows,a,col), col]};
+  }
+
+  // 規劃並排入一色組到 (a,col)：先位移少數佔用者→再排入。安置不了佔用者→回傳 false（降級）。
+  function planAndPlace(a,col,crows){
+    const N=crows.length;
+    const st=plnColState(cells,a,col);
+    const free=[...st.empty]; const occM=movableOcc(a,col,st.occupied);
+    const need=Math.max(0,N-free.length);
+    // 選要位移的佔用層：非成群優先 → 銷售低 → 層號
+    const occInfo=occM.map(L=>{ const cc=cells[plnCellId(a,col,L)];
+      return {L, grp:plnClusterGroupSales(cells,cc)>0?1:0,
+        sales:Number(((cc.info||{})['銷售庫存'])||0)}; });
+    occInfo.sort((x,y)=>(x.grp-y.grp)||(x.sales-y.sales)||(x.L-y.L));
+    const dispLayers=occInfo.slice(0,need).map(d=>d.L);
+    const freeAfter=[...free, ...dispLayers].sort((x,y)=>x-y);
+    const groupCells=new Set(freeAfter.map(L=>plnCellId(a,col,L)));
+    // 規劃 rehome（先算好再套用，避免部分變動殘留）
+    const usedDest=new Set(); const rehome=[];
+    for(const L of dispLayers){
+      const srcId=plnCellId(a,col,L); const cc=cells[srcId];
+      const tL=plnGetTargetLayer(cc.sku,(cc.info||{})['尺寸']);
+      let best=null,bk=null;
+      Object.values(cells).forEach(cs=>{
+        if(cs.sku||cs.locked)return;
+        if(!dests.includes(cs.aisle))return;
+        if(groupCells.has(cs.cell)||usedDest.has(cs.cell))return;
+        const lm=(tL!=null && cs.layer===tL)?0:1;
+        const same=cs.aisle===a?0:1;
+        const dist=(cs.aisle===a && geo[a])?plnAisleDistance(col,cs.col,geo[a].min,geo[a].max):999;
+        const key=[lm,same,dist,cs.col,cs.layer];
+        if(bk===null||plnCmpScoreArr(key,bk)<0){ bk=key; best=cs; }
+      });
+      if(!best)return false;                              // 無處安置 → 放棄本欄（降級找洞塞）
+      usedDest.add(best.cell);
+      rehome.push({src:srcId, sku:cc.sku, info:cc.info, dst:best.cell});
+    }
+    // 套用位移（§置換 INTERNAL_DISPLACEMENT）
+    rehome.forEach(rm=>{
+      moves.push({phase:'INTERNAL_DISPLACEMENT',sku:rm.sku,src:rm.src,dst:rm.dst,dstLayout:(cells[rm.dst]||{}).layout||''});
+      cells[rm.dst].sku=rm.sku; cells[rm.dst].info=rm.info; cells[rm.dst].locked=true;
+      cells[rm.src].sku=null; cells[rm.src].info=null;
+    });
+    dispUsed+=rehome.length;
+    // 排入色組（碼序對層；freeAfter 現已全空、剛好 N 層）
+    const asg=plnAssignColorToColumn(freeAfter,crows);
+    Object.entries(asg.assign).forEach(([sku,L])=>{
+      const dstId=plnCellId(a,col,L);
+      const srcCell=plnFindSkuCell(cells,sku,config.source);
+      let srcInfo=null;
+      if(srcCell){ srcInfo=cells[srcCell].info; cells[srcCell].sku=null; cells[srcCell].info=null; }
+      cells[dstId].sku=sku; cells[dstId].info=srcInfo; cells[dstId].locked=true;
+      moves.push({phase:'SOURCE_TO_DEST',sku,src:srcCell,dst:dstId,dstLayout:(cells[dstId]||{}).layout||''});
+    });
+    return true;
+  }
+
+  // ── 主迴圈：大色組先（較難安置），同大小以 color7 穩定 ──
+  groupedColors.sort((a,b)=> b.rows.length-a.rows.length || a.color7.localeCompare(b.color7));
+  for(const gc of groupedColors){
+    let best=null,bestScore=null;
+    for(const a of dests){
+      for(const col of plnValidCols(cells,a)){
+        const ev=evalColumn(a,col,gc.rows);
+        if(!ev)continue;
+        if(bestScore===null||plnCmpScoreArr(ev.score,bestScore)<0){ bestScore=ev.score; best=ev; }
+      }
+    }
+    if(!best){ scattered.push(...gc.rows); continue; }     // 無可負擔欄 → 降級找洞塞
+    const ok=planAndPlace(best.aisle,best.col,gc.rows);
+    if(!ok){ scattered.push(...gc.rows); continue; }       // 佔用者安置不了 → 降級找洞塞
+  }
+
+  // ── 零散 SKU + 降級色組 → 找洞塞_匹配 ──
+  if(scattered.length){
+    const hf=plnFindHoleFill(config, {cells, selected:scattered.map(r=>r.raw), capacity, deficit, xxSalesMax, moves}, {match:true});
+    (hf.failed||[]).forEach(f=>failed.push(f));
+  }
+
+  return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:cells,
+          complexity:config.complexity, strategy:'以色集中·就地騰位', microDisp:dispUsed};
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
  * ★★★ §5a 最高＝集中連續空位後排入（階段3）★★★
@@ -7076,6 +7248,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
           <option value="color" ${defaultComplexity==='color'?'selected':''}>中等 · 以色集中</option>
           <option value="kuan" ${defaultComplexity==='kuan'?'selected':''}>次高 · 以款集中</option>
           <option value="consolidate" ${defaultComplexity==='consolidate'?'selected':''}>最高 · 集中連續空位</option>
+          <option value="micro" ${defaultComplexity==='micro'?'selected':''}>就地騰位 · 以色集中(高庫存目的走道)</option>
         </select>
       </div>
       <span style="color:var(--text2)">SKU數</span>
@@ -11284,6 +11457,28 @@ function monthlyExportPreview(){
   if(!days.length){info.textContent='此月份無完整報表';return;}
   info.innerHTML=`此月共 <b>${days.length}</b> 天完整報表：${days[0]} ～ ${days[days.length-1]}`;
 }
+// ★ 2026-07-26 Gordon#2：每月匯出後自動開 Gmail 撰寫頁（主旨/內文預填，收件人=本機記住的自己 gmail）
+//   瀏覽器無法讀取登入中的 Google 帳號，故首次使用時詢問一次並記在本機，之後自動帶入收件人。
+function lativSelfBackupEmail(){
+  let e='';try{e=localStorage.getItem('lativ_backup_self_email')||'';}catch(_){}
+  if(!e){
+    e=((typeof prompt==='function'?prompt('第一次使用：請輸入要收「每月備份」的 Gmail 地址\n（本機記住，之後自動帶入收件人；可留空，留空則寄件時自行填）',''):'')||'').trim();
+    if(e){try{localStorage.setItem('lativ_backup_self_email',e);}catch(_){}}
+  }
+  return e;
+}
+function lativGmailBackupCompose(m){
+  try{
+    const to=lativSelfBackupEmail();
+    const fn='lativ_月報表_'+m.replace('-','')+'.json';
+    const su=encodeURIComponent(m.replace('-','_')+'月_當月每日報表留存');
+    const body=encodeURIComponent('本信附件為 lativ 倉庫系統匯出的「'+m+' 每日 ERP 報表」備份檔（'+fn+'），供跨裝置留存與回溯查詢。\n\n※ 請手動夾帶剛剛下載的「'+fn+'」後再按發送。');
+    let url='https://mail.google.com/mail/?view=cm&fs=1&tf=1&su='+su+'&body='+body;
+    if(to)url+='&to='+encodeURIComponent(to);
+    const w=window.open(url,'_blank');
+    if(!w){alert('報表已下載完成。\n\n瀏覽器擋下了自動開啟的 Gmail 視窗，請允許本站的彈出視窗，或手動到 Gmail 撰寫並夾帶剛下載的檔案。');}
+  }catch(e){}
+}
 async function confirmMonthlyExport(){
   const m=document.getElementById('monthly-export-select').value;
   if(!m){alert('請先選擇月份');return;}
@@ -11312,6 +11507,7 @@ async function confirmMonthlyExport(){
     const a=document.createElement('a');
     a.href=url;a.download=`lativ_月報表_${m.replace('-','')}.json`;a.click();
     URL.revokeObjectURL(url);
+    lativGmailBackupCompose(m);   // ★ 2026-07-26 Gordon#2：下載完成同時開 Gmail 撰寫頁（預填主旨/內文/收件人=自己）
     hideLoading();
     document.getElementById('monthly-export-modal').style.display='none';
     const sizeMB=(blob.size/1024/1024).toFixed(2);
