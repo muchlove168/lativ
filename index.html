@@ -6668,14 +6668,21 @@ function plnRunNewEngine(config,initialCells){
         }
 
         // ── rule 4：孤立/架尾 G 欄偵測 ──
-        //   孤立 G 欄 = 全空大材積欄 c，其左鄰(c-1)非可用(占用/缺號)、右鄰(c+1)為全空小材積欄
+        //   孤立 G 欄 = 全空大材積欄 c，其左鄰(c-1)為「真實存在且被占用」、右鄰(c+1)為全空小材積欄
         //   ＝某已滿架尾端殘留的單一 G 欄（無同架空 A 可配對放溢出）→ 留給純 4 碼色。
+        //   ★2026-07-30 修正（Gordon C04 米白→109 案）：舊判定「左鄰非可用(占用/缺號)」把「柱位缺欄
+        //     (left 不存在)」也算成占用邊界。在幾乎全空的走道裡，某大欄剛好落在「柱位缺口之後、其後
+        //     又緊接 B 欄」（如 C04-109＝架首C，其左 108 為柱位、右 110 為 B），就被誤判成孤立殘欄，
+        //     於是第一個純 4 碼色被傳送到走道深處那一欄（米白→109），既不緊湊也破壞剩餘空儲位連續性。
+        //     柱位是「結構性缺口」不是「占用邊界」——只有左鄰是「真實存在且被實貨占用」的欄，c 才是
+        //     值得回收的架尾殘欄。故加 leftExists 條件；packed 走道左鄰為實貨占用的 P06 型回收不受影響。
         const isolatedSet=new Set();
         bigColsAvail.forEach(c=>{
           const left=cells[plnCellId(aisle,c-1,1)];
+          const leftExists=!!left;                     // ★ 柱位缺欄(left 不存在)不算占用邊界
           const leftFree=left&&!left.sku&&!left.locked&&colFullyFree(c-1);
           const rightSmallFree=isSmallLayout(getColLayout(aisle,c+1))&&colFullyFree(c+1);
-          if(!leftFree&&rightSmallFree)isolatedSet.add(c);
+          if(leftExists&&!leftFree&&rightSmallFree)isolatedSet.add(c);
         });
 
         // ── 主碼候選欄（大材積、全空、非架首C、非孤立），小材積候選欄（全空）──
@@ -6814,6 +6821,20 @@ function plnRunNewEngine(config,initialCells){
           //   （free≥剩餘數，保持同色不拆）→ ③ 密度：剩餘層少的欄優先（湊滿不留半欄）→ ④ 欄距。對既有占用穩健。
           const allOvf=racks.flatMap(rk=>rk.ovfCols);
           const shortBackup=[]; racks.forEach(rk=>{ if(rk.isShort)rk.cols.forEach(c=>shortBackup.push(c)); });
+          // ★2026-07-30（Gordon C04 案）：把「主碼欄的殘格」納入溢出候選池。
+          //   殘格＝部分被占用（含 ≥1 空層且 ≥1 占用層）的欄——多為上一批釋放主碼後單獨留下的零散空
+          //   儲位（例 C04-021-4：上批全三碼佔 1~3 層、第 4 層釋放留空）。舊池只含 ovfCols(架首C+B)＋
+          //   短架，看不到這些殘格 → 溢出碼跳過殘格、改開新的溢出欄（深灰 150 開新的 025，021-4 被浪費）。
+          //   密度最優先（Gordon 明示「應先將這三個零散空儲位處理掉、直接拿來放溢出碼」）：殘格整欄已被
+          //   占用、永遠排不進主碼組，拿其空層放溢出碼是純密度增益；ovSort 以「架距最近」為第一鍵，故
+          //   只有同架（就近）的色會取用該架殘格，不會把溢出碼拉到走道深處。
+          const residualCols=[];
+          [...allCols].forEach(c=>{
+            if(plnIsTempZoneSlot(plnCellId(aisle,c,1)))return;   // 暫放區不納入
+            let emp=0,occ=0;
+            for(let L=1;L<=4;L++){ const cs=cells[plnCellId(aisle,c,L)]; if(!cs)continue; if(cs.sku||cs.locked)occ++; else emp++; }
+            if(emp>0&&occ>0)residualCols.push(c);                // 部分占用＝殘格欄
+          });
           const rackOf=col=>{ const s=_segOf.get(col); return s?s.ri:-99; };
           const ovGroups=[];
           for(const e of colorEntries){
@@ -6826,7 +6847,7 @@ function plnRunNewEngine(config,initialCells){
             ovGroups.push({donor:e,items,mc:(e.mainCol!=null?e.mainCol:0)});
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
-          const allPool=[...allOvf,...shortBackup];
+          const allPool=[...new Set([...allOvf,...shortBackup,...residualCols])];
           // ★2026-07-21 兩段式配置（Gordon C06 案）：
           //   原本一輪貪婪、依主碼欄序處理 → 前面的色可能先搶走「別架」的溢出欄，
           //   把同架後面的色擠到更遠的架（7516601 佔走 175 → 7517201 只能掉到 169）。
