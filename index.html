@@ -490,6 +490,7 @@
           <th>顏色數</th><th>尺寸段</th>
           <th class="sortable-th" onclick="sortFW26('包裝耗材')">包裝耗材 ⇅</th>
           <th class="sortable-th" onclick="sortFW26('類別')">類別 ⇅</th>
+          <th>倉位</th>
           <th>狀態</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
@@ -3332,13 +3333,15 @@ function forecastBuildSelectedSkus(selection){
   return {rows:dedupedRows, includeStyleCat, catLookup};
 }
 
-// 匯出待安排新品儲位報表 — 欄位: 商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 商品包材, 類別
+// 匯出待安排新品儲位報表 — 欄位: 商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 倉位, 商品包材, 類別
+//   ★「倉位」＝26FW 新品報表的倉位（1F/3F/4F），依款號（商品編號前5碼）自動帶入；與 ERP「預計倉位」並存
 async function exportArrangeNewReport(){
   const selection=forecastCollectSelection();
   if(!selection.length){alert('請先勾選要匯出的櫃號或類別 (預告進貨明細左側 checkbox)');return;}
   if(!ARRANGE_DATA||!ARRANGE_DATA.length){alert('儲位安排報表尚未上傳, 無法匯出');return;}
   const {rows, catLookup}=forecastBuildSelectedSkus(selection);
   if(!rows.length){alert('勾選範圍內沒有可匯出的 SKU\n(可能該櫃內的款號未在儲位安排報表中)');return;}
+  buildFW26SlotLookup();  // ★ 以最新 26FW 名單建立款號→倉位
   // 按 (類別, 商品編號) 排序
   rows.sort((a,b)=>{
     const ca=catLookup[a.code]||'';
@@ -3346,13 +3349,13 @@ async function exportArrangeNewReport(){
     if(ca!==cb)return ca<cb?-1:1;
     return String(a.code).localeCompare(String(b.code));
   });
-  const cols=['商品編號','商品名稱','尺寸','儲位','材積','未到量','預計倉位','商品包材','類別'];
+  const cols=['商品編號','商品名稱','尺寸','儲位','材積','未到量','預計倉位','倉位','商品包材','類別'];
   const aoa=[cols];
   rows.forEach(r=>{
-    aoa.push([r.code,r.name,r.size,r.slot,r.volume||0,r.pending||0,r.plannedSlot||'',r.packaging||'',catLookup[r.code]||'']);
+    aoa.push([r.code,r.name,r.size,r.slot,r.volume||0,r.pending||0,r.plannedSlot||'',fw26SlotOf(r.code),r.packaging||'',catLookup[r.code]||'']);
   });
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:14},{wch:10}];
+  ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:8},{wch:14},{wch:10}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'待安排新品');
   // ★ 檔名格式: 進口編號_櫃號/櫃型 (去掉櫃號後面的 (箱數) 標註); 多櫃情況附加「_等N櫃」
@@ -6668,21 +6671,14 @@ function plnRunNewEngine(config,initialCells){
         }
 
         // ── rule 4：孤立/架尾 G 欄偵測 ──
-        //   孤立 G 欄 = 全空大材積欄 c，其左鄰(c-1)為「真實存在且被占用」、右鄰(c+1)為全空小材積欄
+        //   孤立 G 欄 = 全空大材積欄 c，其左鄰(c-1)非可用(占用/缺號)、右鄰(c+1)為全空小材積欄
         //   ＝某已滿架尾端殘留的單一 G 欄（無同架空 A 可配對放溢出）→ 留給純 4 碼色。
-        //   ★2026-07-30 修正（Gordon C04 米白→109 案）：舊判定「左鄰非可用(占用/缺號)」把「柱位缺欄
-        //     (left 不存在)」也算成占用邊界。在幾乎全空的走道裡，某大欄剛好落在「柱位缺口之後、其後
-        //     又緊接 B 欄」（如 C04-109＝架首C，其左 108 為柱位、右 110 為 B），就被誤判成孤立殘欄，
-        //     於是第一個純 4 碼色被傳送到走道深處那一欄（米白→109），既不緊湊也破壞剩餘空儲位連續性。
-        //     柱位是「結構性缺口」不是「占用邊界」——只有左鄰是「真實存在且被實貨占用」的欄，c 才是
-        //     值得回收的架尾殘欄。故加 leftExists 條件；packed 走道左鄰為實貨占用的 P06 型回收不受影響。
         const isolatedSet=new Set();
         bigColsAvail.forEach(c=>{
           const left=cells[plnCellId(aisle,c-1,1)];
-          const leftExists=!!left;                     // ★ 柱位缺欄(left 不存在)不算占用邊界
           const leftFree=left&&!left.sku&&!left.locked&&colFullyFree(c-1);
           const rightSmallFree=isSmallLayout(getColLayout(aisle,c+1))&&colFullyFree(c+1);
-          if(leftExists&&!leftFree&&rightSmallFree)isolatedSet.add(c);
+          if(!leftFree&&rightSmallFree)isolatedSet.add(c);
         });
 
         // ── 主碼候選欄（大材積、全空、非架首C、非孤立），小材積候選欄（全空）──
@@ -6821,20 +6817,6 @@ function plnRunNewEngine(config,initialCells){
           //   （free≥剩餘數，保持同色不拆）→ ③ 密度：剩餘層少的欄優先（湊滿不留半欄）→ ④ 欄距。對既有占用穩健。
           const allOvf=racks.flatMap(rk=>rk.ovfCols);
           const shortBackup=[]; racks.forEach(rk=>{ if(rk.isShort)rk.cols.forEach(c=>shortBackup.push(c)); });
-          // ★2026-07-30（Gordon C04 案）：把「主碼欄的殘格」納入溢出候選池。
-          //   殘格＝部分被占用（含 ≥1 空層且 ≥1 占用層）的欄——多為上一批釋放主碼後單獨留下的零散空
-          //   儲位（例 C04-021-4：上批全三碼佔 1~3 層、第 4 層釋放留空）。舊池只含 ovfCols(架首C+B)＋
-          //   短架，看不到這些殘格 → 溢出碼跳過殘格、改開新的溢出欄（深灰 150 開新的 025，021-4 被浪費）。
-          //   密度最優先（Gordon 明示「應先將這三個零散空儲位處理掉、直接拿來放溢出碼」）：殘格整欄已被
-          //   占用、永遠排不進主碼組，拿其空層放溢出碼是純密度增益；ovSort 以「架距最近」為第一鍵，故
-          //   只有同架（就近）的色會取用該架殘格，不會把溢出碼拉到走道深處。
-          const residualCols=[];
-          [...allCols].forEach(c=>{
-            if(plnIsTempZoneSlot(plnCellId(aisle,c,1)))return;   // 暫放區不納入
-            let emp=0,occ=0;
-            for(let L=1;L<=4;L++){ const cs=cells[plnCellId(aisle,c,L)]; if(!cs)continue; if(cs.sku||cs.locked)occ++; else emp++; }
-            if(emp>0&&occ>0)residualCols.push(c);                // 部分占用＝殘格欄
-          });
           const rackOf=col=>{ const s=_segOf.get(col); return s?s.ri:-99; };
           const ovGroups=[];
           for(const e of colorEntries){
@@ -6847,7 +6829,7 @@ function plnRunNewEngine(config,initialCells){
             ovGroups.push({donor:e,items,mc:(e.mainCol!=null?e.mainCol:0)});
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
-          const allPool=[...new Set([...allOvf,...shortBackup,...residualCols])];
+          const allPool=[...allOvf,...shortBackup];
           // ★2026-07-21 兩段式配置（Gordon C06 案）：
           //   原本一輪貪婪、依主碼欄序處理 → 前面的色可能先搶走「別架」的溢出欄，
           //   把同架後面的色擠到更遠的架（7516601 佔走 175 → 7517201 只能掉到 169）。
@@ -7921,6 +7903,7 @@ function plannerRenderResult(r){
 function plannerExportResult(){
   if(!PLN_LAST_RESULT){alert('先執行計畫');return;}
   const r=PLN_LAST_RESULT;
+  buildFW26SlotLookup();  // ★ 以最新 26FW 名單建立款號→倉位（1F/3F/4F）
   // === Sheet 1: 新品安排 (含擺法欄位, 不含顏色) ===
   const cols1=['商品編號','商品名稱','尺寸','儲位','擺法','倉位','未到量'];
   const aoa1=[cols1];
@@ -7932,7 +7915,7 @@ function plannerExportResult(){
     .sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號']))).forEach(s=>{
     const slot=s['儲位']||'';
     const layout=moveLayoutMap[slot]||'';
-    aoa1.push([s['商品編號'],s['商品名稱'],s['尺寸'],slot,layout,'',s['未到量']||0]);
+    aoa1.push([s['商品編號'],s['商品名稱'],s['尺寸'],slot,layout,fw26SlotOf(s['商品編號']),s['未到量']||0]);
   });
 
   const wb=XLSX.utils.book_new();
@@ -8677,6 +8660,25 @@ function renderArrangeCompare(){
 // 26FW — 排序狀態
 let FW26_SORT = { col: '', asc: true };
 
+// ★ 26FW 倉位查表：以款號（=商品編號前5碼）為鍵，值 1F/3F/4F。
+//   來源＝FW26_FILTER_DATA[8]款號 → [13]倉位（同款號一致）。
+//   供「匯出待排新品」「情境配置匯出」以款號自動帶入倉位。
+function buildFW26SlotLookup(){
+  const m={};
+  (FW26_FILTER_DATA||[]).forEach(r=>{
+    const kh=String(r&&r[8]||'').trim();
+    const slot=String(r&&r[13]||'').trim();
+    if(kh&&slot)m[kh]=slot;
+  });
+  window.EMBEDDED_FW26_SLOT=m;
+  return m;
+}
+function fw26SlotOf(code){
+  const m=window.EMBEDDED_FW26_SLOT||buildFW26SlotLookup();
+  const kh=String(code||'').trim().slice(0,5);
+  return m[kh]||'';
+}
+
 // 26FW — 上傳報表
 async function handleFW26Upload(event){
   const file=event.target.files[0];if(!file)return;
@@ -8689,7 +8691,7 @@ async function handleFW26Upload(event){
     // ★ 格式驗證
     const validate = validateReportFormat(raw, ['商品編號','商品名稱','類別','預計交期','款號'], '26FW 新品報表');
     if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
-    // A~M: 採購人員,採購單季別,分類,款號,商品編號,商品名稱,顏色名稱,尺寸,預計交期,顏色數,尺寸段,包裝耗材,類別
+    // A~N: 採購人員,採購單季別,分類,款號,商品編號,商品名稱,顏色名稱,尺寸,預計交期,顏色數,尺寸段,包裝耗材,類別,倉位
     FW26_FILTER_DATA=raw.map(r=>[
       String(r['商品編號']||'').trim(),
       r['商品名稱']||'',
@@ -8703,8 +8705,11 @@ async function handleFW26Upload(event){
       r['尺寸']||'',
       r['顏色數']||'',
       r['尺寸段']||'',
-      r['包裝耗材']||''
+      r['包裝耗材']||'',
+      String(r['倉位']||'').trim()   // [13] 預計倉位（1F/3F/4F，依款號一致）
     ]);
+    // ★ 建立 26FW 款號→倉位 查表（供待排新品/情境配置匯出帶入）
+    buildFW26SlotLookup();
     // 更新 EMBEDDED_FW26_LOOKUP
     window.EMBEDDED_FW26_LOOKUP={};
     FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])window.EMBEDDED_FW26_LOOKUP[r[0]]=r[3];});
@@ -9029,10 +9034,10 @@ function renderFW26Table(){
   data.slice(0,1000).forEach(row=>{
     const isArrived=arrivedSet.has(row[0]);
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td style="font-size:11px">${row[5]||'—'}</td><td style="font-size:11px">${row[6]||'—'}</td><td style="font-size:11px">${row[7]||'—'}</td><td class="num" style="font-size:11px">${row[8]||'—'}</td><td class="num" style="font-size:11px">${row[0]}</td><td class="label-cell" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;font-size:11px">${row[1]||''}</td><td style="font-size:11px">${row[2]||''}</td><td style="font-size:11px">${row[9]||''}</td><td style="font-size:11px">${row[4]||''}</td><td class="num" style="font-size:11px">${row[10]||''}</td><td class="num" style="font-size:11px">${row[11]||''}</td><td style="font-size:11px;max-width:100px;overflow:hidden;text-overflow:ellipsis">${row[12]||''}</td><td style="font-size:11px">${row[3]||''}</td><td><span class="fw-tag ${isArrived?'fw-in':'fw-out'}">${isArrived?'已進倉':'未進倉'}</span></td>`;
+    tr.innerHTML=`<td style="font-size:11px">${row[5]||'—'}</td><td style="font-size:11px">${row[6]||'—'}</td><td style="font-size:11px">${row[7]||'—'}</td><td class="num" style="font-size:11px">${row[8]||'—'}</td><td class="num" style="font-size:11px">${row[0]}</td><td class="label-cell" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;font-size:11px">${row[1]||''}</td><td style="font-size:11px">${row[2]||''}</td><td style="font-size:11px">${row[9]||''}</td><td style="font-size:11px">${row[4]||''}</td><td class="num" style="font-size:11px">${row[10]||''}</td><td class="num" style="font-size:11px">${row[11]||''}</td><td style="font-size:11px;max-width:100px;overflow:hidden;text-overflow:ellipsis">${row[12]||''}</td><td style="font-size:11px">${row[3]||''}</td><td style="font-size:11px;text-align:center;font-weight:600;color:var(--accent)">${row[13]||'—'}</td><td><span class="fw-tag ${isArrived?'fw-in':'fw-out'}">${isArrived?'已進倉':'未進倉'}</span></td>`;
     tbody.appendChild(tr);
   });
-  if(data.length>1000){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="14" style="color:var(--text3);text-align:center;padding:10px">共 ${data.length} 筆，顯示前 1000 筆</td>`;tbody.appendChild(tr);}
+  if(data.length>1000){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="15" style="color:var(--text3);text-align:center;padding:10px">共 ${data.length} 筆，顯示前 1000 筆</td>`;tbody.appendChild(tr);}
   // 區間進倉統計
   renderFW26PeriodStats(dateFrom,dateTo,catFilter);
 }
