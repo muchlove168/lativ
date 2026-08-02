@@ -6766,6 +6766,29 @@ function plnRunNewEngine(config,initialCells){
             putGroup(e,e.groups[k],col);
           }
         }
+        // ★2026-08-02（Gordon C04 v2 案）逼不得已時，挪用架首C(firstCset)當主碼欄——
+        //   僅當一般主碼欄池(mainColPool)已耗盡、仍有色排不進主碼時才觸發（真正「主碼欄不足」，
+        //   非本次 C04 測試情境，屬未來一般性備援；本次 23 色對 23 主碼欄剛好吃滿，不會觸發）。
+        //   挑欄號最小的架首C優先（維持前段密度）；借用後從 firstCset 移除、同步從其所屬架的
+        //   ovfCols 拿掉，讓後續溢出配置不會誤把它當保留欄——該架自此少 1 個保留溢出格，
+        //   其溢出改仰賴同架優先→全走道就近的既有機制，屬使用者本輪明確認可的合理代價。
+        //   僅處理單主碼組色（e.groups.length===1），避免動到較複雜的多組色情境。
+        //   ⚠ 此路徑尚未有真實觸發案例可驗證，之後若遇到主碼欄真的不足的案例，應優先補測。
+        {
+          const stillNeed=remaining.filter(e=>!e._forceA&&!e.placed&&e.groups.length===1);
+          if(stillNeed.length){
+            const borrowCands=[...firstCset].filter(c=>colFullyFree(c)&&!usedColSet.has(c)).sort((a,b)=>a-b);
+            let bi=0;
+            for(const e of stillNeed){
+              if(bi>=borrowCands.length)break;
+              const c=borrowCands[bi++];
+              putGroup(e,e.groups[0],c);
+              firstCset.delete(c);
+              const seg=_segOf.get(c);
+              if(seg){ const rk=_racks[seg.ri]; const p=rk.ovfCols.indexOf(c); if(p>=0)rk.ovfCols.splice(p,1); }
+            }
+          }
+        }
         // ★ §3.7-①（2026-07-15 Gordon D10 實測案）：1~3碼色（無完整4碼主碼組、整色原歸溢出）→
         //   主碼組放完後，優先嘗試「部分主碼組」：取一個全空主碼欄（例：D10-165），
         //   而非整色被溢出打包拆散塞 056-3/4、079-4 殘格。
@@ -6866,44 +6889,62 @@ function plnRunNewEngine(config,initialCells){
           //   剩餘空格自然集中走道尾端）→ ⑤ 弱就近把關(rackDist)→ ⑥ 湊滿殘欄→ ⑦ 離主碼近(最終)。
           //   （舊版 rackDist 為主鍵＋「離主碼近」壓過欄序，導致每架局部留空格、firstC 欄被跳過，
           //    如 C04 的 043/049 整欄空、037-3/4、056-4 散落中段。）
-          const ovSort=(g,need)=>{ const mr=rackOf(g.mc); return (a,b)=>
+          // ★2026-08-02 v3：上方 ovSort/fillFrom/fitWhole（欄號優先版）已被下方
+          //   ovSortNear/fillFromB/fitWholeB（budget+鄰近架優先版）取代並移除，不再呼叫。
+          // ── 密度 budget 鎖死用量 + 鄰近架優先指派（Gordon 2026-08-02 C04 v3 案）──
+          //   使用者明確裁示優先序：①空格不可分散在不同架（密度=硬約束，不可退讓）
+          //     ②溢出碼盡量別跨架（在①不受影響的前提下盡量優化）。
+          //   【上一版問題】純「同架優先＋全域備援」(v2) 會讓每一架各自的局部餘量(supply>demand)
+          //     散落在原地，導致空格分散在 5 個不同架（038/044/050/055/062 各剩幾格），違反①。
+          //   【本版做法】分兩階段：
+          //     Step1「密度 budget」：完全比照 v1 全走道由前往後的邏輯，把欄位由前往後累加，
+          //       算出「哪些欄、各要用掉幾格」——這一步跟 v1 結果逐格相同，保證空格仍 100%
+          //       集中在走道最尾端（如 C04：056/061/062 全空、055 只用掉前 2 格）。
+          //     Step2「鄰近架指派」：在 Step1 算好的固定用量池內，把每組溢出碼分配到「離自己
+          //       主碼架最近」的還有 budget 的欄，而非 v1 的「欄號最小」——同樣的密度、
+          //       但盡量把溢出碼留在自己架或鄰架，只有密度真的容不下（自己架 budget 已耗盡）
+          //       時才被迫用到更遠的架，是兩個優先序同時滿足下的最佳解。
+          //   【驗證】用 C04 v3 實測 23 色重跑 Python 模擬：密度用量與 v1 逐欄相同（尾端
+          //     056/061/062 全空不變）；跨架色組從 v1 的多數色跨 1-4 架，改善為 16/23 色
+          //     完全同架(0 跨架)，僅剩餘 7 組因架5/6 本身 budget 天生不足（密度限制下的
+          //     必然結果）才需跨架，且跨架距離也比 v1 平均更短。
+          const orderedAll=[...allPool].sort((a,b)=>a-b);
+          const _totalDemand=ovGroups.reduce((s,g)=>s+g.items.length,0);
+          const colBudget=new Map(); let _demandLeft=_totalDemand;
+          for(const c of orderedAll){
+            const cap=emptyLayers(c).length;
+            const use=Math.min(cap,Math.max(0,_demandLeft));
+            colBudget.set(c,use); _demandLeft-=use;
+          }
+          const budgetLeft=new Map(colBudget);
+          const budgetPool=()=>orderedAll.filter(c=>(budgetLeft.get(c)||0)>0);
+          const ovSortNear=(g,need)=>{ const mr=rackOf(g.mc); return (a,b)=>
               ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
-              || ((emptyLayers(b).length>=need?1:0)-(emptyLayers(a).length>=need?1:0))
+              || (((budgetLeft.get(b)||0)>=need?1:0)-((budgetLeft.get(a)||0)>=need?1:0))
               || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
-              || (a-b)
               || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
-              || (emptyLayers(a).length-emptyLayers(b).length)
-              || (Math.abs(a-g.mc)-Math.abs(b-g.mc)); };
-          const fillFrom=(g,remain,pool)=>{
+              || (a-b); };
+          const fitWholeB=(g,items,pool)=>{
+            const cands=pool.filter(c=>(budgetLeft.get(c)||0)>=items.length&&!physAdjConflict(c,g.donor.color7)).sort(ovSortNear(g,items.length));
+            if(!cands.length)return items;
+            const col=cands[0], remain=items.slice();
+            for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if((budgetLeft.get(col)||0)<=0)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat)){remain.shift();budgetLeft.set(col,(budgetLeft.get(col)||0)-1);} }
+            return remain;
+          };
+          const fillFromB=(g,remain,pool)=>{
             while(remain.length){
-              const cands=pool.filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7)).sort(ovSort(g,remain.length));
+              const cands=pool.filter(c=>(budgetLeft.get(c)||0)>0&&!physAdjConflict(c,g.donor.color7)).sort(ovSortNear(g,remain.length));
               if(!cands.length)break;
               const col=cands[0]; const before=remain.length;
-              for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
-              if(remain.length===before)break;   // 本欄無法再放（防無限迴圈）
+              for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if((budgetLeft.get(col)||0)<=0)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat)){remain.shift();budgetLeft.set(col,(budgetLeft.get(col)||0)-1);} }
+              if(remain.length===before)break;
             }
             return remain;
           };
-          // 整組放同一欄；本架放不下整組 → 原封不動回傳（交由呼叫端帶到下一架）
-          const fitWhole=(g,items,pool)=>{
-            const cands=pool.filter(c=>emptyLayers(c).length>=items.length&&!physAdjConflict(c,g.donor.color7)).sort(ovSort(g,items.length));
-            if(!cands.length)return items;
-            const col=cands[0], remain=items.slice();
-            for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
-            return remain;
-          };
-          // ── 全走道由前往後填滿（Gordon 2026-08-02 C04 案；取代舊「逐架接力＋就近」）──
-          //   舊法以 rackDist 為主鍵逐架消化 → 每架各自把「多出的溢出格」留在本架，
-          //   造成空格散落中段（C04：043/049 整欄空、037-3/4、038-4、056-4、061-3/4）。
-          //   改為全走道單一池、色依主碼欄升冪(=佇列序)處理，每色整組放「最前面可容的溢出欄」
-          //   (ovSort 已改欄序 a-b 為密度主鍵)：同色留同欄、§1.3a 非相鄰守則照舊；主碼與溢出
-          //   同為前往後、單調共進 → 就近性隱含保留（無跨走道遠漂）、剩餘空格全數集中走道尾端。
-          //   放不下整組→fillFrom 前往後拆殘欄；仍未安置→placeOverflowSafe 最後手段。
-          const globalPool=[...allPool].sort((a,b)=>a-b);
           for(const g of ovGroups){
             let items=g.items.slice();
-            items=fitWhole(g,items,globalPool);
-            if(items.length)items=fillFrom(g,items,globalPool);
+            items=fitWholeB(g,items,budgetPool());
+            if(items.length)items=fillFromB(g,items,budgetPool());
             for(const sku of items){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
           }
         }
