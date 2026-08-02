@@ -11780,8 +11780,10 @@ function monthlyExportReminderCheck(){
 }
 function showMonthlyExportReminder(ym){
   if(document.getElementById('monthly-remind-modal'))return;
-  const subj=encodeURIComponent('lativ 每月每日報表備份 '+ym);
-  const bodyTxt=encodeURIComponent('提醒：請將「銷售比對 → 📦 匯出當月每日報表」下載的檔案，以附件方式寄到本信箱備份存查。\n\n月份：'+ym);
+  const subjPlain='lativ 每月每日報表備份 '+ym;
+  const bodyPlain='提醒：請將「銷售比對 → 📦 匯出當月每日報表」下載的檔案，以附件方式寄到本信箱備份存查。\n\n月份：'+ym;
+  const subj=encodeURIComponent(subjPlain);
+  const bodyTxt=encodeURIComponent(bodyPlain);
   const ov=document.createElement('div');
   ov.id='monthly-remind-modal';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:var(--font)';
@@ -11790,9 +11792,11 @@ function showMonthlyExportReminder(ym){
       <div style="padding:15px 20px;background:var(--accent);color:#fff;font-size:16px;font-weight:700">📦 每月備份提醒</div>
       <div style="padding:18px 20px;font-size:14px;color:var(--text,#222);line-height:1.75">
         新的月份到了！請到 <b>銷售比對</b> 分頁按 <b>「📦 匯出當月每日報表」</b>，把上個整月的每日 ERP 報表封存成單一備份檔，<br>並<b>以附件夾帶 email 寄到你自己的信箱</b>存查（跨裝置／超過 40 天也能回溯）。
-        <div style="margin-top:13px">
+        <div style="margin-top:13px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
           <a href="mailto:?subject=${subj}&body=${bodyTxt}" style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2,#eee);border:1px solid var(--border,#ccc);color:var(--text2,#444);border-radius:5px;padding:7px 12px;font-size:13px;text-decoration:none">✉ 開啟寄信（記得手動夾帶匯出檔）</a>
+          <button id="monthly-remind-copy" type="button" style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2,#eee);border:1px solid var(--border,#ccc);color:var(--text2,#444);border-radius:5px;padding:7px 12px;font-size:13px;cursor:pointer;font-family:var(--font)">📋 複製主旨/內容</button>
         </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3,#999)">若「開啟寄信」按了沒反應（瀏覽器未設定/擋掉預設信箱），改按「複製主旨/內容」，貼到你常用的信箱手動寄送。</div>
         <label style="display:flex;align-items:center;gap:7px;margin-top:16px;font-size:13px;color:var(--text3,#666);cursor:pointer">
           <input type="checkbox" id="monthly-remind-nomore" style="width:15px;height:15px;cursor:pointer">此月不再提醒（此裝置）
         </label>
@@ -11809,6 +11813,27 @@ function showMonthlyExportReminder(ym){
   };
   const btn=document.getElementById('monthly-remind-close');if(btn)btn.onclick=done;
   ov.onclick=(e)=>{if(e.target===ov)done();};   // 點遮罩空白＝關閉（同樣導向銷售比對）
+  // ★2026-08-02 Gordon：mailto 連結在部分瀏覽器（未設定預設信箱時被靜默擋掉、之後點擊完全無反應）
+  //   會失效，故加「複製主旨/內容」防呆，不依賴瀏覽器的 mailto 協議處理權限。
+  const copyBtn=document.getElementById('monthly-remind-copy');
+  if(copyBtn)copyBtn.onclick=()=>{
+    const text='主旨：'+subjPlain+'\n\n內容：\n'+bodyPlain;
+    const showCopied=()=>{const old=copyBtn.textContent;copyBtn.textContent='✓ 已複製';copyBtn.disabled=true;setTimeout(()=>{copyBtn.textContent=old;copyBtn.disabled=false;},1500);};
+    const fallbackCopy=()=>{
+      try{
+        const ta=document.createElement('textarea');
+        ta.value=text;ta.style.position='fixed';ta.style.opacity='0';ta.style.top='0';ta.style.left='0';
+        document.body.appendChild(ta);ta.focus();ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }catch(e){}
+    };
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(showCopied).catch(()=>{fallbackCopy();showCopied();});
+    }else{
+      fallbackCopy();showCopied();
+    }
+  };
 }
 
 (async function init(){
