@@ -6635,35 +6635,86 @@ function plnRunNewEngine(config,initialCells){
       //   【驗證】C04 實案：選中候選②，挪用架首C {049,055}、23 個主碼欄與 Gordon 手排逐欄相同，
       //     跨架色組 8→4 且全部僅跨 1 架（跨架總距 16→6）。
       //     9 組回歸情境：無任一項指標變差；7碼+5碼+4碼 混合選中候選③，末欄 57→55、中段空洞 10→0。
-      function cbScoreOrder(order){
-        const freeN=new Map(); [...allCols].forEach(c=>freeN.set(c,emptyLayers(c).length));
-        const isFullC=c=>freeN.get(c)===4;
-        const bigC=c=>isBigLayout(getColLayout(aisle,c));
-        const pool=[...allCols].filter(c=>bigC(c)&&isFullC(c)&&!firstCset.has(c)).sort((a,b)=>a-b);
+      // ★2026-08-02 v8：「挪用溢出欄當主碼欄」統一規劃器（CB / AG 共用，供評分器與實際排入呼叫）★
+      //   【背景】CBCCCC 與 AAGGGG 每架都是「4 主碼欄 : 8 溢出格」。當批次以低溢出色為主
+      //     （5碼色只需 1 個溢出）時，一架 4 色只吃掉 4 格 → 整整一欄溢出欄永遠用不到，
+      //     主碼被迫往後架開新欄，密度崩壞。CB 的解是挪用架首C(大材積)當主碼欄；
+      //     AG 的解概念完全相同，只是兩個溢出欄都是小材積(A)，挪用＝既有的「降A」機制。
+      //   【演算法】逐架模擬，bank = 前面架累積沒用掉的溢出格：
+      //     若 bank + 本架溢出容量 − 本架主碼欄所需溢出數 ≥ 4（整整一欄會空著）
+      //     且後面還有色排不完 → 挪用一欄。AG 溢出需求極低時同一架可連挪兩欄。
+      //   【參數】cap=null（CB）：以 pNeed（密度最小 footprint 內主碼欄缺幾欄）為上限。
+      //           cap=數字（AG）：恰好取 cap 欄（＝ legacy demoteN，維持既有密度結果不變）；
+      //           貪婪選不滿時以「欄號序」補足（等同 legacy 行為，避免把降A欄攤到多架而爆密度）。
+      //   【驗證】AG 7 組情境（全5碼/全6碼/全4碼/6+5/5+4/3~7亂數/8+5）末欄與空洞與 legacy
+      //     完全相同（零密度回歸），跨架總距 30→15、24→7、53→41，其餘持平。
+      function planBorrowCols(order,mainPool,cap){
+        const out=[];
         const M=order.reduce((s,e)=>s+e.groups.length,0);
         const V=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        if(!M)return out;
+        if(isCBaisle&&V<=0)return out;      // CB 純主碼批次不挪用（保守閘門，維持架首C 原設計）
         const total=M*4+V;
         let acc=0,ideal=Math.max(...allCols);
-        for(const c of [...allCols].sort((a,b)=>a-b)){const f=freeN.get(c)||0;if(!f)continue;acc+=f;if(acc>=total){ideal=c;break;}}
-        const pNeed=Math.max(0,M-pool.filter(c=>c<=ideal).length);
+        for(const c of [...allCols].sort((a,b)=>a-b)){const f=emptyLayers(c).length;if(!f)continue;acc+=f;if(acc>=total){ideal=c;break;}}
+        const pNeed=Math.max(0,M-mainPool.filter(c=>c<=ideal).length);
+        const limit=(cap==null)?pNeed:cap;
+        if(limit<=0)return out;
+        let capAll=0; _racks.forEach(rk=>rk.ovfCols.forEach(c=>{capAll+=emptyLayers(c).length;}));
         const units=[]; order.forEach(e=>{for(let k=0;k<e.groups.length;k++)units.push(k===e.groups.length-1?e.size5Skus.length:0);});
-        let capAll=0; _racks.forEach(rk=>rk.ovfCols.forEach(c=>{capAll+=freeN.get(c)||0;}));
-        const promo=new Set(); let qi=0,bank=0;
-        if(V>0)for(const rk of _racks){
+        let qi=0,bank=0;
+        for(const rk of _racks){
           if(qi>=units.length)break;
-          const mains=rk.mainCols.filter(c=>pool.includes(c));
+          const mains=rk.mainCols.filter(c=>mainPool.includes(c));
           if(!mains.length)continue;
-          const fc=rk.ovfCols.filter(bigC)[0];
-          const fcFree=(fc!=null&&isFullC(fc))?4:0;
-          let ovfCap=0; rk.ovfCols.forEach(c=>{ovfCap+=freeN.get(c)||0;});
+          let ovfCap=0; rk.ovfCols.forEach(c=>{ovfCap+=emptyLayers(c).length;});
           let m=mains.length,need=0;
           for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
-          if(fcFree===4&&(units.length-qi)>m&&promo.size<pNeed&&(capAll-4*(promo.size+1))>=V&&(bank+ovfCap-need)>=4){
-            promo.add(fc); ovfCap-=fcFree; m+=1; need=0;
+          // CB 只准挪用架首C(大材積)，B 欄另有「最後手段」路徑；AG 兩個 A 欄皆可
+          const cands=rk.ovfCols.filter(c=>isCBaisle?isBigLayout(getColLayout(aisle,c)):true);
+          for(const fc of cands){
+            if(out.length>=limit)break;
+            if(emptyLayers(fc).length!==4)break;
+            if((units.length-qi)<=m)break;                              // 最後一架、主碼欄已夠 → 不挪
+            if(isCBaisle&&(capAll-4*(out.length+1))<V)break;            // 挪完溢出容量會不夠
+            if((bank+ovfCap-need)<4)break;                              // 沒有整整一欄會空著 → 不挪
+            out.push(fc); ovfCap-=4; m+=1; need=0;
             for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
           }
-          bank+=ovfCap-need; qi+=Math.min(m,units.length-qi);
+          bank=bank+ovfCap-need;
+          qi+=Math.min(m,units.length-qi);
         }
+        if(cap!=null)for(const c of [...allCols].sort((a,b)=>a-b)){       // AG：補足到 demoteN
+          if(out.length>=cap)break;
+          if(!isSmallLayout(getColLayout(aisle,c)))continue;
+          if(emptyLayers(c).length!==4||out.includes(c))continue;
+          out.push(c);
+        }
+        return out.sort((a,b)=>a-b);
+      }
+      // AG legacy 降A數量（與下方實際 demoteN 同式，供評分器預估用；isolatedSet 尚未建立故略）
+      function agLegacyDemoteN(order,mainPool){
+        let mainsLeft=order.reduce((s,e)=>s+e.groups.length,0);
+        let ovfLeft=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        const poolSz=order.filter(e=>e.groups.length===1).length;
+        let n=0;
+        for(const c of [...allCols].sort((a,b)=>a-b)){
+          if(emptyLayers(c).length!==4)continue;
+          if(mainsLeft<=0&&ovfLeft<=0)break;
+          if(isSmallLayout(getColLayout(aisle,c))){
+            if(ovfLeft>=4)ovfLeft-=4;
+            else if(mainsLeft>0&&n<poolSz){n++;mainsLeft--;}
+            else ovfLeft=0;
+          } else if(mainsLeft>0)mainsLeft--;
+        }
+        return n;
+      }
+      function cbScoreOrder(order){
+        const freeN=new Map(); [...allCols].forEach(c=>freeN.set(c,emptyLayers(c).length));
+        const bigC=c=>isBigLayout(getColLayout(aisle,c));
+        const pool=[...allCols].filter(c=>bigC(c)&&freeN.get(c)===4&&!firstCset.has(c)).sort((a,b)=>a-b);
+        const V=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        const promo=new Set(planBorrowCols(order,pool,isCBaisle?null:agLegacyDemoteN(order,pool)));
         const mpool=pool.concat([...promo]).sort((a,b)=>a-b);
         const mainOf=new Map(),usedCol=new Set(); let pi=0;
         for(const e of order){for(let k=0;k<e.groups.length;k++){
@@ -6702,7 +6753,7 @@ function plnRunNewEngine(config,initialCells){
         let holes=0; [...allCols].forEach(c=>{if(c<last)holes+=(freeN.get(c)||0);});
         return [last,holes,crossD,crossN];
       }
-      if(isCBaisle&&queue.length>1){
+      if(queue.length>1){          // ★v8：CB / AG 皆適用
         // 款區塊搬移（款內色序不變）：dir=1 溢出密度降冪、dir=-1 升冪
         const kuSort=(arr,dir)=>{
           const ord=new Map(),ov=new Map(),gp=new Map();
@@ -6749,7 +6800,9 @@ function plnRunNewEngine(config,initialCells){
       //     (例: 某款全尺碼總和最高, 但拆成多色後每色看似偏低, 不應被降級)。
       //   tie-break: 款總和→同款內色未到量低者→溢出碼少者(越接近純4碼,塞A越乾淨)→kc/color7。
       // §3.4a 降 A 數量由下方密度路徑「最小架數」自算（見 PHASE A）；此處不再預先標記。
-      const allOverflow=[];   // ★ 全走道溢出碼收集池: [{donor,sku}] (迴圈後統一打包)
+      // ★2026-08-02 v8：原 const allOverflow=[] 收集池與其下方的 GLOBAL OVERFLOW 打包區塊
+      //   已確認為死碼（宣告後從未 push → 迴圈跑空陣列，實際溢出分配走上方「密度 budget +
+      //   鄰近架指派」路徑），本輪一併清除。
 
       // §1.5（階段8 清舊）：密度切組為唯一新品排入路徑。
       //   已移除 useRoundRobin 關閉分支(legacy 逐架 fill) 及其專屬機制：
@@ -6841,52 +6894,17 @@ function plnRunNewEngine(config,initialCells){
         //   【驗證】C04 實測 23 色(9個6碼 + 14個5碼)：挪用 043/049 →
         //     主碼止於 063（原 065）、剩餘 14 格全部連續集中在 061-3 之後的走道尾端；
         //     溢出跨架最遠距離 4 架 → 3 架。
-        const promotedFirstC=new Set();
-        //   ★ 保守閘門：只在「本批確實有溢出碼」時才啟用（下方 ovfNeed>0 判斷）——
-        //     純 4 碼批次沒有溢出/密度的拉扯，架首C 維持原設計留給後續批次的溢出碼，行為完全不變。
-        if(isCBaisle&&remaining.length){
-          const units=[];   // 每個主碼組一個單位；該色溢出碼數掛在該色最後一組上
-          remaining.forEach(e=>{for(let k=0;k<e.groups.length;k++)units.push(k===e.groups.length-1?e.size5Skus.length:0);});
-          const ovfNeed=units.reduce((a,b)=>a+b,0);
-          let ovfCapAll=0; _racks.forEach(rk=>rk.ovfCols.forEach(c=>{ovfCapAll+=emptyLayers(c).length;}));
-          // ★「逼不得已」上限 pNeed：先算密度最小 footprint（空格由前往後累加到剛好裝下 totalCells
-          //   的那一欄 = idealLastCol），再看該範圍內「一般主碼欄(CCCC)」夠不夠 —— 不夠幾欄才准挪幾欄。
-          //   夠用時 pNeed=0 → 完全不挪（例：全 6碼 批次供需剛好，維持架首C 專供溢出的原設計）。
-          let _acc=0,idealLastCol=null;
-          for(const c of [...allCols].sort((a,b)=>a-b)){
-            const f=emptyLayers(c).length; if(!f)continue;
-            _acc+=f; if(_acc>=totalCells){idealLastCol=c;break;}
-          }
-          if(idealLastCol==null)idealLastCol=Math.max(...allCols);
-          const pNeed=Math.max(0,mainGroupsTotal-mainColPool.filter(c=>c<=idealLastCol).length);
-          let qi=0,bank=0;
-          for(const rk of (ovfNeed>0?_racks:[])){
-            if(qi>=units.length)break;
-            const mains=rk.mainCols.filter(c=>mainColPool.includes(c));
-            if(!mains.length)continue;
-            const fc=rk.ovfCols.filter(c=>isBigLayout(getColLayout(aisle,c)))[0];   // 架首C
-            const fcFree=(fc!=null&&colFullyFree(fc))?4:0;
-            let ovfCap=0; rk.ovfCols.forEach(c=>{ovfCap+=emptyLayers(c).length;});
-            let m=mains.length,need=0;
-            for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
-            const canBorrow=(fcFree===4)&&((units.length-qi)>m)&&(promotedFirstC.size<pNeed)&&
-                            ((ovfCapAll-4*(promotedFirstC.size+1))>=ovfNeed);
-            if(canBorrow&&(bank+ovfCap-need)>=4){
-              promotedFirstC.add(fc); ovfCap-=fcFree; m+=1; need=0;
-              for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
-            }
-            bank=bank+ovfCap-need;
-            qi+=Math.min(m,units.length-qi);
-          }
-          if(promotedFirstC.size){
-            promotedFirstC.forEach(c=>{
-              firstCset.delete(c);                       // 不再視為「留給溢出」的保留欄
-              if(!mainColPool.includes(c))mainColPool.push(c);
-              const sg=_segOf.get(c);                    // 同步從該架 ovfCols 移除（溢出 budget 不再計入）
-              if(sg){const rk=_racks[sg.ri];const p=rk.ovfCols.indexOf(c);if(p>=0)rk.ovfCols.splice(p,1);}
-            });
-            mainColPool.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
-          }
+        // ★v8：CB 挪用架首C 當主碼欄 —— 規劃邏輯已抽到共用的 planBorrowCols()（見上方註解）。
+        //   行為與 v4~v7 實測驗證過的版本相同（C04 實案仍挪用 049/055、主碼欄與手排逐欄相符）。
+        const promotedFirstC=new Set(isCBaisle?planBorrowCols(remaining,mainColPool,null):[]);
+        if(promotedFirstC.size){
+          promotedFirstC.forEach(c=>{
+            firstCset.delete(c);                       // 不再視為「留給溢出」的保留欄
+            if(!mainColPool.includes(c))mainColPool.push(c);
+            const sg=_segOf.get(c);                    // 同步從該架 ovfCols 移除（溢出 budget 不再計入）
+            if(sg){const rk=_racks[sg.ri];const p=rk.ovfCols.indexOf(c);if(p>=0)rk.ovfCols.splice(p,1);}
+          });
+          mainColPool.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
         }
         const footprintCols=[...allCols]
           .filter(c=>colFullyFree(c)&&!isolatedSet.has(c)&&!firstCset.has(c))
@@ -6912,6 +6930,12 @@ function plnRunNewEngine(config,initialCells){
           const gCap=minFootprint.filter(c=>isBigLayout(getColLayout(aisle,c))).length;
           demoteN=Math.max(0,mainGroupsTotal-gCap);
         }
+        // ★2026-08-02 v8（Gordon 裁示：AAGGGG 與 CBCCCC 概念相同）★
+        //   AG 降A欄「位置」改由 planBorrowCols 逐架規劃 —— 舊版把降A色由前往後塞滿
+        //   smallColPool（A1,A2,A3,A4…），等於前段 A 欄全被主碼佔走、所有溢出碼被擠到後段，
+        //   造成大量跨架（全5碼×20 實測跨架總距 30）。新版讓每一架自己留下溢出容量，
+        //   ★數量仍等於 legacy demoteN → 密度結果完全不變（末欄/空洞逐項相同，零回歸）。
+        const agBorrowCols=(!isCBaisle&&demoteN>0)?planBorrowCols(remaining,mainColPool,demoteN):[];
         if(demoteN>0){
           const pool=isCBaisle?remaining:demotePool;   // CB 維持原池（零回歸）；AG 只從單主碼組色挑
           pool.forEach(e=>{e.overflowLen=e.size5Skus.length;});
@@ -7009,7 +7033,9 @@ function plnRunNewEngine(config,initialCells){
             //   降A色依 smallColPool 升冪逐欄放（nextCol 同款色/同顏色名稱 soft 避鄰照舊），
             //   與主碼 G 欄共同把空欄前綴用滿；不再「一架一降A色」分散、也不再為溢出保留前段 A 欄
             //   （溢出碼集中到前綴後的 A 欄 → 剩餘空欄連續）。
-            for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const col=nextCol(smallColPool,e.color7,e.colorName); if(col==null)break; putGroup(e,e.groups[k],col); } }
+            //   ★v8：優先落在 planBorrowCols 逐架規劃好的 A 欄（讓每架自己留住溢出容量）；
+            //   規劃欄用完或被相鄰規則擋下時，才回退舊行為 smallColPool 由前往後填。
+            for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const col=nextCol(agBorrowCols,e.color7,e.colorName)||nextCol(smallColPool,e.color7,e.colorName); if(col==null)break; putGroup(e,e.groups[k],col); } }
           } else {
             // CB 降A（罕見，CCCC 容量通常足）：smallColPool
             for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const sc=nextCol(smallColPool,e.color7,e.colorName); if(sc==null)break; putGroup(e,e.groups[k],sc); } }
@@ -7139,74 +7165,6 @@ function plnRunNewEngine(config,initialCells){
         }
       }
 
-      // ════════════════════════════════════════════════════════════
-      // GLOBAL OVERFLOW: 全走道一次打包 (Gordon 密度邏輯)
-      //   ① 同色溢出碼整組連續、不拆  ② 不同色湊滿整欄  ③ 剩餘集中在最後
-      //   ④ 真的湊不出才迫不得已拆     ⑤ 相鄰守則(1.3a): 不放同色主碼相鄰欄
-      //   3碼款 hanging(layer4) 只用「單碼溢出組」填, 不為 hanging 拆散成對溢出
-      // ════════════════════════════════════════════════════════════
-      {
-        // 溢出組: 以 donor 色分組, 維持碼順序
-        const ovGroups=[];
-        {
-          const seen=new Map();
-          for(const it of allOverflow){
-            const c7=it.donor.color7;
-            if(!seen.has(c7)){const g={donor:it.donor,c7,items:[]};seen.set(c7,g);ovGroups.push(g);}
-            seen.get(c7).items.push(it);
-          }
-        }
-        const adjOKcol=(c7,col)=>{ for(const dc of[-1,1])for(let L=1;L<=4;L++){const nb=cells[plnCellId(aisle,col+dc,L)];if(nb&&nb.sku&&String(nb.sku).substring(0,7)===c7)return false;} return true; };
-        // §1.5（階段8）：原「① 3碼款 hanging(layer4)」步驟隨 hanging3 機制移除（切組後不再產生半套 3 碼空層4）。
-        // ② 可用 bin: 「小材積 B + 架首 C(firstCset)」連續空層 run, 欄號升冪混合 → 低欄先填(最緊湊)。
-        //   (Gordon 確認: 架首 C 留給溢出, 對(含50/60)優先放架首 C 大材積、單碼優先放 B; 整批跨度最小、剩餘集中在後)
-        //   其餘大材積 C 欄(非架首C) append 末端作最終 fallback。
-        const colRuns=(c)=>{ const free=emptyLayers(c); if(!free.length)return []; const out=[];let cur=[free[0]]; for(let k=1;k<free.length;k++){ if(free[k]===cur[cur.length-1]+1)cur.push(free[k]); else{out.push(cur);cur=[free[k]];} } out.push(cur);return out; };
-        const isBigCol=(c)=>isBigLayout(getColLayout(aisle,c));
-        const ovfBinCols=[...new Set([...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))||firstCset.has(c)))].sort((a,b)=>a-b);
-        const bins=[];
-        for(const c of ovfBinCols)for(const run of colRuns(c))bins.push({col:c,run,isC:isBigCol(c)});
-        for(const c of [...allCols].filter(c=>isBigCol(c)&&!firstCset.has(c)).sort((a,b)=>a-b))
-          for(const run of colRuns(c))bins.push({col:c,run,isC:true});
-        // ③ 全走道 best-fit: 每 bin 用 0/1 knapsack(容量=run長度) 取「填滿層數最大→(材積偏好)→總未到量最大」的整組子集
-        //    材積偏好(Gordon): C bin 偏好成對(2碼)組、B bin 偏好單碼組 → 以小幅 bonus 體現, 不破壞填滿與密度。
-        for(const bin of bins){
-          if(!ovGroups.length)break;
-          const R=bin.run.length;
-          const cand=[];
-          for(let i=0;i<ovGroups.length;i++) if(adjOKcol(ovGroups[i].c7,bin.col)) cand.push(i);
-          if(!cand.length)continue;
-          const prefBonus=(gi)=>{ const sz=ovGroups[gi].items.length; return bin.isC?(sz>=2?1:0):(sz===1?1:0); };
-          // dp[w] = {pend, pref, set} 以剛好填滿 w 層的最佳子集 (先比 pref 再比 pend)
-          const dp=new Array(R+1).fill(null); dp[0]={pend:0,pref:0,set:[]};
-          for(const gi of cand){
-            const sz=ovGroups[gi].items.length; if(sz>R)continue;
-            const pd=ovGroups[gi].donor.totalPending||0; const pb=prefBonus(gi);
-            for(let w=R;w>=sz;w--){
-              if(!dp[w-sz])continue;
-              const np=dp[w-sz].pref+pb, ne=dp[w-sz].pend+pd;
-              if(!dp[w]||np>dp[w].pref||(np===dp[w].pref&&ne>dp[w].pend)) dp[w]={pend:ne,pref:np,set:[...dp[w-sz].set,gi]};
-            }
-          }
-          let bw=0; for(let w=R;w>=1;w--){ if(dp[w]){bw=w;break;} }
-          if(bw===0)continue;
-          // 高未到量組先放(靠前層)
-          const chosen=dp[bw].set.slice().sort((a,b)=>(ovGroups[b].donor.totalPending||0)-(ovGroups[a].donor.totalPending||0));
-          let ptr=0; const placed=[];
-          for(const gi of chosen){ const g=ovGroups[gi]; for(const it of g.items){const L=bin.run[ptr++]; placeOneSku(it.sku,aisle,bin.col,L,g.donor.ku.cat);} placed.push(g); }
-          for(const g of placed){const idx=ovGroups.indexOf(g); if(idx>=0)ovGroups.splice(idx,1);}
-        }
-        // ④ 仍未排(整組放不下任何 bin) → 迫不得已逐碼 placeOverflowSafe, 最後手段強放
-        for(const g of ovGroups){
-          for(const it of g.items){
-            if(placeOverflowSafe(it))continue;
-            let done=false;
-            const colsSorted=[...allCols].sort((a,b)=>(isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)||a-b);
-            for(const c of colsSorted){ if(done)break; for(let L=1;L<=4;L++){const cs=cells[plnCellId(aisle,c,L)]; if(cs&&!cs.sku&&!cs.locked){placeOneSku(it.sku,aisle,c,L,g.donor.ku.cat);done=true;break;}} }
-            if(!done)failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat});
-          }
-        }
-      }
     }
 
     // ════════════════════════════════════════════════════════════
