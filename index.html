@@ -6830,6 +6830,10 @@ function plnRunNewEngine(config,initialCells){
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
           const allPool=[...allOvf,...shortBackup];
+          // ★★ 2026-08-02 更新：下方 07-21/07-22 的「逐架接力(carry)」實作已由
+          //     「全走道由前往後填滿」取代（見本區塊末端 globalPool 迴圈；ovSort 亦改 a-b 密度主鍵）。
+          //     以下 07-21/07-22 段落保留為設計沿革(C06 跨架搶欄 / C02 赤字架流離＋順序顛倒的成因記錄)——
+          //     新法以「單調前往後、色依主碼欄升冪」天然避免跨架遠漂與順序顛倒，並把空格集中走道尾端。
           // ★2026-07-21 兩段式配置（Gordon C06 案）：
           //   原本一輪貪婪、依主碼欄序處理 → 前面的色可能先搶走「別架」的溢出欄，
           //   把同架後面的色擠到更遠的架（7516601 佔走 175 → 7517201 只能掉到 169）。
@@ -6855,13 +6859,21 @@ function plnRunNewEngine(config,initialCells){
           //             最後才是 placeOverflowSafe，行為與舊版一致。
           //   實測 C02：最遠架距 6→1、實體欄距 max 34→3 / 平均 6.83→2.04、溢出欄順序倒退 7→0，
           //            主碼欄配置完全不變、138 格全滿不變。
+          // ★2026-08-02（Gordon C04 案）候選欄排序改「密度優先＝由前往後填滿」：
+          //   優先級對齊需求「儲位密度 > 整款排一起 > 量/材積匹配」——
+          //   ① 顏色名稱 soft 避鄰（需求7 保留）→ ② 能容整組者優先（整款排一起 #2）→
+          //   ③ AG 溢出偏小材積（AAGGGG 保留）→ ④ ★密度 #1：欄號小者先（前面的溢出欄先用滿，
+          //   剩餘空格自然集中走道尾端）→ ⑤ 弱就近把關(rackDist)→ ⑥ 湊滿殘欄→ ⑦ 離主碼近(最終)。
+          //   （舊版 rackDist 為主鍵＋「離主碼近」壓過欄序，導致每架局部留空格、firstC 欄被跳過，
+          //    如 C04 的 043/049 整欄空、037-3/4、056-4 散落中段。）
           const ovSort=(g,need)=>{ const mr=rackOf(g.mc); return (a,b)=>
-              (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
-              || ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
-              || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
+              ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
               || ((emptyLayers(b).length>=need?1:0)-(emptyLayers(a).length>=need?1:0))
-              || (Math.abs(a-g.mc)-Math.abs(b-g.mc))
-              || (emptyLayers(a).length-emptyLayers(b).length) || (a-b); };
+              || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
+              || (a-b)
+              || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
+              || (emptyLayers(a).length-emptyLayers(b).length)
+              || (Math.abs(a-g.mc)-Math.abs(b-g.mc)); };
           const fillFrom=(g,remain,pool)=>{
             while(remain.length){
               const cands=pool.filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7)).sort(ovSort(g,remain.length));
@@ -6880,30 +6892,19 @@ function plnRunNewEngine(config,initialCells){
             for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
             return remain;
           };
-          // ── 逐架接力掃描（色已依主碼欄升冪排序）──
-          const byRack=new Map(); const noRack=[];
+          // ── 全走道由前往後填滿（Gordon 2026-08-02 C04 案；取代舊「逐架接力＋就近」）──
+          //   舊法以 rackDist 為主鍵逐架消化 → 每架各自把「多出的溢出格」留在本架，
+          //   造成空格散落中段（C04：043/049 整欄空、037-3/4、038-4、056-4、061-3/4）。
+          //   改為全走道單一池、色依主碼欄升冪(=佇列序)處理，每色整組放「最前面可容的溢出欄」
+          //   (ovSort 已改欄序 a-b 為密度主鍵)：同色留同欄、§1.3a 非相鄰守則照舊；主碼與溢出
+          //   同為前往後、單調共進 → 就近性隱含保留（無跨走道遠漂）、剩餘空格全數集中走道尾端。
+          //   放不下整組→fillFrom 前往後拆殘欄；仍未安置→placeOverflowSafe 最後手段。
+          const globalPool=[...allPool].sort((a,b)=>a-b);
           for(const g of ovGroups){
-            const r=rackOf(g.mc);
-            if(r<0){ noRack.push({g,items:g.items.slice()}); continue; }   // 無主碼欄（純溢出殘色）→ 直接走全池就近
-            if(!byRack.has(r))byRack.set(r,[]);
-            byRack.get(r).push({g,items:g.items.slice()});
-          }
-          const rackIdxs=[...new Set([...byRack.keys(),...allPool.map(rackOf)])].filter(r=>r>=0).sort((a,b)=>a-b);
-          let carry=[];
-          for(const ri of rackIdxs){
-            const pool=allPool.filter(c=>rackOf(c)===ri);
-            const list=carry.concat(byRack.get(ri)||[]); carry=[];
-            for(const it of list){
-              // 接力上限：掃描階段最多向後接力 3 架；再遠就繼續帶著，最後交給全池就近
-              // （可反向借位）處理，避免少數色一路往走道尾端漂。
-              if(pool.length&&Math.abs(ri-rackOf(it.g.mc))<=3){ const left=fitWhole(it.g,it.items,pool); if(!left.length)continue; it.items=left; }
-              carry.push(it);
-            }
-          }
-          // ── 尾端仍未安置（需反向借位／不得已拆欄）→ 全池就近，最後 placeOverflowSafe ──
-          for(const it of carry.concat(noRack)){
-            const rest=fillFrom(it.g,it.items,allPool);
-            for(const sku of rest){ if(!placeOverflowSafe({donor:it.g.donor,sku}))failed.push({kc:it.g.donor.kc,n:it.g.donor.ku.n,reason:'NO_XXL_SLOT',cat:it.g.donor.ku.cat}); }
+            let items=g.items.slice();
+            items=fitWhole(g,items,globalPool);
+            if(items.length)items=fillFrom(g,items,globalPool);
+            for(const sku of items){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
           }
         }
       }
@@ -7131,7 +7132,12 @@ let PLN_STEPS_COUNT=1;
 // ★ 重設情境配置: 清除從「傳送至儲位調整」傳入的新品佇列, 還原至初始狀態
 function plannerResetConfig(){
   if(!window.NEW_PRODUCT_QUEUE||!window.NEW_PRODUCT_QUEUE.length){
-    // 沒有傳送過新品 → 只重新渲染
+    // 沒有傳送過新品（內部整理模式）→ 只重新渲染
+    // ★2026-08-02 修正：此早退路徑原漏清執行結果 → Run 後按「重設」下方結果殘留不消失。
+    //   補上與下方 has-queue 路徑相同的清除（此分支無 confirm，直接清除安全）。
+    PLN_LAST_RESULT=null;
+    const rc=document.getElementById('planner-result-card');
+    if(rc)rc.style.display='none';
     PLN_STEPS_COUNT=1;
     plannerRenderConfigUI();
     return;
