@@ -6565,7 +6565,7 @@ function plnRunNewEngine(config,initialCells){
 
       // queue: 所有 entries 按 (kc, color7) ASC（容量預選遞延的色不進佇列）
       // §1.3b 佇列排序 kc→color7 → 委派單一來源 PLN_PRIM
-      const queue=PLN_PRIM.queueOrder(colorEntries.filter(e=>e.mainSkus.length>0&&!e._deferred));
+      let queue=PLN_PRIM.queueOrder(colorEntries.filter(e=>e.mainSkus.length>0&&!e._deferred));
 
       // ★ CB 型走道(如 CBCCCC)偵測 + 架首 C 集合 (Gordon 確認):
       //   小材積(B)欄若皆「孤立」(左右非小材積), 則每個 B 旁的「架首 C」(b-1) 應留給溢出對,
@@ -6615,6 +6615,115 @@ function plnRunNewEngine(config,initialCells){
       const _racks=buildRacks();
       const _segOf=new Map();
       _racks.forEach((rk,ri)=>rk.segments.forEach((seg,si)=>seg.forEach((c,pos)=>_segOf.set(c,{ri,si,pos}))));
+
+      // ★2026-08-02 v6（Gordon C04 跨架案）CB 走道「排入順序候選評分」★
+      //   【問題】佇列固定 (kc,color7) 升冪 → 各款的「溢出密度」與各架的溢出容量嚴重不匹配。
+      //     未挪用的架 = 4 主碼欄 : 8 溢出格 → 每主碼組可配 2 個溢出（正好吃下 6 碼色）；
+      //     挪用架首C 後 = 5 主碼欄 : 4 溢出格 → 每主碼組僅 0.8（適合 5/4 碼色）。
+      //     6 碼款若落在後段已挪用的薄架上，前段架的溢出格用不完、後段的溢出碼卻無處可放
+      //     → 大量跨架（C04 實測 754290210 主碼在 060、溢出被丟到 038，跨 3 架）。
+      //   【Gordon 裁示 2026-08-02】「在 035 排完之後，036 先排入 6 碼的款色，因為 6 碼的款色
+      //     還有 6 組，剛好可以完美把 042 這架以前都排滿」＝排入順序要依溢出密度與各架容量匹配。
+      //   【做法】不寫死方向（實測「密度降冪」在某些組合反而傷密度），改為候選評分：
+      //     產生 3 個候選順序 —— ①原款號序 ②款區塊依溢出密度降冪 ③升冪（款內色序皆不變，
+      //     維持優先序②「整款排一起」）—— 各自用純數值模型 cbScoreOrder() 預跑一次，
+      //     取分數最佳者。評分為字典序 [末欄, 末欄前空洞, 跨架總距, 跨架組數]，
+      //     完全對齊 Gordon 的優先序：①空格集中/密度(硬約束) ②溢出碼少跨架。
+      //     由於原序永遠是候選之一，此機制「只會更好、不會更差」。
+      //   【萬用性】3/4/5/6/7/8 碼任意混合皆適用——模型直接算出實際結果再比分，
+      //     不依賴任何對碼數組合的假設。
+      //   【驗證】C04 實案：選中候選②，挪用架首C {049,055}、23 個主碼欄與 Gordon 手排逐欄相同，
+      //     跨架色組 8→4 且全部僅跨 1 架（跨架總距 16→6）。
+      //     9 組回歸情境：無任一項指標變差；7碼+5碼+4碼 混合選中候選③，末欄 57→55、中段空洞 10→0。
+      function cbScoreOrder(order){
+        const freeN=new Map(); [...allCols].forEach(c=>freeN.set(c,emptyLayers(c).length));
+        const isFullC=c=>freeN.get(c)===4;
+        const bigC=c=>isBigLayout(getColLayout(aisle,c));
+        const pool=[...allCols].filter(c=>bigC(c)&&isFullC(c)&&!firstCset.has(c)).sort((a,b)=>a-b);
+        const M=order.reduce((s,e)=>s+e.groups.length,0);
+        const V=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        const total=M*4+V;
+        let acc=0,ideal=Math.max(...allCols);
+        for(const c of [...allCols].sort((a,b)=>a-b)){const f=freeN.get(c)||0;if(!f)continue;acc+=f;if(acc>=total){ideal=c;break;}}
+        const pNeed=Math.max(0,M-pool.filter(c=>c<=ideal).length);
+        const units=[]; order.forEach(e=>{for(let k=0;k<e.groups.length;k++)units.push(k===e.groups.length-1?e.size5Skus.length:0);});
+        let capAll=0; _racks.forEach(rk=>rk.ovfCols.forEach(c=>{capAll+=freeN.get(c)||0;}));
+        const promo=new Set(); let qi=0,bank=0;
+        if(V>0)for(const rk of _racks){
+          if(qi>=units.length)break;
+          const mains=rk.mainCols.filter(c=>pool.includes(c));
+          if(!mains.length)continue;
+          const fc=rk.ovfCols.filter(bigC)[0];
+          const fcFree=(fc!=null&&isFullC(fc))?4:0;
+          let ovfCap=0; rk.ovfCols.forEach(c=>{ovfCap+=freeN.get(c)||0;});
+          let m=mains.length,need=0;
+          for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
+          if(fcFree===4&&(units.length-qi)>m&&promo.size<pNeed&&(capAll-4*(promo.size+1))>=V&&(bank+ovfCap-need)>=4){
+            promo.add(fc); ovfCap-=fcFree; m+=1; need=0;
+            for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
+          }
+          bank+=ovfCap-need; qi+=Math.min(m,units.length-qi);
+        }
+        const mpool=pool.concat([...promo]).sort((a,b)=>a-b);
+        const mainOf=new Map(),usedCol=new Set(); let pi=0;
+        for(const e of order){for(let k=0;k<e.groups.length;k++){
+          if(pi>=mpool.length)break;
+          const col=mpool[pi++]; if(!mainOf.has(e.color7))mainOf.set(e.color7,col);
+          usedCol.add(col); freeN.set(col,0);
+        }}
+        const _rkOf0=c=>{const s=_segOf.get(c);return s?s.ri:9999;};
+        const ovC=[...allCols].filter(c=>(firstCset.has(c)||isSmallLayout(getColLayout(aisle,c)))&&!promo.has(c))
+          .sort((a,b)=>(_rkOf0(a)-_rkOf0(b))||
+            ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||(a-b));   // v7：同架內 B 先於架首C
+        const bud=new Map(); let left=V;
+        for(const c of ovC){const u=Math.min(freeN.get(c)||0,Math.max(0,left));bud.set(c,u);left-=u;}
+        const rkOf=c=>{const s=_segOf.get(c);return s?s.ri:-99;};
+        const sgOf=c=>{const s=_segOf.get(c);return s?s.si:-99;};
+        let crossN=0,crossD=0;
+        const gs=order.filter(e=>e.size5Skus.length)
+          .map(e=>({e,mc:(mainOf.get(e.color7)||0)})).sort((a,b)=>a.mc-b.mc);
+        for(const g of gs){
+          let remain=g.e.size5Skus.length; const mr=rkOf(g.mc);
+          while(remain>0){
+            const cand=ovC.filter(c=>(bud.get(c)||0)>0&&
+              !(rkOf(c)===rkOf(g.mc)&&sgOf(c)===sgOf(g.mc)&&Math.abs(c-g.mc)===1));
+            if(!cand.length)break;
+            const whole=cand.filter(c=>(bud.get(c)||0)>=remain);
+            const col=(whole.length?whole:cand)
+              .sort((a,b)=>(Math.abs(rkOf(a)-mr)-Math.abs(rkOf(b)-mr))||(a-b))[0];
+            const take=Math.min(bud.get(col),remain);
+            bud.set(col,bud.get(col)-take); freeN.set(col,(freeN.get(col)||0)-take);
+            remain-=take; usedCol.add(col);
+            const d=Math.abs(rkOf(col)-mr); if(d){crossN++;crossD+=d*take;}
+          }
+        }
+        if(!usedCol.size)return [0,0,0,0];
+        const last=Math.max(...usedCol);
+        let holes=0; [...allCols].forEach(c=>{if(c<last)holes+=(freeN.get(c)||0);});
+        return [last,holes,crossD,crossN];
+      }
+      if(isCBaisle&&queue.length>1){
+        // 款區塊搬移（款內色序不變）：dir=1 溢出密度降冪、dir=-1 升冪
+        const kuSort=(arr,dir)=>{
+          const ord=new Map(),ov=new Map(),gp=new Map();
+          arr.forEach((e,i)=>{const k=String(e.kc);
+            if(!ord.has(k))ord.set(k,i);
+            ov.set(k,(ov.get(k)||0)+e.size5Skus.length);
+            gp.set(k,(gp.get(k)||0)+e.groups.length);});
+          const d=k=>(gp.get(k)||0)>0?(ov.get(k)||0)/gp.get(k):0;
+          return arr.slice().sort((a,b)=>{
+            const ka=String(a.kc),kb=String(b.kc);
+            if(ka===kb)return 0;                       // 同款維持原色序（ES2019 起 sort 保證穩定）
+            return dir*(d(kb)-d(ka))||(ord.get(ka)-ord.get(kb));
+          });
+        };
+        let best=null;
+        for(const cand of [queue,kuSort(queue,1),kuSort(queue,-1)]){
+          const sc=cbScoreOrder(cand);
+          if(!best||plnCmpScoreArr(sc,best.sc)<0)best={sc,cand};
+        }
+        queue=best.cand;
+      }
       function physAdjCols(col){ const s=_segOf.get(col); if(!s)return []; const seg=_racks[s.ri].segments[s.si]; const o=[]; if(s.pos>0)o.push(seg[s.pos-1]); if(s.pos<seg.length-1)o.push(seg[s.pos+1]); return o; }
       function physAdjacent(c1,c2){ return physAdjCols(c1).includes(c2); }
       // §1.3a 分段感知相鄰：僅同一架同一 segment 的相鄰位置算相鄰（跨架、跨儲位箱不算）。
@@ -6843,7 +6952,11 @@ function plnRunNewEngine(config,initialCells){
         {
           const stillNeed=remaining.filter(e=>!e._forceA&&!e.placed&&e.groups.length===1);
           if(stillNeed.length){
-            const borrowCands=[...firstCset].filter(c=>colFullyFree(c)&&!usedColSet.has(c)).sort((a,b)=>a-b);
+            // ★2026-08-02 v5（Gordon 裁示）：架首C 借完仍不夠時，最後手段連 B(小材積)欄也拿來放主碼。
+            //   「若情況真的逼不得已，連同B材積也可以拿來當主碼，只不過這情境應該幾乎沒有」——
+            //   排序刻意把所有架首C 放在 B 之前，確保 B 永遠是最後才被動用的一批。
+            const borrowCands=[...firstCset].filter(c=>colFullyFree(c)&&!usedColSet.has(c)).sort((a,b)=>a-b)
+              .concat(smallColPool.filter(c=>colFullyFree(c)&&!usedColSet.has(c)).sort((a,b)=>a-b));
             let bi=0;
             for(const e of stillNeed){
               if(bi>=borrowCands.length)break;
@@ -6974,7 +7087,17 @@ function plnRunNewEngine(config,initialCells){
           //     056/061/062 全空不變）；跨架色組從 v1 的多數色跨 1-4 架，改善為 16/23 色
           //     完全同架(0 跨架)，僅剩餘 7 組因架5/6 本身 budget 天生不足（密度限制下的
           //     必然結果）才需跨架，且跨架距離也比 v1 平均更短。
-          const orderedAll=[...allPool].sort((a,b)=>a-b);
+          // ★2026-08-02 v7（Gordon 裁示）溢出 budget 填欄序：同一架內「B 欄先於架首C」。
+          //   密度用量完全不變（總格數一樣、仍是由前往後填滿），差別只在同架內誰先被吃掉：
+          //   架首C 是大材積、且是唯一可被「挪用為主碼欄」的欄位，尾端剩餘時留下整欄架首C
+          //   比留下 B 欄更有價值（下批新品可直接拿來當主碼或放成對溢出）。
+          //   （大尺碼因折法關係實體大小與小尺碼相當，放 B 小材積格無物理風險——Gordon 確認。）
+          //   AG 走道 (AAGGGG) 的 ovfCols 皆為小材積，此鍵值恆等 → 排序結果與舊版相同，零回歸。
+          const _rkOfCol=c=>{const s=_segOf.get(c);return s?s.ri:9999;};
+          const orderedAll=[...allPool].sort((a,b)=>
+            (_rkOfCol(a)-_rkOfCol(b))||
+            ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||
+            (a-b));
           const _totalDemand=ovGroups.reduce((s,g)=>s+g.items.length,0);
           const colBudget=new Map(); let _demandLeft=_totalDemand;
           for(const c of orderedAll){
