@@ -6713,6 +6713,72 @@ function plnRunNewEngine(config,initialCells){
         const mainGroupsTotal=remaining.reduce((s,e)=>s+e.groups.length,0);
         const overflowCells=remaining.reduce((s,e)=>s+e.size5Skus.length,0);
         const totalCells=mainGroupsTotal*4+overflowCells;
+        // ★2026-08-02 v4（Gordon C04 密度案）CB 走道「架首C 挪用為主碼欄」事前規劃 ★
+        //   【問題】CBCCCC 每架 = 4 個主碼欄(CCCC) + 8 個溢出格(架首C 4格 + B 4格)。
+        //     當待排新品以「5碼色」(4主碼+1溢出) 為主時，一架 4 色只吃掉 4 個溢出格，
+        //     架首C 整欄 4 格永遠用不到 → 每架固定空 4 格、主碼被迫往後架開新欄，
+        //     儲位密度崩壞（C04 實測：055-3/4、056、061、062 散空 14 格，主碼卻一路排到 065）。
+        //   【Gordon 裁示 2026-08-02】「若經計算後真的逼不得已，可以挪用 CBCCCC 中原本拿來放
+        //     溢出碼的第一個 C 改放主碼」——該組的溢出碼大概率得排到鄰近儲架，犧牲 1 組的就近性，
+        //     換取「密度維持 + 其餘溢出碼大部分留在同一架」，是權衡之下划算的結果。
+        //     優先序：①空格集中在最後 1~2 架(密度=硬約束) > ②溢出碼盡量同架。
+        //   【做法】主碼排入前先逐架模擬（架序升冪，與下方主碼放置同序）：
+        //     bank = 前面架累積下來還沒用掉的溢出格；
+        //     若「bank + 本架溢出容量 − 本架 4 個主碼欄所需溢出數 ≥ 4」(＝整整一個架首C 欄會空著)
+        //     且後面還有色排不完 → 挪用本架架首C 當第 5 個主碼欄（該架溢出容量隨之 −4）。
+        //     全域安全閥：挪用後全走道溢出容量仍須 ≥ 溢出碼總數，否則不挪。
+        //   【零回歸】只在 isCBaisle 生效；6碼色為主(每色2溢出，供需剛好)時 spare 永遠 <4 → 完全不觸發；
+        //     架首C 非全空、或已是最後一架(色數 ≤ 本架主碼欄數) 亦不觸發。
+        //   【驗證】C04 實測 23 色(9個6碼 + 14個5碼)：挪用 043/049 →
+        //     主碼止於 063（原 065）、剩餘 14 格全部連續集中在 061-3 之後的走道尾端；
+        //     溢出跨架最遠距離 4 架 → 3 架。
+        const promotedFirstC=new Set();
+        //   ★ 保守閘門：只在「本批確實有溢出碼」時才啟用（下方 ovfNeed>0 判斷）——
+        //     純 4 碼批次沒有溢出/密度的拉扯，架首C 維持原設計留給後續批次的溢出碼，行為完全不變。
+        if(isCBaisle&&remaining.length){
+          const units=[];   // 每個主碼組一個單位；該色溢出碼數掛在該色最後一組上
+          remaining.forEach(e=>{for(let k=0;k<e.groups.length;k++)units.push(k===e.groups.length-1?e.size5Skus.length:0);});
+          const ovfNeed=units.reduce((a,b)=>a+b,0);
+          let ovfCapAll=0; _racks.forEach(rk=>rk.ovfCols.forEach(c=>{ovfCapAll+=emptyLayers(c).length;}));
+          // ★「逼不得已」上限 pNeed：先算密度最小 footprint（空格由前往後累加到剛好裝下 totalCells
+          //   的那一欄 = idealLastCol），再看該範圍內「一般主碼欄(CCCC)」夠不夠 —— 不夠幾欄才准挪幾欄。
+          //   夠用時 pNeed=0 → 完全不挪（例：全 6碼 批次供需剛好，維持架首C 專供溢出的原設計）。
+          let _acc=0,idealLastCol=null;
+          for(const c of [...allCols].sort((a,b)=>a-b)){
+            const f=emptyLayers(c).length; if(!f)continue;
+            _acc+=f; if(_acc>=totalCells){idealLastCol=c;break;}
+          }
+          if(idealLastCol==null)idealLastCol=Math.max(...allCols);
+          const pNeed=Math.max(0,mainGroupsTotal-mainColPool.filter(c=>c<=idealLastCol).length);
+          let qi=0,bank=0;
+          for(const rk of (ovfNeed>0?_racks:[])){
+            if(qi>=units.length)break;
+            const mains=rk.mainCols.filter(c=>mainColPool.includes(c));
+            if(!mains.length)continue;
+            const fc=rk.ovfCols.filter(c=>isBigLayout(getColLayout(aisle,c)))[0];   // 架首C
+            const fcFree=(fc!=null&&colFullyFree(fc))?4:0;
+            let ovfCap=0; rk.ovfCols.forEach(c=>{ovfCap+=emptyLayers(c).length;});
+            let m=mains.length,need=0;
+            for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
+            const canBorrow=(fcFree===4)&&((units.length-qi)>m)&&(promotedFirstC.size<pNeed)&&
+                            ((ovfCapAll-4*(promotedFirstC.size+1))>=ovfNeed);
+            if(canBorrow&&(bank+ovfCap-need)>=4){
+              promotedFirstC.add(fc); ovfCap-=fcFree; m+=1; need=0;
+              for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
+            }
+            bank=bank+ovfCap-need;
+            qi+=Math.min(m,units.length-qi);
+          }
+          if(promotedFirstC.size){
+            promotedFirstC.forEach(c=>{
+              firstCset.delete(c);                       // 不再視為「留給溢出」的保留欄
+              if(!mainColPool.includes(c))mainColPool.push(c);
+              const sg=_segOf.get(c);                    // 同步從該架 ovfCols 移除（溢出 budget 不再計入）
+              if(sg){const rk=_racks[sg.ri];const p=rk.ovfCols.indexOf(c);if(p>=0)rk.ovfCols.splice(p,1);}
+            });
+            mainColPool.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
+          }
+        }
         const footprintCols=[...allCols]
           .filter(c=>colFullyFree(c)&&!isolatedSet.has(c)&&!firstCset.has(c))
           .sort((a,b)=>a-b);
