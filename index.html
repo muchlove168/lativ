@@ -6892,18 +6892,39 @@ function plnRunNewEngine(config,initialCells){
             for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
             return remain;
           };
-          // ── 全走道由前往後填滿（Gordon 2026-08-02 C04 案；取代舊「逐架接力＋就近」）──
-          //   舊法以 rackDist 為主鍵逐架消化 → 每架各自把「多出的溢出格」留在本架，
-          //   造成空格散落中段（C04：043/049 整欄空、037-3/4、038-4、056-4、061-3/4）。
-          //   改為全走道單一池、色依主碼欄升冪(=佇列序)處理，每色整組放「最前面可容的溢出欄」
-          //   (ovSort 已改欄序 a-b 為密度主鍵)：同色留同欄、§1.3a 非相鄰守則照舊；主碼與溢出
-          //   同為前往後、單調共進 → 就近性隱含保留（無跨走道遠漂）、剩餘空格全數集中走道尾端。
-          //   放不下整組→fillFrom 前往後拆殘欄；仍未安置→placeOverflowSafe 最後手段。
+          // ★2026-08-02（Gordon C04 案 v2：本架優先＋僅借下一架，取代「全走道單一池」）──
+          //   症狀（使用者附件二次重現，用真實 C04 124 個 SKU 驗證）：08-02 第一版「全走道單一池、
+          //   純欄號前往後」雖然能讓 14 格洩漏集中尾端，但會讓後面架（如架3：045/046/048）捨近求遠，
+          //   把溢出碼跨去搶前一架（架2：038）已多出的餘量，造成主碼與溢出碼分屬不同儲架的次數過多
+          //   （C04 實測：13 個色跨架，其中多筆跨了 2 架以上）。
+          //   根因：全走道當成單一 FIFO 池，只看欄號大小、不看色的主碼落在哪一架，導致某架有剩餘容量
+          //   時，會被「佇列序較後面、主碼在別架」的色搶先用掉。
+          //   數學驗證（見開發日誌）：因為這批貨 6碼(溢出2)/5碼(溢出1) 的混合比例並非每架平均，
+          //   「零跨架」與「洩漏空格單一集中尾端」兩個目標無法同時 100% 達成（總洩漏 14 格固定，
+          //   一旦提前打亂 style 出現順序去湊尾端，只是把洩漏「搬位置」，總量不變、順序卻變得不可預期）。
+          //   決策（Gordon 確認）：優先徹底解決「跨架」，接受洩漏會分散在後半段各架（而非單一尾端塊），
+          //   但每個色的溢出碼「本架優先、本架真的不夠才借『緊鄰下一架』，絕不跳過中間架」——
+          //   C04 模擬驗證：跨架次數 13→1（只剩架1本身供給不足、必須借架2的那 1 個，等同使用者手排時
+          //   也接受的「逼不得已」情形），主碼排入順序、整款分組、佇列序完全不變。
+          //   ★已知限制：僅套用於 CB 走道（isCBaisle）。AG 走道（AAGGGG）目前無使用者實測資料佐證，
+          //   維持原「全走道前往後」邏輯不動，避免無根據變動；之後若有 AG 案例應比照本次方式重新驗證。
           const globalPool=[...allPool].sort((a,b)=>a-b);
+          const tryPool=(g,items,pool)=>{
+            if(!items.length)return items;
+            let rem=fitWhole(g,items,pool);
+            if(rem.length)rem=fillFrom(g,rem,pool);
+            return rem;
+          };
           for(const g of ovGroups){
             let items=g.items.slice();
-            items=fitWhole(g,items,globalPool);
-            if(items.length)items=fillFrom(g,items,globalPool);
+            if(isCBaisle){
+              const mainRack=rackOf(g.mc);
+              if(mainRack>=0){
+                items=tryPool(g,items,allPool.filter(c=>rackOf(c)===mainRack));          // ① 本架優先
+                if(items.length)items=tryPool(g,items,allPool.filter(c=>rackOf(c)===mainRack+1)); // ② 不足才借「緊鄰下一架」
+              }
+            }
+            if(items.length)items=tryPool(g,items,globalPool); // ③ 保底：AG 走道／本架+下一架仍放不下的極端情況
             for(const sku of items){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
           }
         }
