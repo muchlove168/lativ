@@ -6662,7 +6662,14 @@ function plnRunNewEngine(config,initialCells){
         const M=order.reduce((s,e)=>s+e.groups.length,0);
         const V=order.reduce((s,e)=>s+e.size5Skus.length,0);
         if(!M)return out;
-        if(isCBaisle&&V<=0)return out;      // CB 純主碼批次不挪用（保守閘門，維持架首C 原設計）
+        // ★2026-08-05（C07 整理→新品案）移除舊「CB && V<=0 即早退」保守閘門：
+        //   原設計是「純主碼批次不挪用架首C，維持架首C 原保留」。但當整理步驟清出的連續
+        //   區塊跨越架界、區塊內含一個架首C（firstC）時，V=0 批次被此閘門擋住 → firstC 不被
+        //   升為主碼欄 → 尾色被降到區塊外的下一個 B 欄，破壞「空格集中/連續排入」最高優先。
+        //   移除後仍受 pNeed 約束（line ~6669）：批次若靠現有主碼欄就排得下 pNeed=0 → limit=0
+        //   → 立即早退，天然不會亂挪；只有密度真的不足時才依需求升 firstC。
+        //   （firstC 保留原是「大材積就近」考量，在 V=0 時無溢出碼需照顧，保留已無意義。）
+        //   舊 gate 保留於此註解作設計脈絡。
         const total=M*4+V;
         let acc=0,ideal=Math.max(...allCols);
         for(const c of [...allCols].sort((a,b)=>a-b)){const f=emptyLayers(c).length;if(!f)continue;acc+=f;if(acc>=total){ideal=c;break;}}
