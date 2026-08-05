@@ -3297,22 +3297,32 @@ function forecastBuildSelectedSkus(selection){
     const _s5=String(r.style||'').substring(0,5);
     if(_s5)groupToStyles[key].add(_s5);
   });
-  // 收集所有要納入的 款號 (前5碼) → 類別
-  const includeStyleCat={};  // style → cat
+  // ★ 2026-08-05 Gordon：同款不同尺寸可跨多類別（如 74208 小褲+童中袋）→ 過濾/標記一律用「9碼商品編號」
+  //   直接查 26FW 名單(SKU級)，不可用款號單一類別。否則勾「童中袋」會一筆都送不出（款號被記成小褲），
+  //   勾「小褲」又會把整款 42 筆含中袋一起抓走。fw26Lookup 查不到再回落款號層級 styleToCat。
+  const _selSkuCatOf=(code)=>{
+    const c=fw26Lookup[String(code||'').trim()];
+    if(c)return c;
+    return styleToCat[String(code||'').substring(0,5)]||'未匹配';
+  };
+  // 款號 → 該款出現的貨櫃所勾選的類別集合（跨多個選取合併）
+  const styleSelCats={};  // style → Set(選取類別)
   selection.forEach(sel=>{
     const styles=groupToStyles[sel.grpKey]||new Set();
     styles.forEach(st=>{
-      const cat=styleToCat[st]||'未匹配';
-      if(sel.cats.has(cat))includeStyleCat[st]=cat;
+      if(!styleSelCats[st])styleSelCats[st]=new Set();
+      sel.cats.forEach(c=>styleSelCats[st].add(c));
     });
   });
-  // 過濾 ARRANGE_DATA
+  // 過濾 ARRANGE_DATA — 以「該 SKU 真實類別」是否落在該款勾選類別集合為準
   // ★ 2026-07-16 Gordon：只留「待排」— ERP 儲位安排的「儲位」欄已填、或走道報表實況已在架上者
   //   一律排除，否則「匯出待排新品」/「傳送至儲位調整」會把 ERP 已排好的 SKU 再排一次。
   const _selPlacedIdx=plnBuildPlacedIndex();
   const rows=(ARRANGE_DATA||[]).filter(r=>{
     const st=String(r.code||'').substring(0,5);
-    if(!(st in includeStyleCat))return false;
+    const selCats=styleSelCats[st];
+    if(!selCats)return false;                         // 此款不在任何勾選的貨櫃
+    if(!selCats.has(_selSkuCatOf(r.code)))return false; // 此 SKU 的真實類別未被勾選
     return !plnIsPlacedCode(r.code,_selPlacedIdx);
   });
   // ★ 跨櫃 / ARRANGE_DATA 同 SKU 多筆 dedup: 保留首次出現的 row, 避免下游匯出/送 planner 重複
@@ -3327,10 +3337,9 @@ function forecastBuildSelectedSkus(selection){
   });
   const catLookup={};
   dedupedRows.forEach(r=>{
-    const st=String(r.code||'').substring(0,5);
-    catLookup[r.code]=includeStyleCat[st]||'';
+    catLookup[r.code]=_selSkuCatOf(r.code)||'';   // ★ 逐 SKU 真實類別（供匯出「類別」欄 + 送 planner 分群）
   });
-  return {rows:dedupedRows, includeStyleCat, catLookup};
+  return {rows:dedupedRows, styleSelCats, catLookup};
 }
 
 // 匯出待安排新品儲位報表 — 欄位: 商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 商品包材, 類別
@@ -8603,14 +8612,34 @@ function renderArrangeCompare(){
     //   排入儲位後重新上傳報表，這裡的 SKU 數完全不會變。改為以 plnIsPlacedCode() 分流。
     const arrangeByStyle={};
     const _fcPlacedIdx=plnBuildPlacedIndex();
+    // ★ 2026-08-05 Gordon：同一款號(前5碼)可能同款不同尺寸走不同包材 → 不同類別
+    //   （如 74208：100~120→小袋/小褲，130~160→中袋/童中袋）。類別必須以「9碼商品編號」直接查
+    //   26FW 名單(SKU級)，不能塌縮成款號單一類別，否則其中一類會被整批吃掉、在明細/待排/送 planner 全消失。
+    //   fw26Lookup 查不到該 SKU 時再回落款號層級 styleToCat（不惡化既有行為）。
+    const _fcSkuCatOf=(code)=>{
+      const c=fw26Lookup[String(code||'').trim()];
+      if(c)return c;
+      return styleToCat[String(code||'').substring(0,5)]||null;
+    };
     (ARRANGE_DATA||[]).forEach(ar=>{
       const style=String(ar.code||'').substring(0,5);
       if(!style)return;
-      if(!arrangeByStyle[style])arrangeByStyle[style]={skuCount:0,placedCount:0,plannedSlots:new Set()};
-      if(plnIsPlacedCode(ar.code,_fcPlacedIdx))arrangeByStyle[style].placedCount++;
-      else arrangeByStyle[style].skuCount++;
-      if(ar.plannedSlot)arrangeByStyle[style].plannedSlots.add(ar.plannedSlot);
+      if(!arrangeByStyle[style])arrangeByStyle[style]={skuCount:0,placedCount:0,plannedSlots:new Set(),cats:{}};
+      const _ck=_fcSkuCatOf(ar.code)||'未匹配';
+      if(!arrangeByStyle[style].cats[_ck])arrangeByStyle[style].cats[_ck]={skuCount:0,placedCount:0,plannedSlots:new Set()};
+      const _placed=plnIsPlacedCode(ar.code,_fcPlacedIdx);
+      if(_placed){arrangeByStyle[style].placedCount++;arrangeByStyle[style].cats[_ck].placedCount++;}
+      else{arrangeByStyle[style].skuCount++;arrangeByStyle[style].cats[_ck].skuCount++;}
+      if(ar.plannedSlot){arrangeByStyle[style].plannedSlots.add(ar.plannedSlot);arrangeByStyle[style].cats[_ck].plannedSlots.add(ar.plannedSlot);}
     });
+    // 款號 → 類別分佈（依 SKU 真實類別，待排+已排；無 ARRANGE 資料回 null）— 供箱數比例分攤用
+    const _styleCatDist=(style)=>{
+      const arr=arrangeByStyle[style];
+      if(!arr||!arr.cats)return null;
+      const dist={}; let sum=0;
+      Object.entries(arr.cats).forEach(([c,cb])=>{const n=(cb.skuCount||0)+(cb.placedCount||0);if(n>0){dist[c]=n;sum+=n;}});
+      return sum>0?{dist,sum}:null;
+    };
 
     // 第一步：按 (進倉日期 + 進口編號 + 櫃號) 分組
     //   套用補空規則：櫃號有/進口空 → 進口=廠商；兩空+散貨提醒 → 櫃號=散貨,進口=廠商；兩空無提醒 → 櫃號=廠商
@@ -8685,59 +8714,84 @@ function renderArrangeCompare(){
       const catFcPlannedSlots={};  // {類別: Set of 倉位（如 '1F','2F'）} — 來自預告進貨表 plannedSlot
       const catReminders={};       // {類別: Set of 進倉提醒（去重）}
       // ★ 先按 rowBoxList 累計箱數 + 儲區/倉位 + 進倉提醒 到類別
+      // ★ 2026-08-05 Gordon：款號可能跨多類別（同款不同尺寸不同包材）→
+      //   箱數（款號級數字，無法逐類別得知）依該款 SKU 數比例分攤，餘數給最大類別，整櫃箱數總和不變；
+      //   儲區/倉位（forecast slot 會覆蓋 catZoneLookup）僅「單一類別款」沿用，多類別款留給各類別自身 catZoneLookup 判定，避免把某類別的 slot 誤蓋到另一類別；
+      //   進倉提醒屬整個款號 → 套用到該款所有目標類別。
       grp.rowBoxList.forEach(({style,boxCount,slot,plannedSlot,reminder})=>{
         if(!style)return;
-        const cat=styleToCat[style]||'未匹配';
-        catBoxes[cat]=(catBoxes[cat]||0)+boxCount;
-        // 儲區：取 slot 首字（C09 → C），只取字母 A-Z
-        if(slot){
-          const _c=String(slot).charAt(0).toUpperCase();
-          if(/[A-Z]/.test(_c)){
-            if(!catSlotZones[cat])catSlotZones[cat]=new Set();
-            catSlotZones[cat].add(_c);
+        const _cd=_styleCatDist(style);
+        const _targets=_cd?Object.keys(_cd.dist):[styleToCat[style]||'未匹配'];
+        const _isMixed=!!(_cd&&_targets.length>1);
+        // 箱數分攤
+        if(_cd){
+          const _ent=Object.entries(_cd.dist);
+          let _assigned=0,_maxCat=_ent[0][0],_maxN=-1;
+          _ent.forEach(([c,n])=>{const v=Math.floor((Number(boxCount)||0)*n/_cd.sum);catBoxes[c]=(catBoxes[c]||0)+v;_assigned+=v;if(n>_maxN){_maxN=n;_maxCat=c;}});
+          catBoxes[_maxCat]=(catBoxes[_maxCat]||0)+((Number(boxCount)||0)-_assigned);
+        }else{
+          const cat=styleToCat[style]||'未匹配';
+          catBoxes[cat]=(catBoxes[cat]||0)+(Number(boxCount)||0);
+        }
+        // 儲區/倉位（forecast slot）：僅單一類別款沿用
+        if(!_isMixed){
+          const cat=_targets[0];
+          if(slot){
+            const _c=String(slot).charAt(0).toUpperCase();
+            if(/[A-Z]/.test(_c)){
+              if(!catSlotZones[cat])catSlotZones[cat]=new Set();
+              catSlotZones[cat].add(_c);
+            }
+          }
+          if(plannedSlot){
+            const _p=String(plannedSlot).trim();
+            if(_p){
+              if(!catFcPlannedSlots[cat])catFcPlannedSlots[cat]=new Set();
+              catFcPlannedSlots[cat].add(_p);
+            }
           }
         }
-        // 倉位：plannedSlot 原值（去頭尾空白）
-        if(plannedSlot){
-          const _p=String(plannedSlot).trim();
-          if(_p){
-            if(!catFcPlannedSlots[cat])catFcPlannedSlots[cat]=new Set();
-            catFcPlannedSlots[cat].add(_p);
-          }
-        }
-        // 進倉提醒：per 款號去重後集合（顯示時 join）
+        // 進倉提醒：per 款號去重後集合（顯示時 join）→ 套用到該款所有目標類別
         const _rm=String(reminder||'').trim();
         if(_rm){
-          if(!catReminders[cat])catReminders[cat]=new Set();
-          catReminders[cat].add(_rm);
+          _targets.forEach(cat=>{
+            if(!catReminders[cat])catReminders[cat]=new Set();
+            catReminders[cat].add(_rm);
+          });
         }
       });
       // ★ 同一貨櫃內同款號可能有多列（不同進倉批次）→ 去重後才累計 SKU 數，
       //   否則 arrangeByStyle 的 skuCount 會被重複加總（如 73567 兩批次 16→32）
       const _seenGrpStyles=new Set();
+      const _ensureCat=(c)=>{if(!catStats[c])catStats[c]={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};return catStats[c];};
       grp.styles.forEach(style=>{
         if(!style)return;
         if(_seenGrpStyles.has(style))return;
         _seenGrpStyles.add(style);
-        const cat=styleToCat[style];
         const arr=arrangeByStyle[style];
-        const skuNum=arr?arr.skuCount:0;            // 待排
-        const placedNum=arr?arr.placedCount:0;      // 已排入（ERP 或實況）
-
-        if(cat){
-          if(!catStats[cat])catStats[cat]={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set()};
-          catStats[cat].skuCount+=skuNum;
-          catStats[cat].placedCount+=placedNum;
-          catStats[cat].styles.add(style);
-          if(arr)arr.plannedSlots.forEach(s=>catStats[cat].plannedSlots.add(s));
+        const catBreak=(arr&&arr.cats&&Object.keys(arr.cats).length)?arr.cats:null;
+        if(catBreak){
+          // ★ 2026-08-05 Gordon：依 SKU 真實類別拆分（同款可跨小褲/童中袋等多類別）
+          Object.entries(catBreak).forEach(([bcat,cb])=>{
+            const isUn=(bcat==='未匹配');
+            const cat=isUn?'未匹配':bcat;
+            const st=_ensureCat(cat);
+            st.skuCount+=cb.skuCount;
+            st.placedCount+=cb.placedCount;
+            st.styles.add(style);
+            if(isUn)st.unmatchedStyles.add(style);
+            cb.plannedSlots.forEach(s=>st.plannedSlots.add(s));
+          });
         }else{
-          // 不在 26FW 名單：全部歸為「未匹配」（含 73 等其他季別前綴）
-          if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};
-          catStats['未匹配'].skuCount+=skuNum;
-          catStats['未匹配'].placedCount+=placedNum;
-          catStats['未匹配'].unmatchedStyles.add(style);
-          catStats['未匹配'].styles.add(style);
-          if(arr)arr.plannedSlots.forEach(s=>catStats['未匹配'].plannedSlots.add(s));
+          // 無 ARRANGE 資料：維持原本「款號層級、skuCount=0 仍顯示一列」的行為
+          const cat=styleToCat[style];
+          if(cat){
+            _ensureCat(cat).styles.add(style);
+          }else{
+            const st=_ensureCat('未匹配');
+            st.unmatchedStyles.add(style);
+            st.styles.add(style);
+          }
         }
       });
 
