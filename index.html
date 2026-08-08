@@ -888,6 +888,20 @@ function getPackagingRule(packagingName) {
   return null;
 }
 
+// ★2026-08-08 Gordon（Request 3）：包材 → canonical 擺法碼／材積 對照
+//   商品暫放到不符擺法的走道（如中袋放進 A04/A05=D、A07=A+G）時，匯出報表「擺法」原本跟著
+//   「目的儲位」走（m.dstLayout / moveLayoutMap[slot]），補貨員照走道擺法備錯材積。此對照讓匯出時
+//   改以「商品包材」查出該包材本身的擺法碼＋材積（與儲位無關）。維護 UI 在儲架平面圖 tab。
+//   結構: { '中OPP袋': {layout:'C', volume:0.09, note:''} }；layout/volume 皆可留空（只填一個也行）。
+let PKG_VOL_MAP = {};
+function pkgLayoutVol(pkg){
+  if(!pkg) return null;
+  const p=String(pkg).trim();
+  return (p && PKG_VOL_MAP[p]) ? PKG_VOL_MAP[p] : null;
+}
+function savePackagingVolumeConfig(){try{localStorage.setItem('lativ_packaging_volume',JSON.stringify(PKG_VOL_MAP));}catch(e){}}
+function loadPackagingVolumeConfig(){try{const s=localStorage.getItem('lativ_packaging_volume');if(s)PKG_VOL_MAP=JSON.parse(s)||{};}catch(e){PKG_VOL_MAP={};}}
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -3390,13 +3404,15 @@ async function exportArrangeNewReport(){
     if(ca!==cb)return ca<cb?-1:1;
     return String(a.code).localeCompare(String(b.code));
   });
-  const cols=['商品編號','商品名稱','尺寸','儲位','材積','未到量','預計倉位','商品包材','類別'];
+  // ★2026-08-08 Gordon（Request 3）：新增「應擺法碼」欄＝依商品包材查 PKG_VOL_MAP 的 canonical 擺法碼（空＝未建對照）
+  const cols=['商品編號','商品名稱','尺寸','儲位','材積','未到量','預計倉位','商品包材','應擺法碼','類別'];
   const aoa=[cols];
   rows.forEach(r=>{
-    aoa.push([r.code,r.name,r.size,r.slot,r.volume||0,r.pending||0,fw26SlotOf(r.code)||(r.plannedSlot||''),r.packaging||'',catLookup[r.code]||'']);
+    const _pv=pkgLayoutVol(r.packaging);
+    aoa.push([r.code,r.name,r.size,r.slot,r.volume||0,r.pending||0,fw26SlotOf(r.code)||(r.plannedSlot||''),r.packaging||'',_pv?(_pv.layout||''):'',catLookup[r.code]||'']);
   });
   const ws=XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:14},{wch:10}];
+  ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:14},{wch:8},{wch:10}];
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'待安排新品');
   // ★ 檔名格式: 進口編號_櫃號/櫃型 (去掉櫃號後面的 (箱數) 標註); 多櫃情況附加「_等N櫃」
@@ -8247,7 +8263,10 @@ function plannerExportResult(){
   const r=PLN_LAST_RESULT;
   buildFW26SlotLookup();  // ★ 以最新 26FW 名單建立款號→倉位（1F/3F/4F）
   // === Sheet 1: 新品安排 (含擺法欄位, 不含顏色) ===
-  const cols1=['商品編號','商品名稱','尺寸','儲位','擺法','倉位','未到量'];
+  // ★2026-08-08 Gordon（Request 3）：擺法/材積改依「商品包材」查 PKG_VOL_MAP（暫放走道材積修正）。
+  //   有對照 → 顯示該包材的擺法碼＋材積（與儲位無關）；擺法碼與儲位原生擺法不同時標「*」＝暫放不符。
+  //   無對照 → 沿用舊行為（跟隨儲位擺法＋該擺法材積），不影響既有結果。
+  const cols1=['商品編號','商品名稱','尺寸','儲位','擺法','材積','倉位','未到量'];
   const aoa1=[cols1];
   // 建立 move→dstLayout 映射
   const moveLayoutMap={};
@@ -8256,15 +8275,26 @@ function plannerExportResult(){
   [...r.selected].filter(s=>s&&s['_isNewProduct']===true)
     .sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號']))).forEach(s=>{
     const slot=s['儲位']||'';
-    const layout=moveLayoutMap[slot]||'';
-    aoa1.push([s['商品編號'],s['商品名稱'],s['尺寸'],slot,layout,fw26SlotOf(s['商品編號']),s['未到量']||0]);
+    const slotLayout=moveLayoutMap[slot]||'';
+    const pv=pkgLayoutVol(s['商品包材']);
+    let dispLayout, dispVol;
+    if(pv){
+      const pl=pv.layout||slotLayout;
+      dispLayout=(pv.layout&&slotLayout&&pv.layout!==slotLayout)?(pl+'*'):pl;
+      dispVol=(pv.volume!==''&&pv.volume!=null)?pv.volume
+             :(PLN_LAYOUT_VOLUME[pl]!==undefined?PLN_LAYOUT_VOLUME[pl]:'');
+    }else{
+      dispLayout=slotLayout;
+      dispVol=(PLN_LAYOUT_VOLUME[slotLayout]!==undefined)?PLN_LAYOUT_VOLUME[slotLayout]:'';
+    }
+    aoa1.push([s['商品編號'],s['商品名稱'],s['尺寸'],slot,dispLayout,dispVol,fw26SlotOf(s['商品編號']),s['未到量']||0]);
   });
 
   const wb=XLSX.utils.book_new();
 
   // ─── Sheet 1: 新品安排 ───
   const ws1=XLSX.utils.aoa_to_sheet(aoa1);
-  ws1['!cols']=[{wch:13.3},{wch:30},{wch:6},{wch:12.5},{wch:5},{wch:14},{wch:8}];
+  ws1['!cols']=[{wch:13.3},{wch:30},{wch:6},{wch:12.5},{wch:5},{wch:7},{wch:14},{wch:8}];
 
   // === Sheet 2+: 每個 Step 一個「待移」sheet ===
   // 命名規則: 單步驟 → "待移"; 多步驟 → "Step 1_待移", "Step 2_待移", ...
@@ -9026,7 +9056,10 @@ function renderArrangeCompare(){
         });});
         const _tempTxt=_tempN?`<span style="color:#d4a017;font-size:9px;margin-left:3px;cursor:help" title="其中 ${_tempN} 筆目前暫放於 XX/TX 溢位區 → 視為未排，已計入待排數">(暫放 ${_tempN})</span>`:'';
         // ★ 2026-07-25 Gordon：待排=0（已排完儲位）不再顯示「(已排 XX)」灰字（如申洲列 童中袋 0 (已排336)）
-        const _placedTxt=(s.skuCount&&s.placedCount)?`<span style="color:var(--text3);font-size:9px;margin-left:3px;cursor:help" title="已排入 ${s.placedCount} 筆（ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上）→ 不列入待排新品">(已排 ${s.placedCount})</span>`:'';
+        // ★ 2026-08-08 Gordon：預告進貨明細一律不再顯示「(已排 XX)」灰字。07-25 只關掉「待排=0」那半邊，
+        //   「待排>0 且 已排入>0」時仍會冒出（如變化款 73 (已排 15)）→ 本表全面關閉，比照上方「各類別預計儲區」表。
+        //   （已排入數仍照常計入「待排＝總筆數−已排入」的扣除邏輯，只是不再顯示這行灰字。）
+        const _placedTxt='';
         const skuCell=dupAlert
           ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${_pendTxt}${_placedTxt}${_tempTxt}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
           : `${_pendTxt}${_placedTxt}${_tempTxt}`;
@@ -9990,6 +10023,102 @@ function resetPackagingRules(){
 }
 function savePackagingRulesConfig(){try{localStorage.setItem('lativ_packaging_rules',JSON.stringify(PACKAGING_RULES));}catch(e){}}
 function loadPackagingRulesConfig(){try{const saved=localStorage.getItem('lativ_packaging_rules');if(saved)PACKAGING_RULES=JSON.parse(saved);}catch(e){}}
+
+// ★2026-08-08 Gordon（Request 3）：包材→擺法碼/材積 對照維護 UI（儲架平面圖 tab）
+let _pkgVolOrder=[];
+function renderPackagingVolumeList(){
+  const c=document.getElementById('pkgvol-list');if(!c)return;
+  _pkgVolOrder=Object.keys(PKG_VOL_MAP).sort((a,b)=>String(a).localeCompare(String(b),'zh-Hant'));
+  const cnt=document.getElementById('pkgvol-count');if(cnt)cnt.textContent=_pkgVolOrder.length;
+  if(!_pkgVolOrder.length){c.innerHTML='<div style="padding:14px;color:var(--text3);font-size:12px;line-height:1.7">尚無對照。<br>• 點「seed 常見包材」從目前上傳的資料帶入包材清單；<br>• 或「匯入填好的對照表」載入你填好的 xlsx；<br>再逐列填擺法碼與材積後按「存」。</div>';return;}
+  c.innerHTML='';
+  _pkgVolOrder.forEach((name,i)=>{
+    const e=PKG_VOL_MAP[name]||{};
+    const esc=s=>String(s==null?'':s).replace(/"/g,'&quot;');
+    const div=document.createElement('div');
+    div.style.cssText='display:flex;gap:6px;align-items:center;padding:5px 10px;border-bottom:1px solid var(--border)';
+    div.innerHTML=`
+      <span style="flex:1;min-width:120px;font-size:12px;color:var(--text2)" title="${esc(name)}">${esc(name)}</span>
+      <input type="text" value="${esc(e.layout)}" id="pv-l-${i}" placeholder="擺法碼" maxlength="3" style="width:56px;padding:3px 5px;border:1px solid var(--border);border-radius:3px;font-size:12px;text-align:center;text-transform:uppercase;font-family:var(--font)">
+      <input type="number" step="0.001" value="${(e.volume===0||e.volume)?e.volume:''}" id="pv-v-${i}" placeholder="材積" style="width:82px;padding:3px 5px;border:1px solid var(--border);border-radius:3px;font-size:12px;text-align:right;font-family:var(--font)">
+      <input type="text" value="${esc(e.note)}" id="pv-n-${i}" placeholder="備註" style="width:120px;padding:3px 5px;border:1px solid var(--border);border-radius:3px;font-size:11px;font-family:var(--font)">
+      <button onclick="savePkgVol(${i})" style="padding:3px 8px;background:var(--accent);color:#fff;border:none;border-radius:3px;font-size:11px;cursor:pointer;font-family:var(--font)">存</button>
+      <button onclick="removePkgVol(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:12px" title="刪除">✕</button>
+    `;
+    c.appendChild(div);
+  });
+}
+function savePkgVol(i){
+  const name=_pkgVolOrder[i];if(name===undefined)return;
+  const layout=(document.getElementById('pv-l-'+i)?.value||'').trim().toUpperCase();
+  const vRaw=document.getElementById('pv-v-'+i)?.value;
+  let volume='';
+  if(vRaw!==''&&vRaw!=null){const n=Number(vRaw);volume=isNaN(n)?'':n;}
+  const note=(document.getElementById('pv-n-'+i)?.value||'').trim();
+  PKG_VOL_MAP[name]={layout,volume,note};
+  savePackagingVolumeConfig();
+  const btn=document.querySelector(`#pkgvol-list [onclick="savePkgVol(${i})"]`);
+  if(btn){const t=btn.textContent;btn.textContent='✓';btn.style.background='var(--green,#27ae60)';setTimeout(()=>{btn.textContent=t;btn.style.background='var(--accent)';},700);}
+}
+function removePkgVol(i){const name=_pkgVolOrder[i];if(name===undefined)return;if(!confirm('刪除「'+name+'」對照？'))return;delete PKG_VOL_MAP[name];savePackagingVolumeConfig();renderPackagingVolumeList();}
+function addPkgVol(){
+  const name=prompt('輸入包材名稱（需與 ERP「商品包材」欄完全一致）：');
+  if(name==null)return;const p=name.trim();if(!p)return;
+  if(!PKG_VOL_MAP[p])PKG_VOL_MAP[p]={layout:'',volume:'',note:''};
+  savePackagingVolumeConfig();renderPackagingVolumeList();
+}
+function resetPkgVol(){if(!confirm('清空所有「包材→擺法碼/材積」對照？此動作無法復原。'))return;PKG_VOL_MAP={};localStorage.removeItem('lativ_packaging_volume');renderPackagingVolumeList();}
+// 從目前已上傳資料（ARRANGE_DATA / DB）帶入尚未建立的包材，layout/volume 留空待填
+function seedPkgVolFromData(){
+  const set=new Set();
+  (typeof ARRANGE_DATA!=='undefined'&&ARRANGE_DATA||[]).forEach(r=>{const p=String(r.packaging||'').trim();if(p)set.add(p);});
+  (typeof DB!=='undefined'&&DB||[]).forEach(r=>{const p=String(r['商品包材']||r.packaging||'').trim();if(p)set.add(p);});
+  if(!set.size){alert('目前沒有可帶入的包材（請先上傳儲位安排報表）。');return;}
+  let added=0;
+  set.forEach(p=>{if(!PKG_VOL_MAP[p]){PKG_VOL_MAP[p]={layout:'',volume:'',note:''};added++;}});
+  savePackagingVolumeConfig();renderPackagingVolumeList();
+  alert('已帶入 '+added+' 種尚未建立的包材（資料中共 '+set.size+' 種）。\n請逐列填擺法碼與材積後按「存」。');
+}
+// 匯入 Gordon 填好的「包材材積對照表_請填寫.xlsx」
+//   ★以 AOA 讀取並自動偵測「包材名稱」所在的表頭列（表上方有圖例/範例區，表頭不在第 1 列）；
+//   欄名容錯（含★／（請填）／（選填）等修飾）；跳過範例/說明列。
+function importPkgVolXlsx(input){
+  const f=input&&input.files&&input.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=ev=>{
+    try{
+      const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'});
+      const shName=wb.SheetNames.find(n=>n.indexOf('對照')>=0&&n.indexOf('請填')>=0)||wb.SheetNames.find(n=>n.indexOf('對照')>=0)||wb.SheetNames[0];
+      const aoa=XLSX.utils.sheet_to_json(wb.Sheets[shName],{header:1,defval:''});
+      let hdrIdx=-1;
+      for(let i=0;i<aoa.length;i++){if((aoa[i]||[]).some(c=>String(c).indexOf('包材名稱')>=0)){hdrIdx=i;break;}}
+      if(hdrIdx<0){alert('匯入失敗：找不到「包材名稱」表頭列，請確認是本系統匯出的填寫表。');try{input.value='';}catch(e){}return;}
+      const hdr=(aoa[hdrIdx]||[]).map(c=>String(c==null?'':c));
+      const findCol=cond=>{for(let j=0;j<hdr.length;j++){if(cond(hdr[j]))return j;}return -1;};
+      const nameC=findCol(h=>h.indexOf('包材名稱')>=0);
+      let layC=findCol(h=>h.indexOf('對應擺法碼')>=0);
+      if(layC<0)layC=findCol(h=>h.indexOf('擺法碼')>=0&&h.indexOf('現有')<0&&h.indexOf('目前')<0);
+      const volC=findCol(h=>h.indexOf('對應材積')>=0);
+      const noteC=findCol(h=>h.indexOf('備註')>=0);
+      let n=0;
+      for(let i=hdrIdx+1;i<aoa.length;i++){
+        const row=aoa[i]||[];
+        const name=String(row[nameC]==null?'':row[nameC]).trim();
+        if(!name||name.indexOf('範例')>=0||name.indexOf('說明')>=0||name.indexOf('填寫')>=0)continue;
+        const layout=layC>=0?String(row[layC]==null?'':row[layC]).trim().toUpperCase():'';
+        const vRaw=volC>=0?row[volC]:'';
+        let volume='';if(vRaw!==''&&vRaw!=null){const nv=Number(vRaw);volume=isNaN(nv)?'':nv;}
+        const note=noteC>=0?String(row[noteC]==null?'':row[noteC]).trim():'';
+        PKG_VOL_MAP[name]={layout,volume,note};
+        n++;
+      }
+      savePackagingVolumeConfig();renderPackagingVolumeList();
+      alert('已從分頁「'+shName+'」匯入 '+n+' 列包材對照。\n（未填擺法碼/材積者仍會建立空列，可在下方直接補。）');
+    }catch(err){alert('匯入失敗：'+(err&&err.message||err));}
+    try{input.value='';}catch(e){}
+  };
+  rd.readAsArrayBuffer(f);
+}
 
 // ============================================================
 // 移倉規劃 - 統計更新
@@ -12188,7 +12317,7 @@ function showMonthlyExportReminder(ym){
 }
 
 (async function init(){
-  loadAisleConfig();loadManualEdits();loadXXCapacity();loadXXZoneConfig();loadPackagingRulesConfig();rfLoadPrefs();
+  loadAisleConfig();loadManualEdits();loadXXCapacity();loadXXZoneConfig();loadPackagingRulesConfig();loadPackagingVolumeConfig();rfLoadPrefs();
   // ★ R4：applyRmDerivedAvail() 不在此呼叫 — RM_DATA 定義於後方 rackmap script，改於該區塊尾端執行
   let restored=false;
   try{restored=await loadEPRData();if(restored)console.log('EPR restored from IndexedDB');}catch(e){console.warn('EPR restore failed:',e);}
@@ -12280,6 +12409,7 @@ function showMonthlyExportReminder(ym){
   try{updateFW26LastUpdate();}catch(e){}
   console.log('renderFW26Stats called, FW26_FILTER_DATA.length=',FW26_FILTER_DATA.length);
   try{renderPackagingRulesList();}catch(e){}
+  try{renderPackagingVolumeList();}catch(e){}
   try{updateRelocStats();}catch(e){}
   if(!restored){
     const now=new Date();
@@ -12698,6 +12828,28 @@ function showMonthlyExportReminder(ym){
       <div id="rm-canvas" style="width:100%;overflow:auto;max-height:70vh;border:1px solid var(--border,#ddd);border-radius:8px;background:#fff"></div>
       <!-- ★2026-07-21 移除 rm-editor 儲架編輯面板（儲架已定位，暫不使用） -->
       <div id="rm-compare" style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;padding:10px;background:var(--surface,#fafafa)"></div>
+
+      <!-- ★2026-08-08 Gordon（Request 3）：包材→擺法碼/材積 對照維護（暫放走道材積修正） -->
+      <div style="width:100%;border:1px solid var(--border,#ddd);border-radius:8px;background:var(--surface,#fafafa)">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <span style="font-weight:700;font-size:14px;color:var(--accent)">📦 包材 → 擺法碼／材積 對照</span>
+          <span style="font-size:11px;color:var(--text3)">（共 <b id="pkgvol-count">0</b> 種；匯出新品安排時會以「商品包材」查此表顯示擺法碼＋材積，暫放到不符走道時擺法碼標「*」）</span>
+          <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+            <button onclick="seedPkgVolFromData()" style="padding:4px 10px;font-size:11px;border:1px solid var(--accent);color:var(--accent);background:#fff;border-radius:4px;cursor:pointer;font-family:var(--font)">seed 常見包材</button>
+            <label style="padding:4px 10px;font-size:11px;border:1px solid var(--accent);color:var(--accent);background:#fff;border-radius:4px;cursor:pointer;font-family:var(--font)">匯入填好的對照表<input type="file" accept=".xlsx" onchange="importPkgVolXlsx(this)" style="display:none"></label>
+            <button onclick="addPkgVol()" style="padding:4px 10px;font-size:11px;border:1px solid var(--border);color:var(--text2);background:#fff;border-radius:4px;cursor:pointer;font-family:var(--font)">＋手動新增</button>
+            <button onclick="resetPkgVol()" style="padding:4px 10px;font-size:11px;border:1px solid #c0392b;color:#c0392b;background:#fff;border-radius:4px;cursor:pointer;font-family:var(--font)">清空</button>
+          </span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;padding:5px 10px;border-bottom:2px solid var(--border);font-size:11px;color:var(--text3);font-weight:700">
+          <span style="flex:1;min-width:120px">包材名稱（需與 ERP 一致）</span>
+          <span style="width:56px;text-align:center">擺法碼</span>
+          <span style="width:82px;text-align:right">材積 m³</span>
+          <span style="width:120px">備註</span>
+          <span style="width:60px"></span>
+        </div>
+        <div id="pkgvol-list" style="max-height:340px;overflow:auto"></div>
+      </div>
     </div>
   </div>
 </div>
