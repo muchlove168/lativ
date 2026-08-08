@@ -2966,18 +2966,38 @@ function wkFcKey(r){
 function wkArrKey(r){return _wkN(r.code);}
 
 // 疊加合併（upsert）：同 key → 覆蓋，不同 key → 新增
-function wkMerge(archive,rows,keyFn,decorate){
-  const idx={};archive.forEach((r,i)=>{idx[r._key]=i;});
-  const dupInFile={};let added=0,updated=0;
+// ★2026-08-08 Gordon（貨櫃取消/改期案）：新增可選 inScope(archiveRec) predicate —— 傳入時對「本次上傳
+//   所涵蓋的權責範圍」做對帳：範圍內、但新報表已不存在的舊項目（取消/被換櫃/SKU縮水）一併移除；
+//   範圍外（別視窗別款）完全不動 → 保留原「跨週累積」設計（★2026-07-21），只補「消失項目」缺口。
+//   範圍定義：預告=報表實際日期欄視窗 [minCol,maxCol]（不用「週」，避免週跨視窗邊界誤刪視窗外貨櫃）；
+//            儲位安排=本次上傳出現過的款號前5碼集合。不傳 inScope → 行為與原本完全一致（純 upsert、不移除）。
+function wkMerge(archive,rows,keyFn,decorate,inScope){
+  // ① 先產生本次上傳的最終記錄（含檔內去重 key ~N 與 decorate），供對帳與 upsert 共用
+  const dupInFile={};const recs=[];
   rows.forEach(r=>{
     let k=keyFn(r);
     if(dupInFile[k]){dupInFile[k]++;k=k+'~'+dupInFile[k];}else dupInFile[k]=1;
     const rec=Object.assign({},r,{_key:k});
     if(decorate)decorate(rec);
-    if(idx[k]!=null){archive[idx[k]]=rec;updated++;}
-    else{idx[k]=archive.length;archive.push(rec);added++;}
+    recs.push(rec);
   });
-  return {added,updated};
+  // ② 權責範圍內對帳移除（僅在提供 inScope 時）：範圍內且新報表已無此 key → 移除
+  let removed=0;
+  if(typeof inScope==='function'){
+    const newKeys=new Set(recs.map(r=>r._key));
+    for(let i=archive.length-1;i>=0;i--){
+      const a=archive[i];
+      if(inScope(a)&&!newKeys.has(a._key)){archive.splice(i,1);removed++;}
+    }
+  }
+  // ③ upsert
+  const idx={};archive.forEach((r,i)=>{idx[r._key]=i;});
+  let added=0,updated=0;
+  recs.forEach(rec=>{
+    if(idx[rec._key]!=null){archive[idx[rec._key]]=rec;updated++;}
+    else{idx[rec._key]=archive.length;archive.push(rec);added++;}
+  });
+  return {added,updated,removed};
 }
 
 // 目前庫內有哪些週（新→舊，未定日期排最後）
@@ -3091,12 +3111,16 @@ async function handleArrangeUpload(event){
       arrival:String(r['貨到通知']||''),
     })).filter(r=>r.code);
     // ★2026-07-21 疊加：以商品編號 upsert 進 ARRANGE_ARCHIVE，不覆蓋前幾週已累積的 SKU 規格
+    // ★2026-08-08：權責範圍＝本次上傳出現過的款號前5碼；範圍內以新報表為準（同款換櫃/SKU縮水殘留 SKU 移除），
+    //   別款(其他週累積)不動。
     const _arrDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
-    const _am=wkMerge(ARRANGE_ARCHIVE,ARRANGE_DATA,wkArrKey,rec=>{rec._src=_arrDate;});
+    const _arrStyles=new Set(ARRANGE_DATA.map(r=>String(r.code||'').substring(0,5)).filter(Boolean));
+    const _am=wkMerge(ARRANGE_ARCHIVE,ARRANGE_DATA,wkArrKey,rec=>{rec._src=_arrDate;},
+      _arrStyles.size?(a=>_arrStyles.has(String(a.code||'').substring(0,5))):null);
     wkApplySelection();
     await wkPersist();
     try{localStorage.setItem('arrange_upload_date',_arrDate);}catch(e){}
-    document.getElementById('arrange-status').textContent=`儲位安排累積 ${ARRANGE_ARCHIVE.length} 筆（本次新增 ${_am.added} / 更新 ${_am.updated}；${_arrDate}）`;
+    document.getElementById('arrange-status').textContent=`儲位安排累積 ${ARRANGE_ARCHIVE.length} 筆（本次新增 ${_am.added} / 更新 ${_am.updated}${_am.removed?` / 移除 ${_am.removed}`:''}；${_arrDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     // ★ 2026-07-16 Gordon：儲位安排報表只是換一份待排清單，不是新一輪（新一輪由 EPR 報表觸發）
@@ -3142,15 +3166,23 @@ async function handleForecastUpload(event){
     // ★2026-07-21 疊加：同一貨櫃（採購單號|款號|櫃號|進口編號）重複匯入 → 覆蓋更新進倉日/箱數，不會重複出現
     const _fcDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
     const _ref=new Date();
+    // ★2026-08-08：權責範圍＝報表實際日期欄視窗 [minCol,maxCol]（不用「週」避免週跨視窗邊界誤刪）；
+    //   視窗內、新報表已無此貨櫃(取消/被換櫃)→移除；視窗外(更後面週次的既有貨櫃)保留。
+    const _dcols=Object.keys(raw[0]||{}).filter(k=>/^\d{1,2}\/\d{1,2}$/.test(String(k).trim()));
+    let _dymds=_dcols.map(d=>wkResolveYMD(d,_ref)).filter(Boolean);
+    if(!_dymds.length)_dymds=FORECAST_DATA.map(r=>wkResolveYMD(r.arrivalDate,_ref)).filter(Boolean); // fallback：日期欄標題偵測不到→用本次貨櫃日期範圍
+    _dymds.sort();
+    const _winMin=_dymds[0]||'', _winMax=_dymds[_dymds.length-1]||'';
+    const _inWin=(a)=>!!(_winMin&&a._ymd&&a._ymd>=_winMin&&a._ymd<=_winMax);
     const _fm=wkMerge(FORECAST_ARCHIVE,FORECAST_DATA,wkFcKey,rec=>{
       rec._ymd=wkResolveYMD(rec.arrivalDate,_ref);
       rec._week=rec._ymd?wkStart(rec._ymd):'';
       rec._src=_fcDate;
-    });
+    },_winMin?_inWin:null);
     wkApplySelection();
     await wkPersist();
     try{localStorage.setItem('forecast_upload_date',_fcDate);}catch(e){}
-    document.getElementById('forecast-status').textContent=`預告進貨累積 ${FORECAST_ARCHIVE.length} 筆／${wkWeeks().length} 週（本次新增 ${_fm.added} / 更新 ${_fm.updated}；${_fcDate}）`;
+    document.getElementById('forecast-status').textContent=`預告進貨累積 ${FORECAST_ARCHIVE.length} 筆／${wkWeeks().length} 週（本次新增 ${_fm.added} / 更新 ${_fm.updated}${_fm.removed?` / 移除 ${_fm.removed}`:''}；${_fcDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     // ★ 2026-07-16 Gordon：新的預告進貨表 → 已進倉/取消的款號要從待排新品佇列移除
