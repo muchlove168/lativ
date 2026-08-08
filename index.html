@@ -6408,6 +6408,105 @@ function plnRunNewEngine(config,initialCells){
     return unplaced;
   }
 
+  // ═══ §1.3g 全-A 走道 (C08/C09/C10/C11 型: 大號側全 A 材積) 新品排入 (Gordon 2026-08-07 C08案) ═══
+  //   全 A 走道無「大/小材積」之分 → isAgAisle(需 G/C+A/B) 判 false, runAgEngine(computeFirstCset 需大材積鄰欄)
+  //   也吃不了 → 舊路徑落 plnPlaceNonAgUnits, 溢出碼全丟尾端跨架遠離主碼。本引擎借 CBCCCC「保留欄」概念:
+  //   每架末欄(col%6==0)保留給溢出碼(XXL), 讓溢出貼近主碼、相鄰(無儲位箱隔)不放同款色不同碼。
+  //   優先序: 密度(空格集中尾端) > 就近(溢出貼主碼) > 跨架(最後手段)。
+  //   演算法(已對 Gordon C08 手排逐格驗證, 總欄距 min-cost 指派最小化):
+  //   ① 保留欄=col%6==0 候選; reservedCount=min(⌈溢出/4⌉, slack=freeCols−主碼欄, 候選數);
+  //      Pass A 暫跳全候選估主碼位, 依「到最近溢出主碼欄距離」升冪挑最近 reservedCount 個(密度: 保留欄不散置)。
+  //   ② 主碼: phase 序(mirror plnPlaceNonAgUnits: P1 帶溢出且≤殘格→P2 無溢出→P3 其餘)由前往後填非保留欄,
+  //      色原子; 每色 anchor=最後主碼欄。
+  //   ③ 溢出: Hungarian min-cost 指派最小化 Σ|保留欄−主碼欄|; 容量 4/保留欄; 禁忌邊=主碼 pos5(col%6==5)
+  //      不可用同架保留欄(col+1, 跨儲位箱=同款色相鄰); spill(殘格/尾端全空欄)加重罰 SPILL_PEN→保留欄優先;
+  //      保留欄內依主碼欄升冪排層1-4。容量不足時 min-cost 自然把離保留欄最遠的色 spill 到殘格(白色→59-4)。
+  //   ④ 觸發判定 isAllADest: 有整欄全空的主碼區 && 所有整欄全空欄擺法皆 'A'(通用, 命中 C08/C09/C10/C11;
+  //      混入非 A 全空欄 or 僅剩殘格 → 回退 plnPlaceNonAgUnits, 避免誤搶)。
+  //   ★ 獨立分支: CB(C04/C07 ovSort/buildRacks 鎖定區) / AG(P06 runAgEngine) / D-H 配件路徑一律不碰, 零回歸。
+  function plnHungarian(cost){const n=cost.length,INF=Infinity;const u=Array(n+1).fill(0),v=Array(n+1).fill(0),p=Array(n+1).fill(0),way=Array(n+1).fill(0);
+    for(let i=1;i<=n;i++){p[0]=i;let j0=0;const minv=Array(n+1).fill(INF),used=Array(n+1).fill(false);
+      do{used[j0]=true;const i0=p[j0];let delta=INF,j1=-1;for(let j=1;j<=n;j++)if(!used[j]){const cur=cost[i0-1][j-1]-u[i0]-v[j];if(cur<minv[j]){minv[j]=cur;way[j]=j0;}if(minv[j]<delta){delta=minv[j];j1=j;}}
+        for(let j=0;j<=n;j++){if(used[j]){u[p[j]]+=delta;v[j]-=delta;}else minv[j]-=delta;}j0=j1;}while(p[j0]!==0);
+      do{const j1=way[j0];p[j0]=p[j1];j0=j1;}while(j0);}
+    const res=Array(n).fill(-1);for(let j=1;j<=n;j++)if(p[j]>0)res[p[j]-1]=j-1;return res;}
+  function plnMinCostAssign(rows,cols,costFn){const R=rows.length,C=cols.length,n=Math.max(R,C,1);
+    const M=[];for(let i=0;i<n;i++){M.push([]);for(let j=0;j<n;j++)M[i][j]=(i<R&&j<C)?costFn(rows[i],cols[j]):0;}
+    const a=plnHungarian(M);const out=Array(R).fill(-1);for(let i=0;i<R;i++){const j=a[i];if(i<R&&j<C)out[i]=j;}return out;}
+  function isAllADest(a){
+    const colsAsc=plnValidCols(cells,a);let hasFullEmptyA=false;
+    for(const col of colsAsc){
+      let exists=0,blocked=0;
+      for(let L=1;L<=4;L++){const cs=cells[plnCellId(a,col,L)];if(!cs)continue;exists++;if(cs.sku||cs.locked)blocked++;}
+      if(exists===4&&blocked===0){ if(getColLayout(a,col)!=='A')return false; hasFullEmptyA=true; }
+    }
+    return hasFullEmptyA;
+  }
+  function runAllAEngine(aisle,units){
+    const RACK=6;
+    // — 收集 freeCols(整欄全空, ASC) + residuals(既有殘格 cell) 同 plnPlaceNonAgUnits —
+    const colsAsc=plnValidCols(cells,aisle);const freeCols=[];const residuals=[];
+    colsAsc.forEach(col=>{
+      const empt=[];let blocked=0,exists=0;
+      for(let L=1;L<=4;L++){const cs=cells[plnCellId(aisle,col,L)];if(!cs)continue;exists++;if(cs.sku||cs.locked)blocked++;else empt.push(cs);}
+      if(exists===4&&blocked===0)freeCols.push(col);else empt.forEach(cs=>residuals.push(cs));
+    });
+    // — 切組 (同 plnPlaceNonAgUnits prep: 滿4碼=主碼組, 餘數=溢出碼; n<4 整色為短主碼組) —
+    const prep=units.map(u=>{
+      const sorted=PLN_PRIM.sortBySizeCode(u.skus,s=>s.code);
+      const full=Math.floor(sorted.length/4);
+      const mainGroups=[];for(let g=0;g<full;g++)mainGroups.push(sorted.slice(g*4,g*4+4));
+      const restArr=sorted.slice(full*4);let overflow=[];
+      if(restArr.length){ if(full===0)mainGroups.push(restArr); else overflow=restArr; }
+      return {u,mainGroups,overflow,_anchorCol:null};
+    });
+    // — phase 序 (mirror plnPlaceNonAgUnits): P1 帶溢出且溢出數≤殘格budget→P2 無溢出→P3 其餘帶溢出 —
+    const withOvf=prep.filter(p=>p.overflow.length>0),noOvf=prep.filter(p=>!p.overflow.length);
+    let budget=residuals.length;const phase1=[],phase3=[];
+    for(const p of withOvf){ if(p.overflow.length<=budget){phase1.push(p);budget-=p.overflow.length;}else phase3.push(p); }
+    const ordered=[...phase1,...noOvf,...phase3];
+    const totalMainCols=ordered.reduce((s,p)=>s+p.mainGroups.length,0);
+    const overflowCount=ordered.reduce((s,p)=>s+p.overflow.length,0);
+    // — 保留欄挑選 (密度優先: Pass A 估主碼位, 取離溢出主碼最近 reservedCount 欄) —
+    const reservedCand=freeCols.filter(c=>c%RACK===0);
+    const slack=freeCols.length-totalMainCols;
+    const reservedCount=Math.min(Math.ceil(overflowCount/4),Math.max(0,slack),reservedCand.length);
+    let reserved=new Set();
+    if(reservedCount>0&&overflowCount>0){
+      const skipAll=new Set(reservedCand);const mainSeqA=freeCols.filter(c=>!skipAll.has(c));
+      let idx=0;const anchorsA=[];
+      ordered.forEach(p=>{let first=null;p.mainGroups.forEach(()=>{const col=mainSeqA[idx++];if(first===null)first=col;});if(p.overflow.length&&first!=null)anchorsA.push(first);});
+      const scored=reservedCand.map(c=>{let best=Infinity;anchorsA.forEach(m=>best=Math.min(best,Math.abs(c-m)));return {c,d:best};});
+      scored.sort((a,b)=>a.d-b.d||a.c-b.c);reserved=new Set(scored.slice(0,reservedCount).map(o=>o.c));
+    }
+    // — 主碼由前往後填非保留欄 (色原子: 主碼欄不足整色不排) —
+    const mainSeq=freeCols.filter(c=>!reserved.has(c));const plan=[],unplaced=[];let mi=0;
+    for(const p of ordered){
+      if(mi+p.mainGroups.length<=mainSeq.length){const cols=mainSeq.slice(mi,mi+p.mainGroups.length);mi+=p.mainGroups.length;p._anchorCol=cols[cols.length-1];plan.push({p,cols});}
+      else unplaced.push(p.u);
+    }
+    // — 實際排入主碼 —
+    plan.forEach(({p,cols})=>p.mainGroups.forEach((g,gi)=>{const col=cols[gi];g.forEach((s,i)=>placeOneSku(s,aisle,col,i+1,p.u.cat));}));
+    // — 溢出碼 min-cost 指派 (保留欄優先, 罰跨儲位箱同色相鄰) —
+    const ovItems=[];plan.forEach(({p})=>p.overflow.forEach(s=>ovItems.push({s,mainCol:p._anchorCol,cat:p.u.cat})));
+    if(ovItems.length){
+      const resSlots=[];[...reserved].sort((a,b)=>a-b).forEach(RC=>{for(let L=1;L<=4;L++)resSlots.push({col:RC,layer:L,reserved:true});});
+      const usedMain=new Set();plan.forEach(({cols})=>cols.forEach(c=>usedMain.add(c)));
+      const spillSlots=[];
+      residuals.forEach(r=>spillSlots.push({col:r.col,layer:r.layer,reserved:false}));
+      freeCols.forEach(c=>{if(!usedMain.has(c)&&!reserved.has(c))for(let L=1;L<=4;L++)spillSlots.push({col:c,layer:L,reserved:false});});
+      const allSlots=[...resSlots,...spillSlots];const SPILL_PEN=100000,FORBID=1e9;
+      const forbid=(m,s)=>s.reserved&&(m%RACK===5)&&(s.col===m+1);
+      const costFn=(it,s)=>forbid(it.mainCol,s)?FORBID:Math.abs(s.col-it.mainCol)+(s.reserved?0:SPILL_PEN);
+      const asg=plnMinCostAssign(ovItems,allSlots,costFn);const byCol=new Map();const direct=[];
+      ovItems.forEach((it,i)=>{const si=asg[i];if(si<0)return;const s=allSlots[si];
+        if(s.reserved){if(!byCol.has(s.col))byCol.set(s.col,[]);byCol.get(s.col).push(it);}else direct.push({it,s});});
+      direct.forEach(({it,s})=>placeOneSku(it.s,aisle,s.col,s.layer,it.cat));
+      byCol.forEach((items,col)=>{items.sort((a,b)=>a.mainCol-b.mainCol);items.forEach((it,k)=>placeOneSku(it.s,aisle,col,k+1,it.cat));});
+    }
+    return unplaced;
+  }
+
   // ════════════════════════════════════════════════════════════
   // ★ AG 模式引擎 (v4 — 無重複排入)
   // 設計原則:
@@ -7302,7 +7401,8 @@ function plnRunNewEngine(config,initialCells){
   }
   for(const a of nonAgAisles){
     if(!pendingUnits.length)break;
-    pendingUnits=plnPlaceNonAgUnits(a,pendingUnits);
+    // ★2026-08-07 C08案: 全A走道(大號側全A材積)走保留欄引擎, 溢出碼貼近主碼; 其餘(D/H配件)走原路徑
+    pendingUnits=isAllADest(a)?runAllAEngine(a,pendingUnits):plnPlaceNonAgUnits(a,pendingUnits);
   }
   // 仍排不完 → 內部整理騰位後重試 (§1.6 精神)
   if(pendingUnits.length){
@@ -7316,7 +7416,7 @@ function plnRunNewEngine(config,initialCells){
       if(intR&&!intR._internalError){
         intR.moves.forEach(m=>moves.push({...m,phase:'NEW_PRODUCT_CONSOLIDATION'}));
         Object.keys(intR.finalCells).forEach(k=>{cells[k]=intR.finalCells[k];});
-        pendingUnits=plnPlaceNonAgUnits(a,pendingUnits);
+        pendingUnits=isAllADest(a)?runAllAEngine(a,pendingUnits):plnPlaceNonAgUnits(a,pendingUnits);
       }
     }
   }
