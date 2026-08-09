@@ -9148,7 +9148,8 @@ function renderArrangeCompare(){
         });});
         const _tempTxt=_tempN?`<span style="color:#d4a017;font-size:9px;margin-left:3px;cursor:help" title="其中 ${_tempN} 筆目前暫放於 XX/TX 溢位區 → 視為未排，已計入待排數">(暫放 ${_tempN})</span>`:'';
         // ★ 2026-07-25 Gordon：待排=0（已排完儲位）不再顯示「(已排 XX)」灰字（如申洲列 童中袋 0 (已排336)）
-        const _placedTxt=(s.skuCount&&s.placedCount)?`<span style="color:var(--text3);font-size:9px;margin-left:3px;cursor:help" title="已排入 ${s.placedCount} 筆（ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上）→ 不列入待排新品">(已排 ${s.placedCount})</span>`:'';
+        // ★ 2026-08-09 Gordon：預告進貨明細 SKU 數欄「(已排 XX)」灰字一律不顯示（含混合列，覆寫上一行 07-25 混合列保留決策）；display-layer only，placedCount 計算與去重邏輯不動
+        const _placedTxt='';
         const skuCell=dupAlert
           ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${_pendTxt}${_placedTxt}${_tempTxt}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
           : `${_pendTxt}${_placedTxt}${_tempTxt}`;
