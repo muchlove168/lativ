@@ -2338,6 +2338,12 @@ let ARRANGE_DATA = [];
 // 儲位調整建議 tab
 let AISLE_REPORT_DATA = [];   // 走道報表（庫存查詢 SKU 列表）
 let STORAGE_MASTER = {};       // 儲位總表 {sheetName: [{slot, layout}]}
+// ★ 2026-08-09 Gordon：臨時擺法走道（儲位總表「臨時」sheet）— 可用不同擺法安排的走道之替代 layout。
+//   PLN_TEMP_LAYOUT={slot:layout}（獨立存放、不進 STORAGE_MASTER，避免同 slot 重複汙染 cells）。
+//   PLN_TEMP_APPLY={aisle:true}：本次 Run 各走道是否採臨時擺法（Run 前由對話框設定，經 plnBuildState 覆寫 cell.layout →
+//   引擎 isAgAisle/isAllADest/detectCBType 自動判對型別、走對溢出邏輯；未選/非臨時走道零影響。引擎函式不需改。
+let PLN_TEMP_LAYOUT = {};
+let PLN_TEMP_APPLY = {};
 let FORECAST_DATA = [];
 
 // ============================================================
@@ -3543,6 +3549,13 @@ async function handlePlannerMasterUpload(event){
         if(slots.length)sheets[sn]=slots;
       });
       if(!Object.keys(sheets).length){alert('儲位總表為空');return;}
+      // ★ 2026-08-09 Gordon：抽出「臨時」sheet → PLN_TEMP_LAYOUT（不進 STORAGE_MASTER，避免同 slot 重複）
+      PLN_TEMP_LAYOUT={};
+      if(sheets['臨時']){
+        (sheets['臨時']||[]).forEach(({slot,layout})=>{if(slot&&layout)PLN_TEMP_LAYOUT[slot]=String(layout).trim();});
+        delete sheets['臨時'];
+      }
+      try{await idbPut('planner_temp_layout',PLN_TEMP_LAYOUT);}catch(err){}
       STORAGE_MASTER=sheets;
       try{await idbPut('storage_master_sheets',sheets);}catch(err){}
       const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
@@ -4248,7 +4261,10 @@ function plnBuildState(){
   const cells={};
   Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(({slot,layout})=>{
     const p=plnParseCell(slot);if(!p)return;
-    cells[slot]={cell:slot,aisle:p.aisle,col:p.col,layer:p.layer,layout:layout||'',sku:null,info:null,locked:false};
+    // ★ 2026-08-09 Gordon：本次 Run 若該走道選用臨時擺法 → 以臨時 layout 覆寫（引擎自動改走對應溢出邏輯；未選/非臨時走道保持原 layout）
+    let _lay=layout||'';
+    if(PLN_TEMP_APPLY[p.aisle]&&PLN_TEMP_LAYOUT[slot]!==undefined)_lay=PLN_TEMP_LAYOUT[slot];
+    cells[slot]={cell:slot,aisle:p.aisle,col:p.col,layer:p.layer,layout:_lay,sku:null,info:null,locked:false};
   }));
   AISLE_REPORT_DATA.forEach(r=>{
     const c=String(r['儲位']||'').trim();
@@ -7526,7 +7542,7 @@ function plannerRenderConfigUI(){
     <div style="display:flex;align-items:center;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border)">
       <button onclick="plannerAddStep()" class="upload-btn" style="font-size:12px;padding:4px 12px">+ 新增步驟</button>
       <span style="color:var(--text3);font-size:11px">${ovfTxt}</span>
-      <button onclick="plannerRunAllSteps()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
+      <button onclick="plannerRunAllStepsGated()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
     </div>
   `;
   // ★ FIX: 單走道有新品佇列時預設「new」；無新品佇列才預設「internal」；多走道預設「自動」
@@ -8014,6 +8030,104 @@ function plannerRefreshStepCounts(){
 
 let PLN_LAST_RESULT=null;
 
+// ════════ 臨時擺法（可用不同擺法安排的走道）— 逐走道確認 ════════
+// PLN_TEMP_LAYOUT={slot:layout}；本區負責：偵測 step 用到的臨時走道 → 彈對話框讓使用者選擺法 → 設 PLN_TEMP_APPLY → 跑。
+// 擺法碼顯示排序：大材積優先（對齊 CB/CBCCCC 慣例，如 C·B 而非 B·C）
+function plnCodeCmp(a,b){
+  const v=c=>(typeof RM_MATERIALS!=='undefined'&&RM_MATERIALS[c]&&RM_MATERIALS[c].vol)||0;
+  return v(b)-v(a) || (a<b?-1:a>b?1:0);
+}
+function plnTempAisleCodes(){   // {aisle:[distinct codes]} 來自臨時 sheet
+  const m={};
+  Object.keys(PLN_TEMP_LAYOUT||{}).forEach(slot=>{
+    const a=String(slot).split('-')[0];const c=PLN_TEMP_LAYOUT[slot];if(!a||!c)return;
+    (m[a]=m[a]||new Set()).add(c);
+  });
+  const out={};Object.keys(m).forEach(a=>out[a]=[...m[a]].sort(plnCodeCmp));return out;
+}
+function plnMasterAisleCodes(aisle){   // [distinct codes] 來自 STORAGE_MASTER（原本擺法）
+  const s=new Set();
+  Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(({slot,layout})=>{
+    if(slot&&layout&&String(slot).split('-')[0]===aisle)s.add(String(layout).trim());
+  }));
+  return [...s].sort(plnCodeCmp);
+}
+// 收集本次要跑的所有 step 用到的臨時走道（來源+目的，排除「新品-」虛擬走道），逐走道去重
+function plnCollectTempUsage(){
+  const tempCodes=plnTempAisleCodes();
+  if(!Object.keys(tempCodes).length)return [];
+  const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
+  const byAisle={};   // aisle → {aisle, steps:Set, def:[], temp:[]}
+  stepDivs.forEach(d=>{
+    const idx=parseInt(d.id.replace('pln-step-',''));
+    let cfg;try{cfg=plannerCollectStepConfig(idx);}catch(e){return;}
+    const aisles=new Set([...(cfg.source||[]),...(cfg.destination||[])].map(String).filter(a=>a&&!a.startsWith('新品-')));
+    aisles.forEach(a=>{
+      if(!tempCodes[a])return;
+      const def=plnMasterAisleCodes(a),temp=tempCodes[a];
+      if(def.join(',')===temp.join(','))return;   // 原本與臨時擺法相同 → 無需詢問
+      if(!byAisle[a])byAisle[a]={aisle:a,steps:new Set(),def:def,temp:temp};
+      byAisle[a].steps.add(idx);
+    });
+  });
+  return Object.values(byAisle).map(x=>({aisle:x.aisle,steps:[...x.steps].sort((a,b)=>a-b),def:x.def,temp:x.temp}));
+}
+// ▶ Run All Steps 的實際入口：先 gate 臨時擺法
+function plannerRunAllStepsGated(){
+  const usage=plnCollectTempUsage();
+  if(!usage.length){PLN_TEMP_APPLY={};plannerRunAllSteps();return;}
+  plnShowTempLayoutModal(usage);
+}
+// 設定 PLN_TEMP_APPLY → 跑 → 跑完清除（確保臨時擺法僅作用於本次 Run）
+function _plnRunWithTempChoices(applyMap){
+  PLN_TEMP_APPLY=applyMap||{};
+  try{plannerRunAllSteps();}finally{PLN_TEMP_APPLY={};}
+}
+function plnShowTempLayoutModal(usage){
+  const old=document.getElementById('pln-temp-modal');if(old)old.remove();
+  const ov=document.createElement('div');ov.id='pln-temp-modal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100000;display:flex;align-items:center;justify-content:center;font-family:var(--font,sans-serif)';
+  const rows=usage.map((u,i)=>{
+    const defLbl='擺法 '+u.def.join('·'),tempLbl='擺法 '+u.temp.join('·');
+    return '<div style="border:1px solid var(--border,#ddd);border-radius:8px;padding:10px 12px;margin-bottom:10px">'
+      +'<div style="font-weight:700;margin-bottom:8px">'+u.aisle+' <span style="font-weight:400;color:var(--text3,#888);font-size:12px">（Step '+u.steps.join('、')+' 使用）</span></div>'
+      +'<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer">'
+        +'<input type="radio" name="pln-temp-'+i+'" value="def" checked style="cursor:pointer"> '
+        +'<span><b>原本 '+defLbl+'</b> <span style="color:var(--text3,#888);font-size:12px">'+plnLayoutHint(u.def)+'</span></span></label>'
+      +'<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer">'
+        +'<input type="radio" name="pln-temp-'+i+'" value="temp" style="cursor:pointer"> '
+        +'<span><b>臨時 '+tempLbl+'</b> <span style="color:var(--text3,#888);font-size:12px">'+plnLayoutHint(u.temp)+'</span></span></label>'
+      +'</div>';
+  }).join('');
+  ov.innerHTML='<div style="background:var(--bg,#fff);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.3);max-width:520px;width:92vw;max-height:86vh;overflow:auto;padding:20px">'
+    +'<div style="font-size:16px;font-weight:700;margin-bottom:6px">臨時擺法確認</div>'
+    +'<div style="font-size:12.5px;color:var(--text2,#666);margin-bottom:14px">以下走道在「臨時」表中有替代擺法，請選擇本次各走道要用哪種擺法安排（依所選擺法對應的溢出碼邏輯排入）：</div>'
+    +rows
+    +'<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">'
+      +'<button onclick="document.getElementById(\'pln-temp-modal\').remove()" style="font-size:13px;cursor:pointer;border:1px solid #ccc;border-radius:6px;padding:6px 16px;background:#f7f7f7">取消</button>'
+      +'<button id="pln-temp-go" style="font-size:13px;cursor:pointer;border:none;border-radius:6px;padding:6px 18px;background:var(--accent,#6B4F35);color:#fff;font-weight:600">開始安排</button>'
+    +'</div></div>';
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  document.body.appendChild(ov);
+  document.getElementById('pln-temp-go').onclick=function(){
+    const applyMap={};
+    usage.forEach((u,i)=>{
+      const sel=ov.querySelector('input[name="pln-temp-'+i+'"]:checked');
+      if(sel&&sel.value==='temp')applyMap[u.aisle]=true;
+    });
+    ov.remove();
+    _plnRunWithTempChoices(applyMap);
+  };
+}
+// 擺法碼 → 溢出邏輯提示（供對話框說明；純顯示，不影響引擎判定）
+function plnLayoutHint(codes){
+  const big=codes.some(c=>c==='G'||c==='C'),small=codes.some(c=>c==='A'||c==='B');
+  if(codes.length===1&&codes[0]==='A')return '（全A：每架末欄保留）';
+  if(codes.includes('C')&&codes.includes('B'))return '（CB：架首C保留欄）';
+  if(big&&small)return '（AG：溢出就近保留欄）';
+  if(codes.includes('D')||codes.includes('H'))return '（配件：溢出排尾端）';
+  return '';
+}
 function plannerRunAllSteps(){
   // 收集所有 step 設定
   const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
@@ -12260,6 +12374,8 @@ function showMonthlyExportReminder(ym){
   try{
     const sm=await idbGet('storage_master_sheets');
     if(sm&&typeof sm==='object'){STORAGE_MASTER=sm;}
+    // ★ 2026-08-09 Gordon：還原臨時擺法對照（重開頁免重傳儲位總表）
+    try{const tl=await idbGet('planner_temp_layout');if(tl&&typeof tl==='object')PLN_TEMP_LAYOUT=tl;}catch(_){}
   }catch(e){}
   // ★ R1（2026-07-18 重整）：還原共用 XX/TX 報表 → 儲位釋放 tab 重開頁免重傳
   try{
@@ -13500,19 +13616,153 @@ function rmSetView_installDrag(wrap){
   svg.onpointerup=up;svg.onpointercancel=up;
 }
 function rmRenderCompare(){
-  // ★ 2026-08-09 Gordon：移除「儲架材積 vs 真實儲位材積 比對」功能（重新比對／匯出異常／匯入異常清單／異常確認表全數移除）。
-  //   此容器僅保留平面圖核心控制「重置平面圖」；比對相關 store/helper（RM_CMP_*、rmCmp*、rmExport/ImportCompare）已一併刪除。
-  var box=document.getElementById('rm-compare');if(!box)return;
-  box.innerHTML='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">'+
+  var box=document.getElementById('rm-compare');if(!box||!RM)return;
+  var cfg={};
+  for(var a in RM.aisles){for(var side in RM.aisles[a]){RM.aisles[a][side].forEach(function(b){
+    if(b.t!=='架'&&b.t!=='待確認')return;
+    (b.s||[]).forEach(function(sl){
+      for(var Ly=0;Ly<4;Ly++){var c=sl.lay[Ly];if(!c||c==='配')continue;
+        var id=a+'-'+rmPad(sl.q)+'-'+(Ly+1);
+        cfg[id]={code:c,vol:rmCodeVol(c)};}
+    });
+  });}}
+  var db=(typeof DB!=='undefined'&&DB)||[];
+  var head='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><span style="font-weight:700;font-size:14px;color:var(--accent,#6B4F35)">儲架材積 vs 真實儲位材積 比對</span>'+
+    '<button onclick="rmRenderCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">重新比對</button>'+
+    '<button onclick="rmExportCompare()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">匯出異常</button>'+
+    '<button onclick="document.getElementById(\'rm-cmp-import\').click()" style="font-size:12px;cursor:pointer;border:1px solid #ccc;border-radius:5px;padding:3px 10px;background:#f7f7f7">匯入異常清單</button>'+
+    '<input type="file" id="rm-cmp-import" accept=".xlsx,.xls" style="display:none" onchange="rmImportCompare(event)">'+
     '<button onclick="rmResetLayout()" style="font-size:12px;cursor:pointer;border:1px solid #c0392b;color:#c0392b;border-radius:5px;padding:3px 10px;background:#fff">重置平面圖</button></div>';
+  if(!db.length){box.innerHTML=head+'<div style="color:#888;font-size:12.5px;padding:6px">尚未載入 EPR 主報表，無法取得真實儲位材積。請先於「儲區總覽」上傳 EPR 主報表。</div>';RM_CMP_ANOM=[];return;}
+  var anomalies=[],cmp=0,eq=0,bigger=0,smaller=0,seen={};
+  db.forEach(function(r){
+    var id=String(r['儲位']||'').trim();if(!id||seen[id])return;seen[id]=1;
+    var c=cfg[id];if(!c)return;
+    var real=+r['儲位材積']||0;cmp++;
+    if(Math.abs(real-c.vol)<=0.005){eq++;return;}
+    var dir=real>c.vol?'變大':'變小';
+    if(dir==='變大')bigger++;else smaller++;
+    anomalies.push({slot:id,sku:String(r['商品編號']||'').trim(),name:String(r['商品名稱']||''),code:c.code,cfg:c.vol,real:real,rc:rmClosestCode(real),dir:dir});
+  });
+  // 2026-07-15：襯衫類商品易滑落 → 儲位材積刻意由 G 改 P，屬預期異常 → 自動勾選「異常確認」
+  anomalies.forEach(function(x){if(RM_CMP_CHK[x.slot]===undefined)RM_CMP_CHK[x.slot]=x.name.indexOf('襯衫')>=0;});
+  rmCmpSaveChk();   // ★ 記憶功能：自動補值後同步寫入 localStorage
+  RM_CMP_ANOM=anomalies;
+  // ★ 2026-07-25 Gordon #4：只顯示「異常待確認」＝下方表格中「異常確認」未勾選的筆數（隨勾選即時更新）
+  var pending=anomalies.filter(function(x){return !RM_CMP_CHK[x.slot];}).length;
+  var stat='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:12px">'+
+    '<span style="color:#c0392b">異常待確認：<b id="rm-cmp-pending">'+pending+'</b></span></div>';
+  if(anomalies.length){
+    box.innerHTML=head+stat+'<div id="rm-cmp-tbl"></div>';
+    rmCmpDrawTable();
+  }else{
+    box.innerHTML=head+stat+'<div style="color:#2c6e49;font-size:12.5px;padding:6px">✓ 所有已比對儲位的材積皆與儲架設定相符，無異常。</div>';
+  }
+}
+var RM_CMP_ANOM=[];
+// ★ 2026-07-15 Gordon：異常確認勾選「記憶功能」— localStorage 持久化。
+//   重新開頁後保留手動/匯入的勾選狀態；襯衫自動勾選只補「沒有記憶」的儲位，不覆蓋已存狀態。
+var RM_CMP_CHK={};        // 異常確認勾選狀態（slot → true/false；襯衫類初次載入自動 true）
+try{var _rmChkSaved=JSON.parse(localStorage.getItem('rm_cmp_chk_v1')||'{}');if(_rmChkSaved&&typeof _rmChkSaved==='object')RM_CMP_CHK=_rmChkSaved;}catch(e){}
+function rmCmpSaveChk(){try{localStorage.setItem('rm_cmp_chk_v1',JSON.stringify(RM_CMP_CHK));}catch(e){}}
+var RM_CMP_SORT=1;        // 儲位排序方向：1=遞增、-1=遞減
+var RM_CMP_ORDER=[];      // 目前表格顯示順序（slot 清單，供 shift 區間勾選）
+var RM_CMP_LAST=null;     // 最後點擊的 slot（shift 區間錨點）
+function rmCmpSorted(){
+  return RM_CMP_ANOM.slice().sort(function(u,v){
+    var cu=RM_CMP_CHK[u.slot]?1:0,cv=RM_CMP_CHK[v.slot]?1:0;
+    if(cu!==cv)return cu-cv;   // 未確認（未勾選）排前面
+    return (u.slot<v.slot?-1:u.slot>v.slot?1:0)*RM_CMP_SORT;   // 依儲位排序
+  });
+}
+// ★ 2026-08-09 重建說明：本函式（異常表格渲染）為刪除後重建版；欄位＝儲位/商品編號/原始儲位材積/實際材積/異常確認，
+//   邏輯與匯出欄位一致、支援排序與 shift 區間勾選。若與刪除前版面有細微差異，可重傳刪除前檔案由 Claude 換回逐字原版。
+function rmCmpDrawTable(){
+  var tbl=document.getElementById('rm-cmp-tbl');if(!tbl)return;
+  var arr=rmCmpSorted();
+  RM_CMP_ORDER=arr.map(function(x){return x.slot;});
+  var h='<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+    '<thead><tr style="background:var(--surface2,#f2eee6)">'+
+    '<th style="padding:4px 6px;text-align:left;cursor:pointer;user-select:none" onclick="rmCmpSortToggle()" title="點擊切換儲位排序方向">儲位 '+(RM_CMP_SORT===1?'▲':'▼')+'</th>'+
+    '<th style="padding:4px 6px;text-align:left">商品編號</th>'+
+    '<th style="padding:4px 6px;text-align:left">原始儲位材積</th>'+
+    '<th style="padding:4px 6px;text-align:left">實際材積</th>'+
+    '<th style="padding:4px 6px;text-align:center">異常確認</th>'+
+    '</tr></thead><tbody>';
+  arr.forEach(function(x,i){
+    var chk=!!RM_CMP_CHK[x.slot];
+    h+='<tr style="border-top:1px solid var(--border,#eee)'+(chk?';opacity:.5':'')+'">'+
+      '<td style="padding:3px 6px;text-align:left">'+x.slot+'</td>'+
+      '<td style="padding:3px 6px;text-align:left">'+(x.sku||'')+'</td>'+
+      '<td style="padding:3px 6px;text-align:left">'+x.code+' / '+x.cfg+'</td>'+
+      '<td style="padding:3px 6px;text-align:left">'+x.rc+' / '+x.real+'（'+x.dir+'）</td>'+
+      '<td style="padding:3px 6px;text-align:center"><input type="checkbox" data-i="'+i+'" onclick="rmCmpChk(event,this)"'+(chk?' checked':'')+' style="cursor:pointer"></td></tr>';
+  });
+  h+='</tbody></table>';
+  tbl.innerHTML=h;
+}
+function rmCmpSortToggle(){RM_CMP_SORT=-RM_CMP_SORT;rmCmpDrawTable();}
+function rmCmpChk(e,el){
+  var i=+el.getAttribute('data-i');
+  var slot=RM_CMP_ORDER[i];
+  if(e.shiftKey&&RM_CMP_LAST!=null){
+    var st=el.checked;
+    var base=RM_CMP_ANOM.map(function(x){return x.slot;}).sort();
+    var p=base.indexOf(RM_CMP_LAST),q=base.indexOf(slot);
+    var a=Math.min(p,q),b=Math.max(p,q);
+    for(var k=a;k<=b;k++)RM_CMP_CHK[base[k]]=st;
+  }else{
+    RM_CMP_CHK[slot]=el.checked;
+  }
+  RM_CMP_LAST=slot;
+  rmCmpSaveChk();   // ★ 記憶功能：每次勾選即存
+  rmCmpUpdatePending();   // ★ 2026-07-25 #4：同步更新「異常待確認」計數
+  rmCmpDrawTable();
+}
+function rmCmpUpdatePending(){var el=document.getElementById('rm-cmp-pending');if(el)el.textContent=RM_CMP_ANOM.filter(function(x){return !RM_CMP_CHK[x.slot];}).length;}
+function rmExportCompare(){
+  if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
+  if(!RM_CMP_ANOM||!RM_CMP_ANOM.length){alert('目前無異常可匯出');return;}
+  var rows=[['商品編號','儲位','原始儲位材積','實際材積','異常確認']];
+  rmCmpSorted().forEach(function(x){rows.push([x.sku||'',x.slot,x.code+' / '+x.cfg,x.rc+' / '+x.real,RM_CMP_CHK[x.slot]?'V':'']);});
+  var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'材積比對異常');
+  XLSX.writeFile(wb,'儲架材積比對_異常清單.xlsx');
+}
+// 2026-07-15：匯入異常清單 — 讀「儲位＋異常確認(V)」欄，同步更新表格 checkbox 勾選狀態
+async function rmImportCompare(event){
+  var file=event.target.files&&event.target.files[0];
+  event.target.value='';
+  if(!file)return;
+  if(typeof XLSX==='undefined'){alert('XLSX 未載入');return;}
+  try{
+    var buf=await file.arrayBuffer();
+    var wb=XLSX.read(buf,{type:'array'});
+    var raw=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{defval:''});
+    if(!raw.length||raw[0]['儲位']===undefined||raw[0]['異常確認']===undefined){alert('格式不符：需含「儲位」與「異常確認」欄位（由「匯出異常」產生的清單）');return;}
+    var known={};(RM_CMP_ANOM||[]).forEach(function(x){known[x.slot]=1;});
+    var applied=0,checked=0,unknown=0;
+    raw.forEach(function(r){
+      var slot=String(r['儲位']||'').trim();if(!slot)return;
+      if(!known[slot]){unknown++;return;}
+      var v=String(r['異常確認']||'').trim().toUpperCase();
+      var on=(v==='V'||v==='✔');
+      RM_CMP_CHK[slot]=on;applied++;if(on)checked++;
+    });
+    rmCmpSaveChk();   // ★ 記憶功能：匯入結果持久化，重開頁不再跑掉
+    rmCmpDrawTable();
+    alert('匯入完成：更新 '+applied+' 筆（勾選 '+checked+' 筆）'+(unknown?'；'+unknown+' 筆儲位不在目前異常清單中，已略過':''));
+  }catch(e){alert('匯入失敗：'+e.message);}
 }
 
 // ★ 2026-07-15 Gordon：儲位總表上傳同步檢查 —
+//   ①重算材積比對表（rmRenderCompare；異常確認勾選由 localStorage 記憶、不會跑掉）
 //   ②新總表 vs 系統後端（儲架平面圖 RM_DATA 內嵌擺法碼）逐儲位比對：
 //     只比平面圖有繪製的走道；「後端多出」只在總表也涵蓋該走道時才判定。
 //     有 擺法異動／儲位增減 → 彈窗提醒把新總表交給 Claude 重新寫入系統後端
 //     （若儲位增減影響儲架平面圖，屆時一併修改）。
 function rmMasterSyncCheck(sheets){
+  try{if(typeof rmRenderCompare==='function'&&document.getElementById('rm-compare'))rmRenderCompare();}catch(e){}
   if(typeof RM==='undefined'||!RM||!RM.aisles)return;
   var cfg={},cfgAisles={};
   for(var a in RM.aisles){cfgAisles[a]=1;for(var side in RM.aisles[a]){RM.aisles[a][side].forEach(function(b){
