@@ -8396,44 +8396,58 @@ function plannerExportResult(){
     if(!validMoves.length){
       return [['商品編號','NEW','擺法','儲位']]; // 空 sheet 保底
     }
-    // 按 src 走道分組 + 組內排序
-    const byAisle={};
-    validMoves.forEach(m=>{
-      const a=aisleOf(m.src);
-      if(!a)return;
-      if(!byAisle[a])byAisle[a]=[];
-      byAisle[a].push(m);
-    });
-    Object.values(byAisle).forEach(arr=>{
-      arr.sort((a,b)=>colOf(a.src)-colOf(b.src)||layerOf(a.src)-layerOf(b.src));
-    });
-    // 切 chunks (每 chunk ≤57 moves)
-    const TY_BLOCK=57;
-    const multiPages=[];const openSlots=[];const singleChunks=[];
-    Object.keys(byAisle).sort().forEach(a=>{
-      const mvs=byAisle[a];
-      const cs=[];
-      for(let i=0;i<mvs.length;i+=TY_BLOCK) cs.push({aisle:a,moves:mvs.slice(i,i+TY_BLOCK)});
-      if(cs.length>=2){
-        for(let i=0;i<cs.length;i+=2){
-          if(i+1<cs.length){multiPages.push([cs[i],cs[i+1]]);}
-          else{const p=[cs[i]];multiPages.push(p);openSlots.push(p);}
-        }
-      } else if(cs.length===1){singleChunks.push(cs[0]);}
-    });
-    // 填 openSlots + pairing
-    singleChunks.sort((a,b)=>b.moves.length-a.moves.length);
-    let si2=0;
-    while(si2<singleChunks.length&&openSlots.length>0) openSlots.shift().push(singleChunks[si2++]);
-    const singles=singleChunks.slice(si2);const pairedPages=[];
-    let L=0,R=singles.length-1;
-    while(L<=R){
-      if(L===R){pairedPages.push([singles[L]]);L++;}
-      else{pairedPages.push([singles[L],singles[R]]);L++;R--;}
+    // ★2026-08-10 待移執行順序：先「就地騰位/移溢位」(free-up) 後「主移入」(SOURCE_TO_DEST)。
+    //   實體倉需先清空目的走道空格才能把來源走道商品移入；原本純按 src 走道字母排序，
+    //   會把 A07→A10 主移排在 A10→A10 就地騰位「前面」導致執行順序顛倒 (Gordon 附截圖案)。
+    //   純顯示/匯出層：不動 moves 內容與引擎；既有「src 走道→col→layer ASC」排序完全保留，
+    //   僅把待移頁面拆成 free-up 段、主移段，兩段各自 bin-pack 後串接 (free-up 在前)。
+    const isFreeUp=m=>m.phase==='INTERNAL_DISPLACEMENT'||m.phase==='INTERNAL_CONSOLIDATION'
+      ||m.phase==='OVERFLOW_ZONE'||m.phase==='XX_OVERFLOW'||m.phase==='NEW_PRODUCT_CONSOLIDATION';
+    // 將一組 moves 做「按 src 走道分組 + 組內排序 + bin-packing」→ 回傳 pages
+    function buildPagesFor(mvsArr){
+      if(!mvsArr.length) return [];
+      const byAisle={};
+      mvsArr.forEach(m=>{
+        const a=aisleOf(m.src);
+        if(!a)return;
+        if(!byAisle[a])byAisle[a]=[];
+        byAisle[a].push(m);
+      });
+      Object.values(byAisle).forEach(arr=>{
+        arr.sort((a,b)=>colOf(a.src)-colOf(b.src)||layerOf(a.src)-layerOf(b.src));
+      });
+      // 切 chunks (每 chunk ≤57 moves)
+      const TY_BLOCK=57;
+      const multiPages=[];const openSlots=[];const singleChunks=[];
+      Object.keys(byAisle).sort().forEach(a=>{
+        const mvs=byAisle[a];
+        const cs=[];
+        for(let i=0;i<mvs.length;i+=TY_BLOCK) cs.push({aisle:a,moves:mvs.slice(i,i+TY_BLOCK)});
+        if(cs.length>=2){
+          for(let i=0;i<cs.length;i+=2){
+            if(i+1<cs.length){multiPages.push([cs[i],cs[i+1]]);}
+            else{const p=[cs[i]];multiPages.push(p);openSlots.push(p);}
+          }
+        } else if(cs.length===1){singleChunks.push(cs[0]);}
+      });
+      // 填 openSlots + pairing
+      singleChunks.sort((a,b)=>b.moves.length-a.moves.length);
+      let si2=0;
+      while(si2<singleChunks.length&&openSlots.length>0) openSlots.shift().push(singleChunks[si2++]);
+      const singles=singleChunks.slice(si2);const pairedPages=[];
+      let L=0,R=singles.length-1;
+      while(L<=R){
+        if(L===R){pairedPages.push([singles[L]]);L++;}
+        else{pairedPages.push([singles[L],singles[R]]);L++;R--;}
+      }
+      const pgs=[...multiPages,...pairedPages];
+      pgs.forEach(p=>{if(p.length===2&&p[0].aisle>p[1].aisle)[p[0],p[1]]=[p[1],p[0]];});
+      pgs.sort((a,b)=>a[0].aisle.localeCompare(b[0].aisle));
+      return pgs;
     }
-    const pages=[...multiPages,...pairedPages];
-    pages.forEach(p=>{if(p.length===2&&p[0].aisle>p[1].aisle)[p[0],p[1]]=[p[1],p[0]];});
-    pages.sort((a,b)=>a[0].aisle.localeCompare(b[0].aisle));
+    // free-up 段在前、主移段在後；各段內維持原本 src 走道→col→layer 排序
+    const pages=[...buildPagesFor(validMoves.filter(isFreeUp)),
+                 ...buildPagesFor(validMoves.filter(m=>!isFreeUp(m)))];
     // 渲染 aoa
     const maxRows=pages.length?Math.max(...pages.flatMap(p=>p.map(c=>c.moves.length+1))):1;
     const aoa=[];
@@ -9148,8 +9162,7 @@ function renderArrangeCompare(){
         });});
         const _tempTxt=_tempN?`<span style="color:#d4a017;font-size:9px;margin-left:3px;cursor:help" title="其中 ${_tempN} 筆目前暫放於 XX/TX 溢位區 → 視為未排，已計入待排數">(暫放 ${_tempN})</span>`:'';
         // ★ 2026-07-25 Gordon：待排=0（已排完儲位）不再顯示「(已排 XX)」灰字（如申洲列 童中袋 0 (已排336)）
-        // ★ 2026-08-09 Gordon：預告進貨明細 SKU 數欄「(已排 XX)」灰字一律不顯示（含混合列，覆寫上一行 07-25 混合列保留決策）；display-layer only，placedCount 計算與去重邏輯不動
-        const _placedTxt='';
+        const _placedTxt=(s.skuCount&&s.placedCount)?`<span style="color:var(--text3);font-size:9px;margin-left:3px;cursor:help" title="已排入 ${s.placedCount} 筆（ERP 儲位安排的「儲位」欄已填，或走道報表實況已在架上）→ 不列入待排新品">(已排 ${s.placedCount})</span>`:'';
         const skuCell=dupAlert
           ? `<span style="display:inline-flex;align-items:center;gap:3px;justify-content:flex-end"><span>${_pendTxt}${_placedTxt}${_tempTxt}</span><span style="color:#e8a93f;cursor:help" title="${dupTitle.replace(/"/g,'&quot;')}">${dupAlert}</span></span>`
           : `${_pendTxt}${_placedTxt}${_tempTxt}`;
