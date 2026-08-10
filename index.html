@@ -8052,7 +8052,7 @@ function plnMasterAisleCodes(aisle){   // [distinct codes] 來自 STORAGE_MASTER
   }));
   return [...s].sort(plnCodeCmp);
 }
-// 收集本次要跑的所有 step 用到的臨時走道（來源+目的，排除「新品-」虛擬走道），逐走道去重
+// 收集本次要跑的所有 step 用到的臨時走道（★只掃「目的走道」，排除「新品-」虛擬走道），逐走道去重
 function plnCollectTempUsage(){
   const tempCodes=plnTempAisleCodes();
   if(!Object.keys(tempCodes).length)return [];
@@ -8061,7 +8061,10 @@ function plnCollectTempUsage(){
   stepDivs.forEach(d=>{
     const idx=parseInt(d.id.replace('pln-step-',''));
     let cfg;try{cfg=plannerCollectStepConfig(idx);}catch(e){return;}
-    const aisles=new Set([...(cfg.source||[]),...(cfg.destination||[])].map(String).filter(a=>a&&!a.startsWith('新品-')));
+    // ★2026-08-10 只看「目的走道」：臨時擺法(PLN_TEMP_APPLY→plnBuildState)僅影響「商品排入該走道」的
+    //   欄位/溢出邏輯（放入端）。純來源走道是把商品搬走、不放入，其 layout 對本次 Run 零影響 → 不詢問。
+    //   （整理模式 src=dst，該走道仍在 destination 內，照樣會問；跨 step 當作目的時也會問。）
+    const aisles=new Set([...(cfg.destination||[])].map(String).filter(a=>a&&!a.startsWith('新品-')));
     aisles.forEach(a=>{
       if(!tempCodes[a])return;
       const def=plnMasterAisleCodes(a),temp=tempCodes[a];
