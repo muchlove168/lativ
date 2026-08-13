@@ -646,30 +646,9 @@
     <div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:1px">▼ XX/TX 區統計</div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">
-        <span class="dot"></span>XX區統計（1F零碼區）
-        <button onclick="showXXZoneConfig('XX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
-      </div>
-      <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
-        <table id="tbl-xx">
-          <thead style="position:sticky;top:0"><tr>
-            <th onclick="sortXXTable('XX','loc')">儲位</th><th onclick="sortXXTable('XX','ungrab')">未抓貨</th>
-            <th onclick="sortXXTable('XX','stock')">銷售庫存</th><th onclick="sortXXTable('XX','shelf')">架上數量</th>
-            <th onclick="sortXXTable('XX','vol')">商品材積</th><th onclick="sortXXTable('XX','remain')">剩餘材積</th>
-            <th onclick="sortXXTable('XX','usage')">使用率</th><th onclick="sortXXTable('XX','sku')">SKU數</th><th>狀態</th>
-          </tr></thead>
-          <tbody></tbody>
-          <tfoot><tr class="total-row">
-            <td style="text-align:left!important">合計</td>
-            <td id="xx-total-ungrab">—</td><td id="xx-total-stock">—</td><td id="xx-total-shelf">—</td>
-            <td id="xx-total-vol">—</td><td>—</td><td>—</td><td id="xx-total-sku">—</td><td>—</td>
-          </tr></tfoot>
-        </table>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">
         <span class="dot"></span>TX區統計（2F零碼區）
-        <button onclick="showXXZoneConfig('TX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+        <button onclick="exportXXZoneReport('TX')" style="margin-left:auto;background:var(--accent);border:none;color:#fff;border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">📥 匯出統計報表</button>
+        <button onclick="showXXZoneConfig('TX')" style="margin-left:8px;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
       </div>
       <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
         <table id="tbl-tx">
@@ -684,6 +663,29 @@
             <td style="text-align:left!important">合計</td>
             <td id="tx-total-ungrab">—</td><td id="tx-total-stock">—</td><td id="tx-total-shelf">—</td>
             <td id="tx-total-vol">—</td><td>—</td><td>—</td><td id="tx-total-sku">—</td><td>—</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">
+        <span class="dot"></span>XX區統計（1F零碼區）
+        <button onclick="exportXXZoneReport('XX')" style="margin-left:auto;background:var(--accent);border:none;color:#fff;border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">📥 匯出統計報表</button>
+        <button onclick="showXXZoneConfig('XX')" style="margin-left:8px;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+      </div>
+      <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
+        <table id="tbl-xx">
+          <thead style="position:sticky;top:0"><tr>
+            <th onclick="sortXXTable('XX','loc')">儲位</th><th onclick="sortXXTable('XX','ungrab')">未抓貨</th>
+            <th onclick="sortXXTable('XX','stock')">銷售庫存</th><th onclick="sortXXTable('XX','shelf')">架上數量</th>
+            <th onclick="sortXXTable('XX','vol')">商品材積</th><th onclick="sortXXTable('XX','remain')">剩餘材積</th>
+            <th onclick="sortXXTable('XX','usage')">使用率</th><th onclick="sortXXTable('XX','sku')">SKU數</th><th>狀態</th>
+          </tr></thead>
+          <tbody></tbody>
+          <tfoot><tr class="total-row">
+            <td style="text-align:left!important">合計</td>
+            <td id="xx-total-ungrab">—</td><td id="xx-total-stock">—</td><td id="xx-total-shelf">—</td>
+            <td id="xx-total-vol">—</td><td>—</td><td>—</td><td id="xx-total-sku">—</td><td>—</td>
           </tr></tfoot>
         </table>
       </div>
@@ -10019,6 +10021,55 @@ function renderXXTable(zone,rows,defaultCapacity){
   });
   const pre=zone.toLowerCase();
   document.getElementById(`${pre}-total-ungrab`).textContent=num(totalUngrab);document.getElementById(`${pre}-total-stock`).textContent=num(totalStock);document.getElementById(`${pre}-total-shelf`).textContent=num(totalShelf);document.getElementById(`${pre}-total-vol`).textContent=totalVol.toFixed(2);document.getElementById(`${pre}-total-sku`).textContent=num(totalSKU);
+}
+// ★ 2026-08-13 匯出 XX/TX 區統計報表 — 彙總邏輯與 renderXXTable 完全一致，確保匯出數字＝畫面數字
+//   Sheet1 儲位統計（同畫面表格：區域/儲位/未抓貨/銷售庫存/架上數量/商品材積/剩餘材積/使用率/SKU數/狀態 + 合計）
+//   Sheet2 SKU明細（同畫面展開列：儲位/區域/商品編號/商品名稱/顏色/尺寸/架上數量/單品材積/材積小計）
+function exportXXZoneReport(zone){
+  if(!XX_DB||!XX_DB.length){alert('尚未上傳 XX/TX 報表，無可匯出資料');return;}
+  const rows=XX_DB.filter(r=>r.儲位.startsWith(zone+'-'));
+  if(!rows.length){alert(`目前沒有 ${zone} 區資料可匯出`);return;}
+  // 依 renderXXTable 同邏輯：按儲位彙總
+  const byLoc={};
+  rows.forEach(r=>{
+    if(!byLoc[r.儲位])byLoc[r.儲位]={ungrab:0,stock:0,shelf:0,vol:0,skus:[]};
+    const loc=byLoc[r.儲位];loc.ungrab+=r.未抓貨;loc.stock+=r.銷售庫存;loc.shelf+=r.架上數量;loc.vol+=r.商品材積*r.架上數量;loc.skus.push(r);
+  });
+  const locs=Object.keys(byLoc).sort((a,b)=>parseInt(a.split('-')[1])-parseInt(b.split('-')[1]));
+  const defaultCapacity=zone==='XX'?XX_DEFAULT_CAPACITY:TX_DEFAULT_CAPACITY;
+  // 區域標籤（衣服區/配件區），同 renderXXTable getZoneLabel
+  const inRange=(loc,range)=>{const n=parseInt(loc.split('-')[1]);const s=parseInt(range[0].split('-')[1]);const e=parseInt(range[1].split('-')[1]);return n>=s&&n<=e;};
+  const getZoneLabel=(loc)=>{const config=XX_ZONE_CONFIG[zone];if(!config)return'';const clothes=Array.isArray(config.clothes[0])?config.clothes:[config.clothes];const acc=Array.isArray(config.accessories[0])?config.accessories:[config.accessories];for(const r of clothes)if(inRange(loc,r))return'衣服區';for(const r of acc)if(inRange(loc,r))return'配件區';return'';};
+  // Sheet1: 儲位統計
+  const sum=[['區域','儲位','未抓貨','銷售庫存','架上數量','商品材積','剩餘材積','使用率(%)','SKU數','狀態']];
+  let tU=0,tS=0,tSh=0,tV=0,tSKU=0;
+  locs.forEach(locCode=>{
+    const loc=byLoc[locCode];
+    const capacity=XX_CAPACITY[locCode]||defaultCapacity;
+    const remain=capacity-loc.vol;const usage=capacity>0?(loc.vol/capacity*100):0;const skuCount=loc.skus.length;
+    let status='🟢 正常';if(usage>=90)status='🔴 滿載';else if(usage>=60)status='🟡 偏高';
+    tU+=loc.ungrab;tS+=loc.stock;tSh+=loc.shelf;tV+=loc.vol;tSKU+=skuCount;
+    sum.push([getZoneLabel(locCode),locCode,loc.ungrab,loc.stock,loc.shelf,+loc.vol.toFixed(2),+remain.toFixed(2),+usage.toFixed(1),skuCount,status]);
+  });
+  sum.push(['','合計',tU,tS,tSh,+tV.toFixed(2),'','',tSKU,'']);
+  // Sheet2: SKU明細（同畫面展開列順序：先儲位排序、儲位內照原始上傳序）
+  const det=[['儲位','區域','商品編號','商品名稱','顏色','尺寸','架上數量','單品材積','材積小計']];
+  locs.forEach(locCode=>{
+    const zl=getZoneLabel(locCode);
+    byLoc[locCode].skus.forEach(item=>{
+      det.push([locCode,zl,item.商品編號,item.商品名稱,item.顏色,item.尺寸,item.架上數量,+item.商品材積.toFixed(2),+(item.商品材積*item.架上數量).toFixed(2)]);
+    });
+  });
+  const wb=XLSX.utils.book_new();
+  const ws1=XLSX.utils.aoa_to_sheet(sum);
+  ws1['!cols']=[{wch:8},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:9},{wch:7},{wch:9}];
+  XLSX.utils.book_append_sheet(wb,ws1,`${zone}區儲位統計`);
+  const ws2=XLSX.utils.aoa_to_sheet(det);
+  ws2['!cols']=[{wch:10},{wch:8},{wch:14},{wch:30},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9}];
+  XLSX.utils.book_append_sheet(wb,ws2,`${zone}區SKU明細`);
+  const d=new Date();const pad=n=>String(n).padStart(2,'0');
+  const ts=`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  XLSX.writeFile(wb,`${zone}區統計_${ts}.xlsx`);
 }
 function toggleXXDetail(td,locCode){
   const tr=td.parentElement;const nextTr=tr.nextElementSibling;
