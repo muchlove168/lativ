@@ -4421,13 +4421,20 @@ function plnAutoFitGroups(groups,C){
   if(!G||!(C>0))return empty;
   const sumAll=groups.reduce((s,g)=>s+g.size,0);
   const CAP=Math.min(C,sumAll);
-  const W=4096;                      // 佇列序權重（>= 溢出碼總數上限，確保 index 為主排序）
+  // ★2026-08-13（Gordon C08 案）密度優先：填滿目標的整色組合有多組時，優先選「碎片最少」者。
+  //   舊式 cost=i*W+spill 以佇列序(index)為主鍵 → 會硬吃佇列最前的大款；若那是 5 尺寸色，
+  //   其溢出碼在「4 層欄」會留下填不滿的碎片，導致實排比空格少（C08：92 格只排入 90，
+  //   剩 172-4/173-4）。改以「碎片＝|尺寸-4|」為主鍵、佇列序為次鍵：4 尺寸色(剛好鋪滿一欄)
+  //   碎片=0 最優先，5 尺寸(多一碼溢出)與 3 尺寸(缺一層)同罰 → 自動選到能整齊鋪滿的整色組合
+  //   （C08 改選 6 款全 4 尺寸色、23 色×4＝92 完美填滿）。最高目標仍是「總和最大(best)」，
+  //   本鍵只在同總和的多組解間決定取捨，不影響容量。
+  const IDXMAX=G*G+1;                // 佇列序權重上限（Σindex < G²，確保碎片為主排序）
   let prev=new Float64Array(CAP+1).fill(Infinity);prev[0]=0;
   const parent=[];
   for(let i=0;i<G;i++){
     const cur=Float64Array.from(prev);
     const pk=new Uint8Array(CAP+1);
-    const sz=groups[i].size, c=i*W+Math.max(0,sz-4);   // 溢出碼數 = 超過一欄(4層)的碼數
+    const sz=groups[i].size, c=Math.abs(sz-4)*IDXMAX+i;   // 碎片(|尺寸-4|)為主、佇列序為次
     for(let j=CAP;j>=sz;j--){
       const base=prev[j-sz];
       if(base===Infinity)continue;
