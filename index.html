@@ -773,8 +773,8 @@ async function rfCalLoad(){
 async function rfCalSave(){try{await idbPut(RF_CAL_KEY,RF_CAL);}catch(e){}}
 // 手動重置（console 呼叫）：rfResetCalibration()
 function rfResetCalibration(){RF_CAL={ver:1,updated:'',aisles:{}};rfCalSave().then(()=>{try{RELEASE_FORECAST=null;rfEnsure(true);}catch(e){}});console.log('[釋放校正] 已重置，將於下次建置重新累積');}
-function rfLoadPrefs(){try{const a=parseInt(localStorage.getItem('lativ_rf_days'));if(a>0)RF_DAYS=a;const b=parseInt(localStorage.getItem('lativ_rf_window'));if(b>=3)RF_WINDOW=b;const c=parseFloat(localStorage.getItem('lativ_rf_return'));if(c>=0&&c<0.9)RF_RETURN_RATE=c;}catch(e){}}
-function rfSavePrefs(){try{localStorage.setItem('lativ_rf_days',String(RF_DAYS));localStorage.setItem('lativ_rf_window',String(RF_WINDOW));localStorage.setItem('lativ_rf_return',String(RF_RETURN_RATE));}catch(e){}}
+function rfLoadPrefs(){try{const a=parseInt(localStorage.getItem('lativ_rf_days'));if(a>0)RF_DAYS=a;const c=parseFloat(localStorage.getItem('lativ_rf_return'));if(c>=0&&c<0.9)RF_RETURN_RATE=c;}catch(e){}}  // ★2026-08-13 W 寫死 14：不再讀 lativ_rf_window（殘留舊值不得覆蓋）
+function rfSavePrefs(){try{localStorage.setItem('lativ_rf_days',String(RF_DAYS));localStorage.setItem('lativ_rf_return',String(RF_RETURN_RATE));}catch(e){}}
 // 調整退貨率緩衝（console：rfSetReturnRate(0.10) 代表 10%）→ 立即重算釋放預測
 function rfSetReturnRate(r){RF_RETURN_RATE=Math.max(0,Math.min(0.5,+r||0));rfSavePrefs();RELEASE_FORECAST=null;try{rfEnsure(true);}catch(e){}console.log('[釋放預測] 退貨率緩衝已設為 '+Math.round(RF_RETURN_RATE*100)+'%，重新計算中');}
 
@@ -788,13 +788,23 @@ let XX_ZONE_CONFIG = {
 const XX_DEFAULT_CAPACITY = 2.2;
 const TX_DEFAULT_CAPACITY = 2.4;
 
-const SS_PFX = ['64','65','68','69','72','73'];
-const FW_PFX = ['66','67','70','71','74','75'];
-const SEASON_ORDER = [
-  {label:'26FW',pfx:['74','75']},{label:'26SS',pfx:['72','73']},
-  {label:'25FW',pfx:['70','71']},{label:'25SS',pfx:['68','69']},
-  {label:'24FW',pfx:['66','67']},{label:'24SS',pfx:['64','65']},
-];
+// ★ 2026-08-13 D案（年度滾動）：季別改由公式自動生成，毋須每年手動加新季。
+//   規律（24SS 起穩定）：前綴每季 +2；24SS=64/65、24FW=66/67…26FW=74/75 → 27SS=76/77、27FW=78/79…
+//   生成範圍到「系統年份+1」的 FW（頁面每次載入以當下年份重算，跨年自動延伸）。
+//   23SS(62/63) 之前的編號規律不同 → 不納入公式，維持既有特例處理（getSeasonFromCode 的 xx 標籤等）。
+const SEASON_GEN=(()=>{
+  const list=[];const maxYear=new Date().getFullYear()+1;
+  for(let y=2024;y<=maxYear;y++){
+    for(let s=0;s<2;s++){                       // s: 0=SS, 1=FW
+      const p=64+((y-2024)*2+s)*2;
+      list.push({label:String(y%100)+(s===0?'SS':'FW'),pfx:[String(p),String(p+1)]});
+    }
+  }
+  return list;                                   // 舊→新
+})();
+const SS_PFX = SEASON_GEN.filter(s=>s.label.endsWith('SS')).map(s=>s.pfx).flat();
+const FW_PFX = SEASON_GEN.filter(s=>s.label.endsWith('FW')).map(s=>s.pfx).flat();
+const SEASON_ORDER = SEASON_GEN.slice().reverse();   // 新→舊（getXXStatus/rfIsNextSeason 依相對序判斷，維持語意）
 
 let AISLE_CONFIG = {
   g1:[
@@ -837,6 +847,14 @@ let SEASON_PROGRESS_DATA = [
   {season:'24SS',totalShipment:13716174,pfx:['64','65']},
   {season:'23SS',totalShipment:13025769,pfx:['62','63']},
 ];
+// ★ 2026-08-13 D案：依 SEASON_ORDER 自動補上新季列（totalShipment:0、可雙擊編輯後由 lativ_manual_edits
+//   依季標籤還原）。_auto 標記＝自動補的列，在 renderSeasonProgress 中「無出貨額且無庫存」時隱藏，
+//   避免 27SS/27FW 提前佔版面；一旦有庫存或填了出貨額即自動顯示。既有列（含 23SS）順序照舊保留。
+SEASON_PROGRESS_DATA=(()=>{
+  const gen=SEASON_ORDER.map(s=>SEASON_PROGRESS_DATA.find(x=>x.season===s.label)||{season:s.label,totalShipment:0,pfx:s.pfx.slice(),_auto:true});
+  SEASON_PROGRESS_DATA.forEach(x=>{if(!gen.find(g=>g.season===x.season))gen.push(x);});
+  return gen;
+})();
 let SS26_NO_POS_STOCK = 0;
 let FW26_NO_POS_STOCK = 0;
 
@@ -895,7 +913,7 @@ function getPackagingRule(packagingName) {
 // ============================================================
 function pct(v){return isNaN(v)||!isFinite(v)?'—':(v*100).toFixed(1)+'%';}
 function num(v){return (v||0).toLocaleString();}
-function numF(v,d=2){return (v||0).toFixed(d);}
+// numF 已刪（2026-08-13 死碼清理：無呼叫端）
 function setText(id,val){const el=document.getElementById(id);if(el)el.textContent=val;}
 function showLoading(msg){document.getElementById('loading-msg').textContent=msg;document.getElementById('loading').classList.add('show');}
 function hideLoading(){document.getElementById('loading').classList.remove('show');}
@@ -903,9 +921,10 @@ function hideLoading(){document.getElementById('loading').classList.remove('show
 function getSeasonFromCode(code){
   if(!code||code.length<2)return'其他';
   const n=parseInt(code.substring(0,2));
-  if(n===74||n===75)return'26FW';if(n===72||n===73)return'26SS';
-  if(n===70||n===71)return'25FW';if(n===68||n===69)return'25SS';
-  if(n===66||n===67)return'24FW';if(n===64||n===65)return'24SS';
+  if(isNaN(n))return'其他';
+  // ★ 2026-08-13 D案：64(24SS) 起改公式推導（每季 +2），76→27SS、78→27FW…自動延伸。
+  //   64~75 的結果與舊版逐一比對完全相同（零回歸）；<64 維持舊行為（62→'62xx'）。
+  if(n>=64){const k=Math.floor((n-64)/2);const y=2024+Math.floor(k/2);return String(y%100)+(k%2===0?'SS':'FW');}
   if(n>=60)return String(n)+'xx';return'其他';
 }
 
@@ -995,7 +1014,7 @@ function switchTab(name){
   // ★ 儲位數據已併入儲區總覽 tab 底部：進入 sku tab 時一併刷新
   if(name==='sku'){try{renderSlotData();}catch(e){}try{refreshSidePanelCharts();}catch(e){}}
   if(name==='rackmap'){rmBoot();return;}
-  if(name==='compare'){renderSalesCompare();return;}
+  if(name==='compare'){renderSalesCompare();try{renderRollupTrend();}catch(e){}return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
     if(name==='sales'){renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();}
@@ -1107,7 +1126,7 @@ function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.ope
 function idbPut(key,value){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbGet(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readonly');const req=tx.objectStore(IDB_STORE).get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>{db.close();reject(req.error);};}));}
 function idbDel(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
-function idbClear(){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).clear();tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
+// idbClear 已刪（2026-08-13 死碼清理：無呼叫端；清資料走各功能的清除/匯入）
 function idbKeys(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly');var rq=tx.objectStore(IDB_STORE).getAllKeys();rq.onsuccess=function(){db.close();resolve(rq.result||[]);};rq.onerror=function(){db.close();reject(rq.error);};});});}
 function idbDumpAll(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly'),os=tx.objectStore(IDB_STORE),out={};var kr=os.getAllKeys();kr.onsuccess=function(){var keys=kr.result||[];var vr=os.getAll();vr.onsuccess=function(){var vals=vr.result||[];for(var i=0;i<keys.length;i++)out[keys[i]]=vals[i];db.close();resolve(out);};vr.onerror=function(){db.close();reject(vr.error);};};kr.onerror=function(){db.close();reject(kr.error);};});});}
 function idbRestoreAll(obj){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readwrite'),os=tx.objectStore(IDB_STORE);Object.keys(obj||{}).forEach(function(k){os.put(obj[k],k);});tx.oncomplete=function(){db.close();resolve();};tx.onerror=function(){db.close();reject(tx.error);};});});}
@@ -1672,18 +1691,7 @@ function editRfDays(g){
   input.onkeydown=e=>{if(e.key==='Enter')input.blur();};
   span.innerHTML='';span.appendChild(input);input.focus();input.select();
 }
-function editRfWindow(){
-  const span=document.getElementById('rf-w');if(!span)return;
-  const input=document.createElement('input');input.type='number';input.className='inline-edit';input.min='3';input.max='40';input.value=RF_WINDOW;
-  input.onblur=()=>{
-    const v=parseInt(input.value)||RF_WINDOW;const nw=Math.max(3,Math.min(40,v));
-    span.textContent=nw;
-    if(nw!==RF_WINDOW){RF_WINDOW=nw;rfSavePrefs();RELEASE_FORECAST=null;renderSKUTables();rfEnsure(true);}
-    else{rfSavePrefs();renderSKUTables();}
-  };
-  input.onkeydown=e=>{if(e.key==='Enter')input.blur();};
-  span.innerHTML='';span.appendChild(input);input.focus();input.select();
-}
+// editRfWindow 已刪（2026-08-13 Gordon 裁示：W 寫死 14、不提供編輯；#rf-w 元素早已自畫面移除）
 function rfRenderStatus(){
   const el=document.getElementById('rf-status');if(!el)return;
   const w=document.getElementById('rf-w');if(w&&!w.querySelector('input'))w.textContent=RF_WINDOW;
@@ -1999,7 +2007,7 @@ function renderRegionTable(){
 function renderSeasonSalesTable(){
   const tbody=document.querySelector('#tbl-season-sales tbody');if(!tbody)return;tbody.innerHTML='';
   let grandStock=0,grandUngrab=0,grandSku=0;
-  const seasonGroups=[{label:'26FW',pfxs:['74','75']},{label:'26SS',pfxs:['72','73']},{label:'25FW',pfxs:['70','71']},{label:'25SS',pfxs:['68','69']},{label:'24FW',pfxs:['66','67']},{label:'24SS',pfxs:['64','65']},{label:'23SS',pfxs:['62','63']}];
+  const seasonGroups=[...SEASON_ORDER.map(s=>({label:s.label,pfxs:s.pfx})),{label:'23SS',pfxs:['62','63']}];   // ★ 2026-08-13 D案：由 SEASON_ORDER 生成，自動含新季
   // SKU 數：依前綴歸季；比最新一季前綴更大者（如 76xx）併入最新一季（同原 renderSeasonSKUTable 邏輯）
   const skuCounts={};
   const newestMax=Math.max(...seasonGroups[0].pfxs.map(p=>parseInt(p)));
@@ -2151,6 +2159,8 @@ function renderSeasonProgress(){
   const tbody=document.querySelector('#tbl-season-progress tbody');if(!tbody)return;tbody.innerHTML='';
   SEASON_PROGRESS_DATA.forEach((s,idx)=>{
     const rows=[...(CACHE.bySeason[s.pfx[0]]||[]),...(CACHE.bySeason[s.pfx[1]]||[])];
+    // ★ 2026-08-13 D案：自動補的未來季（_auto）在「無出貨額且無任何庫存列」時隱藏，商品出現後自動顯示。
+    if(s._auto&&(s.totalShipment||0)===0&&rows.length===0)return;
     // ★ 2026-07-21 除錯：原本未進倉量直接取 Σ未到量，但 26SS/26FW 的未進倉量在「季別總表」是可手動覆寫的
     //   （SS26_NO_POS_STOCK / FW26_NO_POS_STOCK），兩張表各算各的 → 26FW 已售與側欄進倉進度對不起來。
     //   改為統一走 seasonUndelivered()：26SS/26FW 用可覆寫值，其餘季別仍＝Σ未到量。
@@ -2181,7 +2191,7 @@ function loadManualEdits(){
 // ★ 2026-07-21 儲區總覽側欄三圓形圖表：進倉進度 / 儲位使用率 / 各類別 SKU 佔比
 // ============================================================
 // 季別排序鍵：年份*10 + (SS=1, FW=2)；26SS=261、26FW=262、27SS=271…
-function seasonKey(label){const y=parseInt(String(label).substring(0,2));const s=String(label).substring(2)==='SS'?1:2;return (isNaN(y)?0:y)*10+s;}
+// seasonKey 已刪（2026-08-13 死碼清理：唯一消費者 progressSeasonsList 一併移除）
 function seasonDisplayName(label){const y='20'+String(label).substring(0,2);return y+(String(label).substring(2)==='SS'?'春夏':'秋冬');}
 // 甜甜圈 SVG（p:0~1、色、中央文字）
 function _donutSVG(p,color,centerLabel){
@@ -2202,10 +2212,7 @@ function seasonUndelivered(label){
   if(typeof CACHE==='undefined'||!CACHE||!CACHE.bySeason)return 0;
   return pfx.reduce((sum,pk)=>sum+(CACHE.bySeason[pk]||[]).reduce((a,r)=>a+(r.未到量||0),0),0);
 }
-function progressSeasonsList(){
-  // 從 2026SS 開始（seasonKey>=261），最新季別排最前
-  return SEASON_PROGRESS_DATA.filter(s=>seasonKey(s.season)>=261).sort((a,b)=>seasonKey(b.season)-seasonKey(a.season));
-}
+// progressSeasonsList 已刪（2026-08-13 死碼清理：無呼叫端）
 // ★ 2026-07-21：新品 SKU 進倉進度單一資料源 —— 與 26FW tab 統計列（fw-total / fw-arrived / fw-pending）完全同源
 //   total   = 新品清單筆數（FW26_FILTER_DATA）
 //   arrived = 商品編號已出現在 EPR 資料庫（DB）者
@@ -2376,53 +2383,8 @@ function onSingleDatePick(v){
   compareLoadStored(v);
 }
 
-async function handleCompareUpload(event){
-  const file=event.target.files[0]; if(!file)return;
-  if(!DB||!DB.length){
-    alert('請先在主頁面上傳當前的 ERP 報表，再上傳歷史報表進行比對。');
-    event.target.value='';
-    return;
-  }
-  showLoading('讀取歷史 ERP 報表中...');
-  try{
-    const buf=await file.arrayBuffer();
-    const wb=XLSX.read(buf,{type:'array'});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-    const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
-    const validate=validateReportFormat(raw,['商品編號','商品名稱','儲位','銷售庫存','倉庫庫存'],'EPR 主報表');
-    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
-
-    const rows=raw.map(r=>({
-      商品編號:String(r['商品編號']||'').trim(),
-      商品名稱:r['商品名稱']||'',
-      顏色:r['顏色']||'',
-      尺寸:r['尺寸']||'',
-      儲位:r['儲位']||'',
-      銷售庫存:+r['銷售庫存']||0,
-      倉庫庫存:+r['倉庫庫存']||0,
-      未到量:+r['未到量']||0,
-      未抓貨:+r['未抓貨']||0,
-      可賣數量:+r['可賣數量']||0,
-      保留數量:+r['保留數量']||0,
-      總進貨量:+r['總進貨量']||0,
-      總採購量:+r['總採購量']||0,
-    })).filter(r=>r.商品編號);
-
-    // 從檔名中嘗試抓取日期（檔名格式可能含 YYYYMMDD）
-    let detectedDate='';
-    const m=file.name.match(/(\d{8})|(\d{4}-\d{2}-\d{2})|(\d{4}\/\d{2}\/\d{2})/);
-    if(m)detectedDate=m[0];
-
-    COMPARE_OLD_DATA={date:detectedDate||file.name,rows,fileName:file.name};
-    try{await idbPut('compare_old',COMPARE_OLD_DATA);}catch(e){}
-    document.getElementById('compare-status').textContent=`歷史報表：${file.name}（${rows.length.toLocaleString()} 筆）`;
-    document.getElementById('compare-clear-btn').style.display='inline-flex';
-    hideLoading();
-    renderSalesCompare();
-  }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
-  event.target.value='';
-}
-
+// handleCompareUpload 已刪（2026-08-13 死碼清理：手動上傳歷史 Excel 已被「選日期下拉／兩日期區間」取代，UI 入口早已移除）。
+// 歷史報表欄位需求（含 總進貨量/總採購量）見 histEprToCompareRows。
 async function clearCompareData(){
   if(!confirm('確定要清除歷史 ERP 報表？'))return;
   COMPARE_OLD_DATA=null;
@@ -2436,104 +2398,16 @@ async function clearCompareData(){
 }
 
 // ════════════════════════════════════════════════════════════
-// ★ 2026-07-25 Gordon #4：出貨統計匯入 ＋ 兩日期區間銷售對比
-//   目的：每天一早的 ERP SKU 總表(庫存快照)推導的期間銷售，會被「進貨誤差」干擾；
-//         用實打實的「匯出出貨統計」逐日出貨量去對照，擋住這些誤差、看真實銷售件數。
+// ★ 2026-07-25 Gordon #4（部分保留）：兩日期區間銷售對比
 //   ‧ 兩個日期都可從系統已存日期挑（不再限「已存日 → 當前」）。
-//   ‧ 出貨統計每日銷售量(Gordon 定義) = 店配完成數量(當日)件數 + 宅配件數 + 前一日 店配完成數量(預做隔日)件數
-//     （現場當天宅配(下午)出完後，下班前會先預做隔天上午的店配 → 那批算前一天的產出）
-//   ‧ 區間[起始,結束) 實際銷售 = Σ 各日銷售量（D 從起始日到結束日前一天；對應兩份晨間快照間的庫存下降）。
+//   ★ 2026-08-13 移除「出貨統計匯入」半邊（Gordon 裁示：該功能先前已刻意下架、UI 入口早已移除）：
+//     SHIPMENT_STATS / shipmentParseAoa / shipmentPrevDay / shipmentWindowTotal / periodSoldTotal /
+//     handleShipmentUpload / loadShipmentStats / renderShipmentStatus 已刪。
+//     若日後要重建，出貨統計每日銷售量(Gordon 定義) = 店配完成數量(當日)件數 + 宅配件數
+//     + 前一日 店配完成數量(預做隔日)件數；區間[起,迄) 銷售 = Σ 各日（迄不含）。
+//     舊 idb key 'shipment_stats' 殘值不主動清除（無載入點、無害）。
 //   ════════════════════════════════════════════════════════════
-let SHIPMENT_STATS=null;   // {rows:{'YYYY-MM-DD':{storeToday,home,prepickNext}}, dates:[...], months:[...]}
 
-// 出貨統計 xlsx → aoa(header:1) → 逐日 map。以表頭雙列文字定位欄位（抗欄位位移）。
-function shipmentParseAoa(aoa){
-  if(!aoa||aoa.length<3)return {rows:{},dates:[]};
-  const row0=aoa[0]||[],row1=aoa[1]||[];
-  const findGroup=(label)=>{for(let c=0;c<row0.length;c++){if(String(row0[c]||'').replace(/\s/g,'')===label)return c;}return -1;};
-  // 各群組件數欄＝群組起始欄 +1（子欄序：包裹數,件數,…）
-  const gToday=findGroup('店配完成數量(當日)');
-  const gHome=findGroup('宅配');
-  const gPre=findGroup('店配完成數量(預做隔日)');
-  const cToday=gToday>=0?gToday+1:13;   // fallback：已驗證的固定索引
-  const cHome=gHome>=0?gHome+1:15;
-  const cPre=gPre>=0?gPre+1:21;
-  const rows={};const dates=[];
-  for(let i=2;i<aoa.length;i++){
-    const r=aoa[i]||[];const dcell=String(r[0]||'').trim();
-    const md=dcell.match(/^(\d{4}-\d{2}-\d{2})/);
-    if(!md)continue;            // 跳過「合計」「平均」等非日期列
-    const d=md[1];
-    const n=(x)=>{const v=+x;return isFinite(v)?v:0;};   // '-'／空 → 0
-    rows[d]={storeToday:n(r[cToday]),home:n(r[cHome]),prepickNext:n(r[cPre])};
-    dates.push(d);
-  }
-  dates.sort();
-  return {rows,dates,cols:{cToday,cHome,cPre}};
-}
-// 前一日 YYYY-MM-DD
-function shipmentPrevDay(d){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()-1);return t.toISOString().slice(0,10);}
-// 區間[start,end) 出貨統計實際銷售總量。start<end，皆 YYYY-MM-DD。
-function shipmentWindowTotal(rows,start,end){
-  if(!rows||!start||!end||start>=end)return {total:0,days:[],missing:[],perDay:[]};
-  let total=0;const days=[],missing=[],perDay=[];
-  const cur=new Date(start+'T00:00:00Z');const endD=new Date(end+'T00:00:00Z');
-  while(cur<endD){
-    const d=cur.toISOString().slice(0,10);
-    const today=rows[d];const prev=rows[shipmentPrevDay(d)];
-    if(!today){missing.push(d);}
-    const v=(today?(today.storeToday+today.home):0)+(prev?prev.prepickNext:0);
-    total+=v;days.push(d);perDay.push({date:d,sold:v,hasData:!!today});
-    cur.setUTCDate(cur.getUTCDate()+1);
-  }
-  return {total,days,missing,perDay};
-}
-// 兩份晨間快照(earlier→later)間的 ERP 推導期間銷售（沿用銷售比對公式）。
-function periodSoldTotal(startRows,endRows){
-  const sMap={},eMap={};
-  (startRows||[]).forEach(r=>{sMap[r.商品編號]=r;});
-  (endRows||[]).forEach(r=>{eMap[r.商品編號]=r;});
-  const codes=new Set([...Object.keys(sMap),...Object.keys(eMap)]);
-  let total=0;
-  codes.forEach(code=>{
-    const s=sMap[code],e=eMap[code];
-    const sSell=s?(+s.銷售庫存||0):0,sPur=s?(+s.總進貨量||0):0;
-    const eSell=e?(+e.銷售庫存||0):0,ePur=e?(+e.總進貨量||0):0;
-    let sold;
-    if(s&&!e)sold=sSell;                       // 期末已下架 → 以期初銷售庫存為上限
-    else sold=(sSell-eSell)+(ePur-sPur);       // 標準：庫存下降 + 期間進貨
-    if(sold>0)total+=sold;
-  });
-  return total;
-}
-
-async function handleShipmentUpload(event){
-  const file=event.target.files[0];if(!file){return;}
-  showLoading('讀取出貨統計中...');
-  try{
-    const buf=await file.arrayBuffer();
-    const wb=XLSX.read(buf,{type:'array'});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-    const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    const parsed=shipmentParseAoa(aoa);
-    if(!parsed.dates.length){hideLoading();alert('讀不到出貨統計的日期列（請確認是「匯出出貨統計」報表）');event.target.value='';return;}
-    const months=[...new Set(parsed.dates.map(d=>d.slice(0,7)))].sort();
-    SHIPMENT_STATS={rows:parsed.rows,dates:parsed.dates,months};
-    try{await idbPut('shipment_stats',SHIPMENT_STATS);}catch(e){}
-    hideLoading();
-    renderShipmentStatus();
-    try{intervalRefreshAvailability();}catch(e){}
-    alert(`✓ 已匯入出貨統計\n\n涵蓋 ${parsed.dates.length} 天：${parsed.dates[0]} ～ ${parsed.dates[parsed.dates.length-1]}\n月份：${months.join('、')}`);
-  }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
-  event.target.value='';
-}
-async function loadShipmentStats(){try{const s=await idbGet('shipment_stats');if(s&&s.rows)SHIPMENT_STATS=s;}catch(e){}}
-function renderShipmentStatus(){
-  const el=document.getElementById('ship-status');if(!el)return;
-  if(!SHIPMENT_STATS||!SHIPMENT_STATS.dates.length){el.textContent='尚未匯入出貨統計';el.style.color='var(--text3)';return;}
-  const d=SHIPMENT_STATS.dates;
-  el.innerHTML=`已匯入 <b>${d.length}</b> 天出貨統計（${d[0]} ～ ${d[d.length-1]}）`;el.style.color='var(--green)';
-}
 // 兩個日期下拉：填入系統已存日期
 function intervalRefreshAvailability(){
   const s=document.getElementById('iv-start'),e=document.getElementById('iv-end');
@@ -2625,6 +2499,7 @@ function renderSalesCompare(){
     const oldOrdered=old?(+old.總採購量||0):0;
     const curSell=cur?(+cur.銷售庫存||0):0;
     const curPending=cur?(+cur.未到量||0):0;
+    const curOrdered=cur?(+cur.總採購量||0):0;   // ★ 2026-08-13：補當前側總採購量（供「採購量減少」偵測）
     const curPurchased=cur?(+cur.總進貨量||0):0;
 
     // ★ 特例：當前已下架(查無) → 銷售 = 歷史 銷售庫存
@@ -2646,7 +2521,12 @@ function renderSalesCompare(){
       if(isSoldOutDelisted)remark.push('已下架(原庫存已售完)');
       else remark.push('已下架');
     }
-    if(old&&cur&&curPurchased<oldPurchased)remark.push('採購量減少');
+    // ★ 2026-08-13（Gordon 說明 ERP 語意後定案）：總採購量 ≈ 總進貨量＋未到量。
+    //   採購端/工廠端縮減剩餘訂單時，總採購量會下降（例：10000→8000）→ 這才是「採購量減少」的正確偵測，
+    //   比較 總採購量（oldOrdered vs curOrdered）。此備註不影響 sold 計算，純提醒該款後續到貨會比預期少。
+    //   另保留「進貨量減少(異常)」：總進貨量為累計實際進貨、正常不應倒退，倒退＝資料異常且會壓低 sold。
+    if(old&&cur&&curOrdered<oldOrdered)remark.push('採購量減少(訂單縮減)');
+    if(old&&cur&&curPurchased<oldPurchased)remark.push('進貨量減少(異常)');
 
     const ref=cur||old||{};
     // 儲位：優先用當前的（最新），其次用歷史的
@@ -3474,21 +3354,8 @@ async function sendToPlannerFromForecast(){
 // ★ 儲位調整建議 TAB
 // ═══════════════════════════════════════════════════════
 // sheet 名稱正規化：全形→半形 + trim
-function plannerNormalizeSheetName(sn){
-  let s=String(sn||'').trim();
-  let out='';
-  for(let i=0;i<s.length;i++){
-    const code=s.charCodeAt(i);
-    out+=(code>=0xFF21&&code<=0xFF5A)?String.fromCharCode(code-0xFEE0):s[i];
-  }
-  return out;
-}
-// 取儲位前綴：E01-100-1 → E01, XX-011 → XX-, A03-001-3 → A03
-function plannerGetAislePrefix(slot){const s=String(slot||'').trim();return s.length>=3?s.substring(0,3):s;}
-// 走道 → 儲區字母（E01 → E, A03 → A, XX- → XX, TX- → TX）
-function plannerGetZoneLetter(prefix){const s=String(prefix||'');if(s.startsWith('XX')||s.startsWith('TX'))return s.substring(0,2);return s.charAt(0);}
-// Phase 1 主要 sheet 集合：A/B/C/D/E/F/L/M/P/XX
-function plannerIsPrimarySheet(normName){return ['A','B','C','D','E','F','L','M','P','XX'].includes(normName);}
+// plannerNormalizeSheetName/plannerGetAislePrefix/plannerGetZoneLetter/plannerIsPrimarySheet 已刪
+// （2026-08-13 死碼清理：早期儲位總表 sheet 解析工具，解析改寫後無呼叫端）
 
 async function handlePlannerAisleUpload(event){
   const file=event.target.files[0];if(!file)return;
@@ -4177,28 +4044,7 @@ const PLN_SPEC = {
 function plnSkuKuanSe(sku){return String(sku||'').substring(0,7);}
 function plnSkuKuan(sku){return String(sku||'').substring(0,5);}
 
-// 查相鄰同層儲位是否有同款色 SKU (cells 為實際 state 陣列)
-// ignoreCell 用於排除「正在被移走」的來源 cell，避免自我衝突
-function plnAdjConflictCount(cells,sku,cellId,ignoreCell){
-  // §1.3a 相鄰守則。層範圍政策集中於 PLN_SPEC_FLAGS.adjAllLayerForAdjust：
-  //   false(預設)＝同層(現行已驗證行為)；true＝整欄任一層(對齊規格鎖定)。
-  const p=plnParseCell(cellId);if(!p)return 0;
-  const ks=plnSkuKuanSe(sku);if(!ks)return 0;
-  const allLayer=PLN_SPEC_FLAGS.adjAllLayerForAdjust;
-  const layers=allLayer?[1,2,3,4]:[p.layer];
-  let cnt=0;
-  for(const dc of [-1,1]){
-    let hit=false;
-    for(const L of layers){
-      const nb=plnCellId(p.aisle,p.col+dc,L);
-      if(ignoreCell && nb===ignoreCell)continue;
-      const nc=cells.find(c=>c.cell===nb);
-      if(nc && nc.sku && plnSkuKuanSe(nc.sku)===ks){hit=true;break;}
-    }
-    if(hit)cnt++;
-  }
-  return cnt;
-}
+// plnAdjConflictCount 已刪（2026-08-13 死碼清理：相鄰守則已統一走 PLN_PRIM.adjConflict/adjConflictCount，本獨立舊版無呼叫端）
 
 // 同上但使用 Map<cellId, sku> (用於 greedy 過程中暫存的 state)
 function plnAdjConflictByMap(skuMap,sku,cellId){
@@ -4722,29 +4568,9 @@ function plnFindSkuCell(cells,sku,sourceAisles){
   return null;  // ★ 不再 fallback 到 C01，避免找到剛放置的 SKU
 }
 
-// ★ displacement 目的地: 只找 empty (非 locked) cells, 排除 group 預定要佔的 cells
-function plnFindDispDest(cells,srcCell,config,excludeCells,targetLayer){
-  excludeCells=excludeCells||new Set();
-  const src=cells[srcCell];
-  const cands=[];
-  Object.values(cells).forEach(cs=>{
-    if(cs.sku||cs.locked)return;
-    if(excludeCells.has(cs.cell))return;  // ★ 排除 group 預定 cells (避免 chained displacement)
-    if(!config.destination.includes(cs.aisle))return;
-    let dist=999;
-    if(cs.aisle===src.aisle && config.aisleGeometry[cs.aisle]){
-      const g=config.aisleGeometry[cs.aisle];
-      dist=plnAisleDistance(src.col,cs.col,g.min,g.max);
-    }
-    const lay=cs.layout===src.layout?0:1;
-    // ★ targetLayer 對應度 (0=match, 1=no match) — 列為最高優先級
-    const layerMatch=(targetLayer!=null && cs.layer===targetLayer)?0:1;
-    cands.push({cell:cs.cell,layerMatch,sameAisle:cs.aisle===src.aisle?0:1,lay,dist,col:cs.col});
-  });
-  if(!cands.length)return null;
-  cands.sort((a,b)=>(a.layerMatch-b.layerMatch)||(a.sameAisle-b.sameAisle)||(a.lay-b.lay)||(a.dist-b.dist)||(a.col-b.col));
-  return cands[0].cell;
-}
+// plnFindDispDest 已刪（2026-08-13 死碼清理，觸及鎖定註記）：displacement 目的地挑選已內聯於引擎
+// （scored.sort: layerMatch→sameAisle→sameLay→dist→col），原鎖定修正「targetLayer 為最高優先排序鍵」
+// 由內聯版 layerMatch 第一鍵完整繼承，行為不變。
 
 // ★ 放置: 每個 cell 放完後立即 locked=true; displace 走 batch matching (對應 layer 數最大化)
 function plnPlaceGroup(cells,skusLayers,config,moves,opts){
@@ -6321,21 +6147,7 @@ function plnRunNewEngine(config,initialCells){
     }
     return '';
   }
-  function colEmptyLayers(aisle,col){
-    const empty=[];
-    for(let L=1;L<=4;L++){
-      const cs=cells[plnCellId(aisle,col,L)];
-      if(cs&&!cs.sku&&!cs.locked)empty.push(L);
-    }
-    return empty;
-  }
-  function isColFree(aisle,col){
-    for(let L=1;L<=4;L++){
-      const cs=cells[plnCellId(aisle,col,L)];
-      if(cs&&(cs.sku||cs.locked))return false;
-    }
-    return true;
-  }
+  // colEmptyLayers/isColFree 已刪（2026-08-13 死碼清理：巢狀宣告後無呼叫端）
   // ★ 核心: 排入單一 SKU 到指定儲位 (返回 bool)
   //   ★ 防重複（Gordon 2026-06-30）：同一商品編號全程只排一次——擋掉「兩貨櫃同款 SKU 重複輸入」
   //     與「多輪 AG 把純溢出色(n<4)重排」兩種重複來源。已排過的 code 直接拒絕，不會佔第二個儲位。
@@ -10822,7 +10634,7 @@ const SLOT_ZONES=[
   {floor:'2F',zone:'L',aisles:['L01','L02','L03','L04','L05','L06','L07','L08','L09','L10','L11','L12','L13','L14','L15']},
   {floor:'2F',zone:'M',aisles:['M06','M07','M08']},
 ];
-const SLOT_MONTHLY_HIST={
+const SLOT_MONTHLY_HIST_DEFAULT={
   2020:[12903,12201,15030,15107,12482,10668,10000,11615,12791,12921,11446,10449],
   2021:[10105,9748,12403,14347,14389,12676,13132,13873,14507,14177,13143,13027],
   2022:[13679,13733,16604,17510,16721,16523,16546,19501,21149,20026,18733,20585],
@@ -10830,6 +10642,17 @@ const SLOT_MONTHLY_HIST={
   2024:[23608,23586,23113,22779,21903,22072,23122,27289,27639,26149,23842,23623],
   2025:[25183,24714,26893,25332,23950,23447,23870,28914,30265,28569,26398,26898],
 };
+// ★ 2026-08-13 修正：原本寫入 localStorage('slot_monthly_hist')＋列入匯出/匯入，但啟動從不讀回
+//   （與 SLOT_SEASON_HIST 不對稱）→ 寫入/匯入的月度歷史值重新整理即遺失。比照 SLOT_SEASON_HIST 模式還原：
+//   已存年份逐年覆蓋預設值，未存年份沿用 hardcode 預設（匯入舊備份檔不會弄丟內建歷史）。
+const SLOT_MONTHLY_HIST=(()=>{
+  const base=JSON.parse(JSON.stringify(SLOT_MONTHLY_HIST_DEFAULT));
+  try{
+    const saved=JSON.parse(localStorage.getItem('slot_monthly_hist')||'null');
+    if(saved&&typeof saved==='object'){Object.keys(saved).forEach(y=>{if(Array.isArray(saved[y])&&saved[y].length===12)base[y]=saved[y];});}
+  }catch(e){}
+  return base;
+})();
 // 歷史季別 SKU（可雙擊編輯，存 localStorage）
 const SLOT_SEASON_HIST_DEFAULT={
   春夏:{2020:11475,2021:13890,2022:17097,2023:17447,2024:18207,2025:19310},
@@ -10843,11 +10666,40 @@ const SLOT_SEASON_HIST=(()=>{
   return JSON.parse(JSON.stringify(SLOT_SEASON_HIST_DEFAULT));
 })();
 function saveSlotSeasonHist(){try{localStorage.setItem('slot_season_hist',JSON.stringify(SLOT_SEASON_HIST));}catch(e){}}
-let SLOT_MONTHLY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_2026');if(s){const o=JSON.parse(s);if(Object.keys(o).length>0)return o;}}catch(e){}return {1:28624,2:29476,3:29373,4:26521};})();
+// ★ 2026-08-13 D案（年度滾動）：SLOT_MONTHLY_2026／SLOT_MONTHLY_DAY_2026／SLOT_SEASON_2026 的「_2026」
+//   為歷史沿革命名，實際語意＝「SLOT_LIVE_YEAR（當前追蹤年）」的即時追蹤值；localStorage 鍵名同步沿用不改。
+//   跨年（報表年份 > SLOT_LIVE_YEAR）時 slotRolloverLiveYear() 自動把即時值封存進 *_HIST，再重置追蹤新年份。
+//   ⚠ SLOT_LIVE_YEAR 必須先於 SLOT_MONTHLY_2026/SLOT_SEASON_2026 宣告：兩者的 hardcode 預設值只在
+//   live=2026 時套用，否則滾動後（store 為空物件）重新載入會把 2026 預設值「復活」成新年份的資料。
+let SLOT_LIVE_YEAR=(()=>{try{const v=parseInt(localStorage.getItem('slot_live_year'));if(v>=2026)return v;}catch(e){}return 2026;})();
+let SLOT_MONTHLY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_2026');if(s){const o=JSON.parse(s);if(Object.keys(o).length>0)return o;}}catch(e){}return SLOT_LIVE_YEAR===2026?{1:28624,2:29476,3:29373,4:26521}:{};})();
+function slotRolloverLiveYear(newY){
+  const oldY=SLOT_LIVE_YEAR;
+  // 1) 月度封存：{月:值} → 12 格陣列（無值＝null），寫入 SLOT_MONTHLY_HIST[oldY]
+  const arr=Array(12).fill(null);
+  for(let m=1;m<=12;m++){const v=+SLOT_MONTHLY_2026[m];if(v>0)arr[m-1]=v;}
+  if(arr.some(v=>v!=null)){SLOT_MONTHLY_HIST[oldY]=arr;try{localStorage.setItem('slot_monthly_hist',JSON.stringify(SLOT_MONTHLY_HIST));}catch(e){}}
+  // 2) 季別封存：春夏/秋冬 → SLOT_SEASON_HIST（秋冬若當年由 26FW 報表自動計算，取當下值封存）
+  ['春夏','秋冬'].forEach(s=>{
+    let v=SLOT_SEASON_2026[s];
+    if(v==null&&s==='秋冬'&&oldY===2026&&FW26_FILTER_DATA.length>0){const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});v=seen.size;}
+    if(v!=null){if(!SLOT_SEASON_HIST[s])SLOT_SEASON_HIST[s]={};SLOT_SEASON_HIST[s][oldY]=v;}
+  });
+  saveSlotSeasonHist();
+  // 3) 重置即時追蹤 → 新年份（跨多年亦一次到位；中間年份本無資料）
+  SLOT_MONTHLY_2026={};SLOT_MONTHLY_DAY_2026={};SLOT_SEASON_2026={};
+  SLOT_LIVE_YEAR=newY;
+  try{
+    localStorage.setItem('slot_monthly_2026','{}');
+    localStorage.setItem('slot_monthly_day_2026','{}');
+    localStorage.setItem('slot_season_2026','{}');
+    localStorage.setItem('slot_live_year',String(newY));
+  }catch(e){}
+}
 // ★ 2026-07-25：記錄每月底 SKU 數是「哪一天的報表」設定的（{月:'YYYY-MM-DD'}）。
 //   用途：當月一律顯示最新一天（後上傳的日期覆寫前一天）；跨月後自然停止更新＝鎖定於該月最後上傳日。
 let SLOT_MONTHLY_DAY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_day_2026');if(s){const o=JSON.parse(s);if(o&&typeof o==='object')return o;}}catch(e){}return {};})();
-let SLOT_SEASON_2026=(()=>{try{return JSON.parse(localStorage.getItem('slot_season_2026')||'{"春夏":17777}');}catch(e){return {"春夏":17777};}})();
+let SLOT_SEASON_2026=(()=>{try{return JSON.parse(localStorage.getItem('slot_season_2026')||(SLOT_LIVE_YEAR===2026?'{"春夏":17777}':'{}'));}catch(e){return SLOT_LIVE_YEAR===2026?{"春夏":17777}:{};}})();
 
 function exportSlotData(){
   const wb=XLSX.utils.book_new();
@@ -10914,7 +10766,7 @@ function exportSlotData(){
 
   // 2026 season
   const ss2026=SLOT_SEASON_2026['春夏']??null;
-  const fw2026=(()=>{if(SLOT_SEASON_2026['秋冬']!=null)return SLOT_SEASON_2026['秋冬'];if(FW26_FILTER_DATA.length>0){const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});return seen.size;}return null;})();
+  const fw2026=(()=>{if(SLOT_SEASON_2026['秋冬']!=null)return SLOT_SEASON_2026['秋冬'];if(FW26_FILTER_DATA.length>0&&SLOT_LIVE_YEAR===2026){const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});return seen.size;}return null;})();
 
   // ── 通用樣式 ──
   const sData =(extra={})=>Object.assign({font:fJH,alignment:cC,border:bAll},extra);
@@ -10954,8 +10806,8 @@ function exportSlotData(){
   put(1,10,'剩餘',sData({alignment:cCn}));
   // O2: 月份, 年份欄（底色標頭，非粗體）
   put(1,14,'月份',sHead());
-  const histYears=[2020,2021,2022,2023,2024,2025];
-  const allYears=has2026?[...histYears,2026]:histYears;
+  const histYears=Object.keys(SLOT_MONTHLY_HIST).map(Number).filter(y=>y!==SLOT_LIVE_YEAR).sort((a,b)=>a-b);   // ★ D案：動態歷史年
+  const allYears=has2026?[...histYears,SLOT_LIVE_YEAR]:histYears;
   allYears.forEach((y,i)=>{
     const col=15+i*2;
     put(1,col,y,sHead());
@@ -11033,17 +10885,17 @@ function exportSlotData(){
   put(7,12,'',sMergeInner());
 
   // ── 每季度採購 SKU (F~M, rows 9-11) ──
-  const seasonYears=[2020,2021,2022,2023,2024,2025,2026];
+  const seasonYears=[...new Set([...Object.keys(SLOT_SEASON_HIST['春夏']||{}),...Object.keys(SLOT_SEASON_HIST['秋冬']||{})].map(Number))].filter(y=>y!==SLOT_LIVE_YEAR).sort((a,b)=>a-b).concat([SLOT_LIVE_YEAR]);   // ★ D案：動態
   put(9,5,'季別',sHead());
   seasonYears.forEach((y,i)=>put(9,6+i,y,sHead()));
   put(10,5,'春夏 SKU',sData());
   seasonYears.forEach((y,i)=>{
-    const v=y===2026?(ss2026??''):(SLOT_SEASON_HIST['春夏'][y]??'');
+    const v=y===SLOT_LIVE_YEAR?(ss2026??''):(SLOT_SEASON_HIST['春夏'][y]??'');
     put(10,6+i,v,sData());
   });
   put(11,5,'秋冬 SKU',sData());
   seasonYears.forEach((y,i)=>{
-    const v=y===2026?(fw2026??''):(SLOT_SEASON_HIST['秋冬'][y]??'');
+    const v=y===SLOT_LIVE_YEAR?(fw2026??''):(SLOT_SEASON_HIST['秋冬'][y]??'');
     put(11,6+i,v,sData());
   });
 
@@ -11076,7 +10928,7 @@ function exportSlotData(){
     put(r,14,m,sData());
     allYears.forEach((y,yi)=>{
       const col=15+yi*2;
-      const v=y===2026?(SLOT_MONTHLY_2026[i+1]??''):(SLOT_MONTHLY_HIST[y]?.[i]??'');
+      const v=y===SLOT_LIVE_YEAR?(SLOT_MONTHLY_2026[i+1]??''):(SLOT_MONTHLY_HIST[y]?.[i]??'');
       put(r,col,v,sData());
       put(r,col+1,'',sMergeInner());  // ★ 合併右側格也需完整框線
     });
@@ -11086,7 +10938,7 @@ function exportSlotData(){
   allYears.forEach((y,yi)=>{
     const col=15+yi*2;
     let avg=null;
-    if(y===2026){
+    if(y===SLOT_LIVE_YEAR){
       const vals=Object.entries(SLOT_MONTHLY_2026).filter(([,v])=>v>0).map(([,v])=>v);
       avg=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):null;
     } else {
@@ -11164,7 +11016,10 @@ function checkMonthlyAutoSave(reportDateStr){
   const isCurrentMonth=(y===curY&&month===curM);
   const isPastMonth=(y<curY)||(y===curY&&month<curM);
 
-  if(y===2026){
+  // ★ 2026-08-13 D案：報表年份超過當前追蹤年 → 先封存舊年、切換追蹤新年（2027 起月度追蹤不再停擺）
+  if(y>SLOT_LIVE_YEAR)slotRolloverLiveYear(y);
+
+  if(y===SLOT_LIVE_YEAR){
     const prevDay=SLOT_MONTHLY_DAY_2026[month]||'';
     const hasVal=(SLOT_MONTHLY_2026[month]!=null&&SLOT_MONTHLY_2026[month]!==''&&+SLOT_MONTHLY_2026[month]>0);
     // 當月：一律追蹤最新一天；過去月份：僅在尚無值時補登（不覆寫已鎖定的月底值）
@@ -11176,7 +11031,7 @@ function checkMonthlyAutoSave(reportDateStr){
       try{localStorage.setItem('slot_monthly_day_2026',JSON.stringify(SLOT_MONTHLY_DAY_2026));}catch(e){}
     }
   } else if(SLOT_MONTHLY_HIST[y]){
-    // 非 2026（歷史年份）：一律屬過去 → 沿用月底邏輯，僅在該月最後一天上傳時寫入（實務上不會再觸發）
+    // 早於追蹤年的歷史年份：沿用月底邏輯，僅在該月最後一天上傳時寫入（實務上不會再觸發）
     const lastDay=new Date(y,month,0).getDate();
     if(+rd.slice(8,10)===lastDay){
       SLOT_MONTHLY_HIST[y][month-1]=DB.length;
@@ -11186,6 +11041,7 @@ function checkMonthlyAutoSave(reportDateStr){
 }
 function updateSeasonSKUFromFW26(){
   if(!FW26_FILTER_DATA.length)return;
+  if(SLOT_LIVE_YEAR!==2026)return;   // ★ D案：26FW 名單只對應 2026 追蹤年；滾動後避免把 26FW 數誤寫成新年秋冬
   const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});
   SLOT_SEASON_2026['秋冬']=seen.size;
   localStorage.setItem('slot_season_2026',JSON.stringify(SLOT_SEASON_2026));
@@ -11328,20 +11184,20 @@ function renderSlotData(){
   }
 
   // ── 每月底 SKU 數 ──
-  const years=Object.keys(SLOT_MONTHLY_HIST).map(Number).sort();
+  const years=Object.keys(SLOT_MONTHLY_HIST).map(Number).filter(y=>y!==SLOT_LIVE_YEAR).sort();
   const months=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-  const allYears=Object.keys(SLOT_MONTHLY_2026).length>0?[...years,2026]:years;
+  const allYears=Object.keys(SLOT_MONTHLY_2026).length>0?[...years,SLOT_LIVE_YEAR]:years;
   const mHead=document.getElementById('slot-monthly-head');
   const mBody=document.getElementById('slot-monthly-body');
   const mFoot=document.getElementById('slot-monthly-foot');
   if(mHead)mHead.innerHTML=`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">月份</th>`+allYears.map(y=>`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">${y}</th>`).join('');
   // ★ 2026-07-25：當月（今天所屬 2026 月份）以斜體＋tooltip 標示為「最新一天、跨月後鎖定」
   const _now=new Date();const _liveY=_now.getFullYear(),_liveM=_now.getMonth()+1;
-  if(mBody)mBody.innerHTML=months.map((m,i)=>`<tr><td style="padding:4px 8px;font-weight:600;text-align:center">${m}</td>${allYears.map(y=>{const v=y===2026?SLOT_MONTHLY_2026[i+1]:SLOT_MONTHLY_HIST[y]?.[i];const isLive=(y===2026&&_liveY===2026&&(i+1)===_liveM);const liveDay=isLive?(SLOT_MONTHLY_DAY_2026[i+1]||''):'';return`<td style="padding:4px 8px;text-align:center;font-size:11px${isLive?';font-style:italic;color:var(--accent)':''}"${isLive?` title="當月最新一天${liveDay?'（'+liveDay+'）':''}，跨月後鎖定為月底值"`:''}>${v!=null?num(v):'—'}</td>`;}).join('')}</tr>`).join('');
+  if(mBody)mBody.innerHTML=months.map((m,i)=>`<tr><td style="padding:4px 8px;font-weight:600;text-align:center">${m}</td>${allYears.map(y=>{const v=y===SLOT_LIVE_YEAR?SLOT_MONTHLY_2026[i+1]:SLOT_MONTHLY_HIST[y]?.[i];const isLive=(y===SLOT_LIVE_YEAR&&_liveY===SLOT_LIVE_YEAR&&(i+1)===_liveM);const liveDay=isLive?(SLOT_MONTHLY_DAY_2026[i+1]||''):'';return`<td style="padding:4px 8px;text-align:center;font-size:11px${isLive?';font-style:italic;color:var(--accent)':''}"${isLive?` title="當月最新一天${liveDay?'（'+liveDay+'）':''}，跨月後鎖定為月底值"`:''}>${v!=null?num(v):'—'}</td>`;}).join('')}</tr>`).join('');
   if(mFoot){
     const avgs=allYears.map(y=>{
       let vals;
-      if(y===2026){vals=Object.entries(SLOT_MONTHLY_2026).filter(([,v])=>v>0).map(([,v])=>v);}
+      if(y===SLOT_LIVE_YEAR){vals=Object.entries(SLOT_MONTHLY_2026).filter(([,v])=>v>0).map(([,v])=>v);}
       else{vals=(SLOT_MONTHLY_HIST[y]||[]).filter(v=>v!=null&&v>0);}
       // 用有資料的月份數去除（不固定除以12）
       return vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):null;
@@ -11352,14 +11208,14 @@ function renderSlotData(){
   // ── 每季採購 SKU 數 ──
   const sHead=document.getElementById('slot-season-head');
   const sBody=document.getElementById('slot-season-body');
-  const seasonYears=[2020,2021,2022,2023,2024,2025,2026];
+  const seasonYears=[...new Set([...Object.keys(SLOT_SEASON_HIST['春夏']||{}),...Object.keys(SLOT_SEASON_HIST['秋冬']||{})].map(Number))].filter(y=>y!==SLOT_LIVE_YEAR).sort((a,b)=>a-b).concat([SLOT_LIVE_YEAR]);   // ★ D案：歷史年動態＋當前追蹤年
   if(sHead)sHead.innerHTML=`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">季別</th>`+seasonYears.map(y=>`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">${y}</th>`).join('');
   if(sBody){
     sBody.innerHTML=['春夏','秋冬'].map(s=>{
       const cols=seasonYears.map(y=>{
         let val,editable=true,autoCalc=false;
-        if(y===2026){
-          if(s==='秋冬'&&FW26_FILTER_DATA.length>0){
+        if(y===SLOT_LIVE_YEAR){
+          if(s==='秋冬'&&FW26_FILTER_DATA.length>0&&SLOT_LIVE_YEAR===2026){
             const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});
             val=seen.size;editable=false;autoCalc=true;
           }else{val=SLOT_SEASON_2026[s];}
@@ -11387,7 +11243,7 @@ function renderSlotData(){
 function editSeasonCell(td){
   const season=td.dataset.season;
   const year=Number(td.dataset.year);
-  const oldVal=(year===2026)?(SLOT_SEASON_2026[season]??''):(SLOT_SEASON_HIST[season]?.[year]??'');
+  const oldVal=(year===SLOT_LIVE_YEAR)?(SLOT_SEASON_2026[season]??''):(SLOT_SEASON_HIST[season]?.[year]??'');
   const input=document.createElement('input');
   input.type='text';
   input.value=oldVal;
@@ -11398,9 +11254,9 @@ function editSeasonCell(td){
     if(saved)return;saved=true;
     const v=parseInt(input.value.replace(/[^\d-]/g,''),10);
     if(!isNaN(v)){
-      if(year===2026)SLOT_SEASON_2026[season]=v;
+      if(year===SLOT_LIVE_YEAR)SLOT_SEASON_2026[season]=v;
       else{if(!SLOT_SEASON_HIST[season])SLOT_SEASON_HIST[season]={};SLOT_SEASON_HIST[season][year]=v;}
-      if(year===2026)localStorage.setItem('slot_season_2026',JSON.stringify(SLOT_SEASON_2026));
+      if(year===SLOT_LIVE_YEAR)localStorage.setItem('slot_season_2026',JSON.stringify(SLOT_SEASON_2026));
       else saveSlotSeasonHist();
       // 記錄最後更新時間（僅日期）
       const nowStr=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
@@ -11904,6 +11760,95 @@ function ph1Export(){
 }
 
 // 銷售比對 tab 的彙總狀態列
+// ════════════════════════════════════════════════════════════
+// ★ 2026-08-13 B案（Gordon 裁示繼續累積 rollup）：長期彙總趨勢檢視器
+//   目的：rollup 自 07-17 起純寫入累積，無任何讀取畫面 → 及早目視驗證資料正確，
+//   避免累積一年後才發現建置有 bug。期別列表用 env（不解壓、開卡即列）；
+//   Σ銷量與類別分佈需解壓 payload → 逐期懶載入（點「載入」）或一鍵全載，結果快取。
+//   資料量門檻備忘：週趨勢 8~12 週起有意義、月趨勢 3 個月起、去年同期需滿一年。
+// ════════════════════════════════════════════════════════════
+const ROLLUP_TREND_CACHE={};   // idbKey → {sold, byCat:{cat:sold}}
+async function renderRollupTrend(force){
+  const body=document.getElementById('rollup-trend-body');
+  const st=document.getElementById('rollup-trend-status');
+  if(!body)return;
+  let keys=[];
+  try{keys=(await idbKeys()).map(String);}catch(e){}
+  const wkKeys=keys.filter(k=>k.indexOf(ROLLUP_WK_PREFIX)===0).sort().reverse();   // 新→舊
+  const moKeys=keys.filter(k=>k.indexOf(ROLLUP_MO_PREFIX)===0).sort().reverse();
+  if(st)st.textContent=`週 ${wkKeys.length} 期・月 ${moKeys.length} 期（每天上傳 EPR 自動累積）`;
+  if(!wkKeys.length&&!moKeys.length){
+    body.innerHTML='<div style="padding:16px;text-align:center;color:var(--text3);font-size:13px">尚未累積任何彙總。每天上傳 EPR 報表時會自動建置（週=SKU 級、月=款色級）。</div>';
+    return;
+  }
+  const envOf=async k=>{try{return await idbGet(k);}catch(e){return null;}};
+  const rowHtml=(k,env)=>{
+    const c=ROLLUP_TREND_CACHE[k];
+    const soldTd=c?`<td class="num" style="padding:4px 8px;text-align:right;font-weight:700">${(c.sold||0).toLocaleString()}</td>`
+      :`<td style="padding:4px 8px;text-align:center"><button onclick="rollupTrendLoadOne('${k}')" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">載入</button></td>`;
+    const built=(env.builtAt||'').slice(0,10);
+    const cov=env.daysCovered!=null?env.daysCovered:'—';
+    const nD=(env.dates||[]).length;
+    const gap=(env.daysCovered!=null&&nD&&env.daysCovered>nD)?` <span title="涵蓋日數 > 報表天數：期間內有缺日（正常，日均會換算）" style="color:var(--orange)">⚠缺${env.daysCovered-nD}日</span>`:'';
+    const catBtn=c?`<button onclick="rollupTrendToggleCat('${k}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-family:var(--font)">類別 ▾</button>`:'';
+    return `<tr id="rt-row-${k}"><td style="padding:4px 8px;font-weight:600">${env.period||k}</td>`+
+      `<td style="padding:4px 8px;text-align:center">${nD}${gap}</td>`+
+      `<td style="padding:4px 8px;text-align:center">${cov}</td>`+
+      `<td class="num" style="padding:4px 8px;text-align:right">${(env.nCodes||0).toLocaleString()}</td>`+
+      soldTd+
+      `<td style="padding:4px 8px;text-align:center;color:var(--text3);font-size:11px">${built}</td>`+
+      `<td style="padding:4px 8px;text-align:center">${catBtn}</td></tr>`+
+      `<tr id="rt-cat-${k}" style="display:none"><td colspan="7" style="padding:2px 8px 8px 24px" id="rt-catcell-${k}"></td></tr>`;
+  };
+  const section=async(title,ks,levelNote)=>{
+    if(!ks.length)return '';
+    let rows='';
+    for(const k of ks){const env=await envOf(k);if(env)rows+=rowHtml(k,env);}
+    return `<div style="font-weight:700;font-size:13px;margin:10px 0 4px">${title} <span style="font-weight:400;color:var(--text3);font-size:12px">${levelNote}</span></div>`+
+      `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text3)">`+
+      `<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">期別</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">報表天數</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">涵蓋日數</th>`+
+      `<th style="padding:4px 8px;text-align:right;border-bottom:1px solid var(--border)">筆數</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">Σ銷量</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">建置於</th>`+
+      `<th style="border-bottom:1px solid var(--border)"></th></tr></thead><tbody>${rows}</tbody></table>`;
+  };
+  body.innerHTML=(await section('週彙總',wkKeys,'（SKU 級・ISO 週）'))+(await section('月彙總',moKeys,'（款色級）'))+
+    `<div style="margin-top:8px;font-size:11px;color:var(--text3)">Σ銷量＝期內逐日配對銷量加總（同銷售比對公式）。判讀門檻：週趨勢約 8~12 週起、月趨勢 3 個月起、「去年同期」需滿一年。此表主要用途＝目視驗證累積資料合理（數量級、缺日、筆數）。</div>`;
+}
+async function rollupTrendLoadOne(idbKey){
+  try{
+    if(!ROLLUP_TREND_CACHE[idbKey]){
+      const r=await rollupLoad(idbKey);
+      if(!r||!r.payload){alert('讀取失敗：'+idbKey);return;}
+      const p=r.payload;let sold=0;const byCat={};
+      (p.sold||[]).forEach((v,i)=>{sold+=(v||0);const c=(p.cat&&p.cat[i])||'未分類';byCat[c]=(byCat[c]||0)+(v||0);});
+      ROLLUP_TREND_CACHE[idbKey]={sold,byCat};
+    }
+    await renderRollupTrend();
+  }catch(e){alert('載入失敗：'+e.message);}
+}
+async function rollupTrendLoadAll(){
+  let keys=[];
+  try{keys=(await idbKeys()).map(String);}catch(e){}
+  const ks=keys.filter(k=>k.indexOf('rollup_')===0).sort().reverse().slice(0,40);   // 上限 40 期防久等
+  showLoading('載入彙總銷量中…');
+  try{for(const k of ks){if(!ROLLUP_TREND_CACHE[k]){const r=await rollupLoad(k);if(r&&r.payload){const p=r.payload;let sold=0;const byCat={};(p.sold||[]).forEach((v,i)=>{sold+=(v||0);const c=(p.cat&&p.cat[i])||'未分類';byCat[c]=(byCat[c]||0)+(v||0);});ROLLUP_TREND_CACHE[k]={sold,byCat};}}}}finally{hideLoading();}
+  await renderRollupTrend();
+}
+function rollupTrendToggleCat(idbKey){
+  const tr=document.getElementById('rt-cat-'+idbKey);
+  const cell=document.getElementById('rt-catcell-'+idbKey);
+  if(!tr||!cell)return;
+  if(tr.style.display==='none'){
+    const c=ROLLUP_TREND_CACHE[idbKey];if(!c)return;
+    const ents=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]);
+    cell.innerHTML='<table style="border-collapse:collapse;font-size:12px">'+ents.map(([cat,v])=>`<tr><td style="padding:2px 12px 2px 0;color:var(--text2)">${cat}</td><td style="padding:2px 0;text-align:right;font-weight:600">${v.toLocaleString()}</td></tr>`).join('')+'</table>';
+    tr.style.display='';
+  }else{tr.style.display='none';}
+}
+
 async function rollupUpdateStatusUI(){
   const el=document.getElementById('rollup-status');if(!el)return;
   try{
@@ -12160,7 +12105,6 @@ function populateCompareHistSelect(){
   sel.title=dates.length?('可選 '+dates.length+' 天（系統暫存 近40天 ＋ 已上傳備份檔，重疊自動去重）'):'尚無可選日期（上傳 ERP 報表或每月備份檔後才有）';
   try{rollupUpdateStatusUI();}catch(e){}
   try{intervalRefreshAvailability();}catch(e){}   // ★ #4：同步區間對比日期下拉
-  try{renderShipmentStatus();}catch(e){}
 }
 function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIST_MAX_DAYS);const cutStr=cutoff.toISOString().slice(0,10);Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)&&/^\d{4}-\d{2}-\d{2}$/.test(k.slice(HIST_PREFIX.length))).forEach(k=>{if(k.slice(HIST_PREFIX.length)<cutStr)localStorage.removeItem(k);});}
 // ★ 2026-07-25：只認 YYYY-MM-DD 形態的歷史 key。
@@ -12168,8 +12112,7 @@ function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIS
 //   舊寫法會把它 strip 成一筆假日期「epr_dates」混進歷史下拉選單（圖4）。
 //   加日期形態 guard 即可濾掉，且防止未來任何非日期 key 再洩漏；不動索引 key 本身（下載該日報表需要它）。
 function histList(){return Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)&&/^\d{4}-\d{2}-\d{2}$/.test(k.slice(HIST_PREFIX.length))).map(k=>k.slice(HIST_PREFIX.length)).sort().reverse();}
-function histExport(){const dates=histList();if(!dates.length){alert('沒有歷史記錄可匯出');return;}const all={};dates.forEach(d=>{try{all[d]=JSON.parse(localStorage.getItem(HIST_PREFIX+d));}catch(e){}});const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`lativ_history_${dates[0].slice(0,7).replace('-','')}.json`;a.click();URL.revokeObjectURL(url);}
-function histImport(file){if(!file)return;const reader=new FileReader();reader.onload=e=>{try{const all=JSON.parse(e.target.result);let count=0;Object.entries(all).forEach(([d,snap])=>{localStorage.setItem(HIST_PREFIX+d,JSON.stringify(snap));count++;});histUpdateUI();alert(`已匯入 ${count} 筆歷史記錄`);}catch(err){alert('匯入失敗：'+err.message);}};reader.readAsText(file);}
+// histExport/histImport 已刪（2026-08-13 死碼清理：僅匯歷史摘要的舊功能，已被右上角整包匯出/匯入取代）
 
 // ============================================================
 // ★ 整包資料匯出 / 匯入（跨裝置同步用）
@@ -12191,7 +12134,7 @@ async function exportAllData(){
 
     // 2. 收集所有 localStorage 設定
     const settings={};
-    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','reserve_reasons','fw26_last_update','slot_season_last_update','arrange_upload_date','forecast_upload_date','planner_aisle_upload_date','planner_master_upload_date'];
+    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_monthly_day_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','slot_live_year','reserve_reasons','fw26_last_update','slot_season_last_update','arrange_upload_date','forecast_upload_date','planner_aisle_upload_date','planner_master_upload_date'];
     settingKeys.forEach(k=>{
       try{const v=localStorage.getItem(k);if(v!==null)settings[k]=JSON.parse(v);}catch(e){
         try{const v=localStorage.getItem(k);if(v!==null)settings[k]=v;}catch(e2){}
@@ -12452,8 +12395,7 @@ function showMonthlyExportReminder(ym){
       document.getElementById('compare-clear-btn').style.display='inline-flex';
     }
   }catch(e){}
-  // ★ 2026-07-25 #4：載入出貨統計 + 初始化區間對比日期下拉
-  try{await loadShipmentStats();renderShipmentStatus();}catch(e){}
+  // ★ 2026-07-25 #4：初始化區間對比日期下拉（出貨統計載入已於 2026-08-13 隨模組移除）
   try{intervalRefreshAvailability();}catch(e){}
   // 載入 儲位調整建議 tab 的資料
   try{
@@ -12805,6 +12747,17 @@ function showMonthlyExportReminder(ym){
       </div>
     </div>
 
+    <!-- ★ 2026-08-13 B案：長期彙總趨勢（rollup 檢視器）——目的：及早驗證累積中的週/月彙總資料正確性 -->
+    <div class="card" id="rollup-trend-card" style="margin-top:14px">
+      <div class="card-title" style="gap:8px;flex-wrap:wrap">
+        <span class="dot"></span>長期彙總趨勢（累積驗證）
+        <button onclick="rollupTrendLoadAll()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">📊 載入全部銷量</button>
+        <button onclick="renderRollupTrend(true)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 12px;font-size:13px;cursor:pointer;font-family:var(--font)">🔄 刷新</button>
+        <span id="rollup-trend-status" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+      <div id="rollup-trend-body" style="padding:4px 12px 12px"><div style="padding:16px;text-align:center;color:var(--text3);font-size:13px">載入中…</div></div>
+    </div>
+
     <!-- 階段1：過季款色 1F/2F 調換排名 -->
     <div class="card" id="ph1-card" style="margin-top:14px">
       <div class="card-title" style="gap:8px;flex-wrap:wrap">
@@ -13154,13 +13107,7 @@ function rmCapacity(bay){
 function rmCapSig(bay){return (bay.L||175)+'|'+bay.s.map(function(s){return rmSlotPlace(s)||'';}).sort().join(',');}
 
 // ---------- 幾何 ----------
-function rmSpan(bay){ // 佔用儲位數（含缺號）
-  if(bay.t==='柱'&&bay.pw)return bay.pw;
-  var m=/^(\d+)-(\d+)$/.exec(bay.r||'');
-  var sp=m?Math.abs(parseInt(m[2],10)-parseInt(m[1],10))+1:(/^\d+$/.test(bay.r||'')?1:1);
-  if(bay.t==='架'||bay.t==='待確認')sp=Math.max(sp,bay.s.length||1);
-  return sp;
-}
+// rmSpan 已刪（2026-08-13 死碼清理：無呼叫端）
 function rmUnitN(a){ // 每標準架的號碼數（號碼格線密度）：AB/C/D=6、E=5（E08/E09=6）、F=5
   if(a==='E08'||a==='E09')return 6;
   return ({A:6,B:6,C:6,D:6,E:5,F:5})[a.charAt(0)]||6;
