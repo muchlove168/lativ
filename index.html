@@ -10023,8 +10023,10 @@ function renderXXTable(zone,rows,defaultCapacity){
   document.getElementById(`${pre}-total-ungrab`).textContent=num(totalUngrab);document.getElementById(`${pre}-total-stock`).textContent=num(totalStock);document.getElementById(`${pre}-total-shelf`).textContent=num(totalShelf);document.getElementById(`${pre}-total-vol`).textContent=totalVol.toFixed(2);document.getElementById(`${pre}-total-sku`).textContent=num(totalSKU);
 }
 // ★ 2026-08-13 匯出 XX/TX 區統計報表 — 彙總邏輯與 renderXXTable 完全一致，確保匯出數字＝畫面數字
-//   Sheet1 儲位統計（同畫面表格：區域/儲位/未抓貨/銷售庫存/架上數量/商品材積/剩餘材積/使用率/SKU數/狀態 + 合計）
-//   Sheet2 SKU明細（同畫面展開列：儲位/區域/商品編號/商品名稱/顏色/尺寸/架上數量/單品材積/材積小計）
+//   Sheet1 儲位統計（區域/儲位/未抓貨/銷售庫存/架上數量/剩餘材積/使用率/SKU數 + 合計）
+//   Sheet2 SKU明細（儲位/區域/商品編號/商品名稱/顏色/尺寸/架上數量/單品材積/材積小計）
+//   ★ 區域欄 carry-forward：範圍外儲位沿用上一個有效標籤 → 對應畫面「分隔列只在標籤變動時插入」的視覺分組
+//     （例：TX-161~184 落在配件區 111~154 之後、無獨立設定 → 畫面上接在配件區底下、匯出亦繼承配件區）
 function exportXXZoneReport(zone){
   if(!XX_DB||!XX_DB.length){alert('尚未上傳 XX/TX 報表，無可匯出資料');return;}
   const rows=XX_DB.filter(r=>r.儲位.startsWith(zone+'-'));
@@ -10040,36 +10042,55 @@ function exportXXZoneReport(zone){
   // 區域標籤（衣服區/配件區），同 renderXXTable getZoneLabel
   const inRange=(loc,range)=>{const n=parseInt(loc.split('-')[1]);const s=parseInt(range[0].split('-')[1]);const e=parseInt(range[1].split('-')[1]);return n>=s&&n<=e;};
   const getZoneLabel=(loc)=>{const config=XX_ZONE_CONFIG[zone];if(!config)return'';const clothes=Array.isArray(config.clothes[0])?config.clothes:[config.clothes];const acc=Array.isArray(config.accessories[0])?config.accessories:[config.accessories];for(const r of clothes)if(inRange(loc,r))return'衣服區';for(const r of acc)if(inRange(loc,r))return'配件區';return'';};
-  // Sheet1: 儲位統計
-  const sum=[['區域','儲位','未抓貨','銷售庫存','架上數量','商品材積','剩餘材積','使用率(%)','SKU數','狀態']];
-  let tU=0,tS=0,tSh=0,tV=0,tSKU=0;
+  // ★ carry-forward：範圍外儲位繼承上一個有效標籤（對應畫面分隔列語意）；先算好每儲位最終區域
+  const zoneOf={};let _lastZone='';
+  locs.forEach(loc=>{const z=getZoneLabel(loc);if(z)_lastZone=z;zoneOf[loc]=_lastZone;});
+  // Sheet1: 儲位統計（移除「商品材積」「狀態」欄）
+  const sum=[['區域','儲位','未抓貨','銷售庫存','架上數量','剩餘材積','使用率(%)','SKU數']];
+  let tU=0,tS=0,tSh=0,tSKU=0;
   locs.forEach(locCode=>{
     const loc=byLoc[locCode];
     const capacity=XX_CAPACITY[locCode]||defaultCapacity;
     const remain=capacity-loc.vol;const usage=capacity>0?(loc.vol/capacity*100):0;const skuCount=loc.skus.length;
-    let status='🟢 正常';if(usage>=90)status='🔴 滿載';else if(usage>=60)status='🟡 偏高';
-    tU+=loc.ungrab;tS+=loc.stock;tSh+=loc.shelf;tV+=loc.vol;tSKU+=skuCount;
-    sum.push([getZoneLabel(locCode),locCode,loc.ungrab,loc.stock,loc.shelf,+loc.vol.toFixed(2),+remain.toFixed(2),+usage.toFixed(1),skuCount,status]);
+    tU+=loc.ungrab;tS+=loc.stock;tSh+=loc.shelf;tSKU+=skuCount;
+    sum.push([zoneOf[locCode],locCode,loc.ungrab,loc.stock,loc.shelf,+remain.toFixed(2),+usage.toFixed(1),skuCount]);
   });
-  sum.push(['','合計',tU,tS,tSh,+tV.toFixed(2),'','',tSKU,'']);
+  sum.push(['','合計',tU,tS,tSh,'','',tSKU]);
   // Sheet2: SKU明細（同畫面展開列順序：先儲位排序、儲位內照原始上傳序）
   const det=[['儲位','區域','商品編號','商品名稱','顏色','尺寸','架上數量','單品材積','材積小計']];
   locs.forEach(locCode=>{
-    const zl=getZoneLabel(locCode);
+    const zl=zoneOf[locCode];
     byLoc[locCode].skus.forEach(item=>{
       det.push([locCode,zl,item.商品編號,item.商品名稱,item.顏色,item.尺寸,item.架上數量,+item.商品材積.toFixed(2),+(item.商品材積*item.架上數量).toFixed(2)]);
     });
   });
+  // ★ 全部儲存格置中 + 表頭樣式（沿用 exportDBFiltered 樣式模式，xlsx-js-style 支援）
+  const thinB={style:'thin',color:{rgb:'000000'}};const allB={top:thinB,bottom:thinB,left:thinB,right:thinB};const medB={style:'medium',color:{rgb:'000000'}};
+  const styleSheet=ws=>{
+    const range=XLSX.utils.decode_range(ws['!ref']||'A1');
+    for(let R=range.s.r;R<=range.e.r;R++)for(let C=range.s.c;C<=range.e.c;C++){
+      const addr=XLSX.utils.encode_cell({r:R,c:C});if(!ws[addr])continue;
+      ws[addr].s={
+        alignment:{horizontal:'center',vertical:'center'},
+        border:R===0?{...allB,bottom:medB}:allB,
+        font:R===0?{bold:true,name:'Microsoft JhengHei',sz:11}:{name:'Microsoft JhengHei',sz:11},
+        ...(R===0?{fill:{patternType:'solid',fgColor:{rgb:'F2EDE8'}}}:{})
+      };
+    }
+    if(!ws['!sheetViews'])ws['!sheetViews']=[{}];ws['!sheetViews'][0].showGridLines=false;
+  };
   const wb=XLSX.utils.book_new();
   const ws1=XLSX.utils.aoa_to_sheet(sum);
-  ws1['!cols']=[{wch:8},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:9},{wch:7},{wch:9}];
+  ws1['!cols']=[{wch:8},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:7}];
+  styleSheet(ws1);
   XLSX.utils.book_append_sheet(wb,ws1,`${zone}區儲位統計`);
   const ws2=XLSX.utils.aoa_to_sheet(det);
   ws2['!cols']=[{wch:10},{wch:8},{wch:14},{wch:30},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9}];
+  styleSheet(ws2);
   XLSX.utils.book_append_sheet(wb,ws2,`${zone}區SKU明細`);
   const d=new Date();const pad=n=>String(n).padStart(2,'0');
   const ts=`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  XLSX.writeFile(wb,`${zone}區統計_${ts}.xlsx`);
+  XLSX.writeFile(wb,`${zone}區統計_${ts}.xlsx`,{bookSST:false,cellStyles:true});
 }
 function toggleXXDetail(td,locCode){
   const tr=td.parentElement;const nextTr=tr.nextElementSibling;
