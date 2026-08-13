@@ -490,6 +490,7 @@
           <th>顏色數</th><th>尺寸段</th>
           <th class="sortable-th" onclick="sortFW26('包裝耗材')">包裝耗材 ⇅</th>
           <th class="sortable-th" onclick="sortFW26('類別')">類別 ⇅</th>
+          <th>倉位</th>
           <th>狀態</th>
         </tr></thead><tbody></tbody></table></div>
       </div>
@@ -645,30 +646,9 @@
     <div style="font-size:15px;font-weight:700;color:var(--accent);margin-bottom:10px;letter-spacing:1px">▼ XX/TX 區統計</div>
     <div class="card" style="margin-bottom:16px">
       <div class="card-title">
-        <span class="dot"></span>XX區統計（1F零碼區）
-        <button onclick="showXXZoneConfig('XX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
-      </div>
-      <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
-        <table id="tbl-xx">
-          <thead style="position:sticky;top:0"><tr>
-            <th onclick="sortXXTable('XX','loc')">儲位</th><th onclick="sortXXTable('XX','ungrab')">未抓貨</th>
-            <th onclick="sortXXTable('XX','stock')">銷售庫存</th><th onclick="sortXXTable('XX','shelf')">架上數量</th>
-            <th onclick="sortXXTable('XX','vol')">商品材積</th><th onclick="sortXXTable('XX','remain')">剩餘材積</th>
-            <th onclick="sortXXTable('XX','usage')">使用率</th><th onclick="sortXXTable('XX','sku')">SKU數</th><th>狀態</th>
-          </tr></thead>
-          <tbody></tbody>
-          <tfoot><tr class="total-row">
-            <td style="text-align:left!important">合計</td>
-            <td id="xx-total-ungrab">—</td><td id="xx-total-stock">—</td><td id="xx-total-shelf">—</td>
-            <td id="xx-total-vol">—</td><td>—</td><td>—</td><td id="xx-total-sku">—</td><td>—</td>
-          </tr></tfoot>
-        </table>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">
         <span class="dot"></span>TX區統計（2F零碼區）
-        <button onclick="showXXZoneConfig('TX')" style="margin-left:auto;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+        <button onclick="exportXXZoneReport('TX')" style="margin-left:auto;background:var(--accent);border:none;color:#fff;border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">📥 匯出統計報表</button>
+        <button onclick="showXXZoneConfig('TX')" style="margin-left:8px;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
       </div>
       <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
         <table id="tbl-tx">
@@ -683,6 +663,29 @@
             <td style="text-align:left!important">合計</td>
             <td id="tx-total-ungrab">—</td><td id="tx-total-stock">—</td><td id="tx-total-shelf">—</td>
             <td id="tx-total-vol">—</td><td>—</td><td>—</td><td id="tx-total-sku">—</td><td>—</td>
+          </tr></tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">
+        <span class="dot"></span>XX區統計（1F零碼區）
+        <button onclick="exportXXZoneReport('XX')" style="margin-left:auto;background:var(--accent);border:none;color:#fff;border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600">📥 匯出統計報表</button>
+        <button onclick="showXXZoneConfig('XX')" style="margin-left:8px;background:var(--surface);border:1px solid var(--border);color:var(--text2);border-radius:4px;padding:3px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">⚙ 設定儲位配置</button>
+      </div>
+      <div class="tbl-wrap" style="max-height:600px;overflow-y:auto">
+        <table id="tbl-xx">
+          <thead style="position:sticky;top:0"><tr>
+            <th onclick="sortXXTable('XX','loc')">儲位</th><th onclick="sortXXTable('XX','ungrab')">未抓貨</th>
+            <th onclick="sortXXTable('XX','stock')">銷售庫存</th><th onclick="sortXXTable('XX','shelf')">架上數量</th>
+            <th onclick="sortXXTable('XX','vol')">商品材積</th><th onclick="sortXXTable('XX','remain')">剩餘材積</th>
+            <th onclick="sortXXTable('XX','usage')">使用率</th><th onclick="sortXXTable('XX','sku')">SKU數</th><th>狀態</th>
+          </tr></thead>
+          <tbody></tbody>
+          <tfoot><tr class="total-row">
+            <td style="text-align:left!important">合計</td>
+            <td id="xx-total-ungrab">—</td><td id="xx-total-stock">—</td><td id="xx-total-shelf">—</td>
+            <td id="xx-total-vol">—</td><td>—</td><td>—</td><td id="xx-total-sku">—</td><td>—</td>
           </tr></tfoot>
         </table>
       </div>
@@ -770,8 +773,8 @@ async function rfCalLoad(){
 async function rfCalSave(){try{await idbPut(RF_CAL_KEY,RF_CAL);}catch(e){}}
 // 手動重置（console 呼叫）：rfResetCalibration()
 function rfResetCalibration(){RF_CAL={ver:1,updated:'',aisles:{}};rfCalSave().then(()=>{try{RELEASE_FORECAST=null;rfEnsure(true);}catch(e){}});console.log('[釋放校正] 已重置，將於下次建置重新累積');}
-function rfLoadPrefs(){try{const a=parseInt(localStorage.getItem('lativ_rf_days'));if(a>0)RF_DAYS=a;const b=parseInt(localStorage.getItem('lativ_rf_window'));if(b>=3)RF_WINDOW=b;const c=parseFloat(localStorage.getItem('lativ_rf_return'));if(c>=0&&c<0.9)RF_RETURN_RATE=c;}catch(e){}}
-function rfSavePrefs(){try{localStorage.setItem('lativ_rf_days',String(RF_DAYS));localStorage.setItem('lativ_rf_window',String(RF_WINDOW));localStorage.setItem('lativ_rf_return',String(RF_RETURN_RATE));}catch(e){}}
+function rfLoadPrefs(){try{const a=parseInt(localStorage.getItem('lativ_rf_days'));if(a>0)RF_DAYS=a;const c=parseFloat(localStorage.getItem('lativ_rf_return'));if(c>=0&&c<0.9)RF_RETURN_RATE=c;}catch(e){}}  // ★2026-08-13 W 寫死 14：不再讀 lativ_rf_window（殘留舊值不得覆蓋）
+function rfSavePrefs(){try{localStorage.setItem('lativ_rf_days',String(RF_DAYS));localStorage.setItem('lativ_rf_return',String(RF_RETURN_RATE));}catch(e){}}
 // 調整退貨率緩衝（console：rfSetReturnRate(0.10) 代表 10%）→ 立即重算釋放預測
 function rfSetReturnRate(r){RF_RETURN_RATE=Math.max(0,Math.min(0.5,+r||0));rfSavePrefs();RELEASE_FORECAST=null;try{rfEnsure(true);}catch(e){}console.log('[釋放預測] 退貨率緩衝已設為 '+Math.round(RF_RETURN_RATE*100)+'%，重新計算中');}
 
@@ -785,13 +788,23 @@ let XX_ZONE_CONFIG = {
 const XX_DEFAULT_CAPACITY = 2.2;
 const TX_DEFAULT_CAPACITY = 2.4;
 
-const SS_PFX = ['64','65','68','69','72','73'];
-const FW_PFX = ['66','67','70','71','74','75'];
-const SEASON_ORDER = [
-  {label:'26FW',pfx:['74','75']},{label:'26SS',pfx:['72','73']},
-  {label:'25FW',pfx:['70','71']},{label:'25SS',pfx:['68','69']},
-  {label:'24FW',pfx:['66','67']},{label:'24SS',pfx:['64','65']},
-];
+// ★ 2026-08-13 D案（年度滾動）：季別改由公式自動生成，毋須每年手動加新季。
+//   規律（24SS 起穩定）：前綴每季 +2；24SS=64/65、24FW=66/67…26FW=74/75 → 27SS=76/77、27FW=78/79…
+//   生成範圍到「系統年份+1」的 FW（頁面每次載入以當下年份重算，跨年自動延伸）。
+//   23SS(62/63) 之前的編號規律不同 → 不納入公式，維持既有特例處理（getSeasonFromCode 的 xx 標籤等）。
+const SEASON_GEN=(()=>{
+  const list=[];const maxYear=new Date().getFullYear()+1;
+  for(let y=2024;y<=maxYear;y++){
+    for(let s=0;s<2;s++){                       // s: 0=SS, 1=FW
+      const p=64+((y-2024)*2+s)*2;
+      list.push({label:String(y%100)+(s===0?'SS':'FW'),pfx:[String(p),String(p+1)]});
+    }
+  }
+  return list;                                   // 舊→新
+})();
+const SS_PFX = SEASON_GEN.filter(s=>s.label.endsWith('SS')).map(s=>s.pfx).flat();
+const FW_PFX = SEASON_GEN.filter(s=>s.label.endsWith('FW')).map(s=>s.pfx).flat();
+const SEASON_ORDER = SEASON_GEN.slice().reverse();   // 新→舊（getXXStatus/rfIsNextSeason 依相對序判斷，維持語意）
 
 let AISLE_CONFIG = {
   g1:[
@@ -834,6 +847,14 @@ let SEASON_PROGRESS_DATA = [
   {season:'24SS',totalShipment:13716174,pfx:['64','65']},
   {season:'23SS',totalShipment:13025769,pfx:['62','63']},
 ];
+// ★ 2026-08-13 D案：依 SEASON_ORDER 自動補上新季列（totalShipment:0、可雙擊編輯後由 lativ_manual_edits
+//   依季標籤還原）。_auto 標記＝自動補的列，在 renderSeasonProgress 中「無出貨額且無庫存」時隱藏，
+//   避免 27SS/27FW 提前佔版面；一旦有庫存或填了出貨額即自動顯示。既有列（含 23SS）順序照舊保留。
+SEASON_PROGRESS_DATA=(()=>{
+  const gen=SEASON_ORDER.map(s=>SEASON_PROGRESS_DATA.find(x=>x.season===s.label)||{season:s.label,totalShipment:0,pfx:s.pfx.slice(),_auto:true});
+  SEASON_PROGRESS_DATA.forEach(x=>{if(!gen.find(g=>g.season===x.season))gen.push(x);});
+  return gen;
+})();
 let SS26_NO_POS_STOCK = 0;
 let FW26_NO_POS_STOCK = 0;
 
@@ -892,7 +913,7 @@ function getPackagingRule(packagingName) {
 // ============================================================
 function pct(v){return isNaN(v)||!isFinite(v)?'—':(v*100).toFixed(1)+'%';}
 function num(v){return (v||0).toLocaleString();}
-function numF(v,d=2){return (v||0).toFixed(d);}
+// numF 已刪（2026-08-13 死碼清理：無呼叫端）
 function setText(id,val){const el=document.getElementById(id);if(el)el.textContent=val;}
 function showLoading(msg){document.getElementById('loading-msg').textContent=msg;document.getElementById('loading').classList.add('show');}
 function hideLoading(){document.getElementById('loading').classList.remove('show');}
@@ -900,9 +921,10 @@ function hideLoading(){document.getElementById('loading').classList.remove('show
 function getSeasonFromCode(code){
   if(!code||code.length<2)return'其他';
   const n=parseInt(code.substring(0,2));
-  if(n===74||n===75)return'26FW';if(n===72||n===73)return'26SS';
-  if(n===70||n===71)return'25FW';if(n===68||n===69)return'25SS';
-  if(n===66||n===67)return'24FW';if(n===64||n===65)return'24SS';
+  if(isNaN(n))return'其他';
+  // ★ 2026-08-13 D案：64(24SS) 起改公式推導（每季 +2），76→27SS、78→27FW…自動延伸。
+  //   64~75 的結果與舊版逐一比對完全相同（零回歸）；<64 維持舊行為（62→'62xx'）。
+  if(n>=64){const k=Math.floor((n-64)/2);const y=2024+Math.floor(k/2);return String(y%100)+(k%2===0?'SS':'FW');}
   if(n>=60)return String(n)+'xx';return'其他';
 }
 
@@ -992,7 +1014,7 @@ function switchTab(name){
   // ★ 儲位數據已併入儲區總覽 tab 底部：進入 sku tab 時一併刷新
   if(name==='sku'){try{renderSlotData();}catch(e){}try{refreshSidePanelCharts();}catch(e){}}
   if(name==='rackmap'){rmBoot();return;}
-  if(name==='compare'){renderSalesCompare();return;}
+  if(name==='compare'){renderSalesCompare();try{renderRollupTrend();}catch(e){}return;}
   if(DB.length>0&&DIRTY[name]){
     if(name==='sku')renderSKUTables();
     if(name==='sales'){renderAllSalesZones();renderRegionTable();renderSeasonSalesTable();renderSalesStats();renderSeasonProgress();}
@@ -1104,7 +1126,7 @@ function openIDB(){return new Promise((resolve,reject)=>{const req=indexedDB.ope
 function idbPut(key,value){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).put(value,key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
 function idbGet(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readonly');const req=tx.objectStore(IDB_STORE).get(key);req.onsuccess=()=>{db.close();resolve(req.result);};req.onerror=()=>{db.close();reject(req.error);};}));}
 function idbDel(key){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).delete(key);tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
-function idbClear(){return openIDB().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(IDB_STORE,'readwrite');tx.objectStore(IDB_STORE).clear();tx.oncomplete=()=>{db.close();resolve();};tx.onerror=()=>{db.close();reject(tx.error);};}));}
+// idbClear 已刪（2026-08-13 死碼清理：無呼叫端；清資料走各功能的清除/匯入）
 function idbKeys(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly');var rq=tx.objectStore(IDB_STORE).getAllKeys();rq.onsuccess=function(){db.close();resolve(rq.result||[]);};rq.onerror=function(){db.close();reject(rq.error);};});});}
 function idbDumpAll(){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readonly'),os=tx.objectStore(IDB_STORE),out={};var kr=os.getAllKeys();kr.onsuccess=function(){var keys=kr.result||[];var vr=os.getAll();vr.onsuccess=function(){var vals=vr.result||[];for(var i=0;i<keys.length;i++)out[keys[i]]=vals[i];db.close();resolve(out);};vr.onerror=function(){db.close();reject(vr.error);};};kr.onerror=function(){db.close();reject(kr.error);};});});}
 function idbRestoreAll(obj){return openIDB().then(function(db){return new Promise(function(resolve,reject){var tx=db.transaction(IDB_STORE,'readwrite'),os=tx.objectStore(IDB_STORE);Object.keys(obj||{}).forEach(function(k){os.put(obj[k],k);});tx.oncomplete=function(){db.close();resolve();};tx.onerror=function(){db.close();reject(tx.error);};});});}
@@ -1669,18 +1691,7 @@ function editRfDays(g){
   input.onkeydown=e=>{if(e.key==='Enter')input.blur();};
   span.innerHTML='';span.appendChild(input);input.focus();input.select();
 }
-function editRfWindow(){
-  const span=document.getElementById('rf-w');if(!span)return;
-  const input=document.createElement('input');input.type='number';input.className='inline-edit';input.min='3';input.max='40';input.value=RF_WINDOW;
-  input.onblur=()=>{
-    const v=parseInt(input.value)||RF_WINDOW;const nw=Math.max(3,Math.min(40,v));
-    span.textContent=nw;
-    if(nw!==RF_WINDOW){RF_WINDOW=nw;rfSavePrefs();RELEASE_FORECAST=null;renderSKUTables();rfEnsure(true);}
-    else{rfSavePrefs();renderSKUTables();}
-  };
-  input.onkeydown=e=>{if(e.key==='Enter')input.blur();};
-  span.innerHTML='';span.appendChild(input);input.focus();input.select();
-}
+// editRfWindow 已刪（2026-08-13 Gordon 裁示：W 寫死 14、不提供編輯；#rf-w 元素早已自畫面移除）
 function rfRenderStatus(){
   const el=document.getElementById('rf-status');if(!el)return;
   const w=document.getElementById('rf-w');if(w&&!w.querySelector('input'))w.textContent=RF_WINDOW;
@@ -1996,7 +2007,7 @@ function renderRegionTable(){
 function renderSeasonSalesTable(){
   const tbody=document.querySelector('#tbl-season-sales tbody');if(!tbody)return;tbody.innerHTML='';
   let grandStock=0,grandUngrab=0,grandSku=0;
-  const seasonGroups=[{label:'26FW',pfxs:['74','75']},{label:'26SS',pfxs:['72','73']},{label:'25FW',pfxs:['70','71']},{label:'25SS',pfxs:['68','69']},{label:'24FW',pfxs:['66','67']},{label:'24SS',pfxs:['64','65']},{label:'23SS',pfxs:['62','63']}];
+  const seasonGroups=[...SEASON_ORDER.map(s=>({label:s.label,pfxs:s.pfx})),{label:'23SS',pfxs:['62','63']}];   // ★ 2026-08-13 D案：由 SEASON_ORDER 生成，自動含新季
   // SKU 數：依前綴歸季；比最新一季前綴更大者（如 76xx）併入最新一季（同原 renderSeasonSKUTable 邏輯）
   const skuCounts={};
   const newestMax=Math.max(...seasonGroups[0].pfxs.map(p=>parseInt(p)));
@@ -2148,6 +2159,8 @@ function renderSeasonProgress(){
   const tbody=document.querySelector('#tbl-season-progress tbody');if(!tbody)return;tbody.innerHTML='';
   SEASON_PROGRESS_DATA.forEach((s,idx)=>{
     const rows=[...(CACHE.bySeason[s.pfx[0]]||[]),...(CACHE.bySeason[s.pfx[1]]||[])];
+    // ★ 2026-08-13 D案：自動補的未來季（_auto）在「無出貨額且無任何庫存列」時隱藏，商品出現後自動顯示。
+    if(s._auto&&(s.totalShipment||0)===0&&rows.length===0)return;
     // ★ 2026-07-21 除錯：原本未進倉量直接取 Σ未到量，但 26SS/26FW 的未進倉量在「季別總表」是可手動覆寫的
     //   （SS26_NO_POS_STOCK / FW26_NO_POS_STOCK），兩張表各算各的 → 26FW 已售與側欄進倉進度對不起來。
     //   改為統一走 seasonUndelivered()：26SS/26FW 用可覆寫值，其餘季別仍＝Σ未到量。
@@ -2178,7 +2191,7 @@ function loadManualEdits(){
 // ★ 2026-07-21 儲區總覽側欄三圓形圖表：進倉進度 / 儲位使用率 / 各類別 SKU 佔比
 // ============================================================
 // 季別排序鍵：年份*10 + (SS=1, FW=2)；26SS=261、26FW=262、27SS=271…
-function seasonKey(label){const y=parseInt(String(label).substring(0,2));const s=String(label).substring(2)==='SS'?1:2;return (isNaN(y)?0:y)*10+s;}
+// seasonKey 已刪（2026-08-13 死碼清理：唯一消費者 progressSeasonsList 一併移除）
 function seasonDisplayName(label){const y='20'+String(label).substring(0,2);return y+(String(label).substring(2)==='SS'?'春夏':'秋冬');}
 // 甜甜圈 SVG（p:0~1、色、中央文字）
 function _donutSVG(p,color,centerLabel){
@@ -2199,10 +2212,7 @@ function seasonUndelivered(label){
   if(typeof CACHE==='undefined'||!CACHE||!CACHE.bySeason)return 0;
   return pfx.reduce((sum,pk)=>sum+(CACHE.bySeason[pk]||[]).reduce((a,r)=>a+(r.未到量||0),0),0);
 }
-function progressSeasonsList(){
-  // 從 2026SS 開始（seasonKey>=261），最新季別排最前
-  return SEASON_PROGRESS_DATA.filter(s=>seasonKey(s.season)>=261).sort((a,b)=>seasonKey(b.season)-seasonKey(a.season));
-}
+// progressSeasonsList 已刪（2026-08-13 死碼清理：無呼叫端）
 // ★ 2026-07-21：新品 SKU 進倉進度單一資料源 —— 與 26FW tab 統計列（fw-total / fw-arrived / fw-pending）完全同源
 //   total   = 新品清單筆數（FW26_FILTER_DATA）
 //   arrived = 商品編號已出現在 EPR 資料庫（DB）者
@@ -2337,6 +2347,12 @@ let ARRANGE_DATA = [];
 // 儲位調整建議 tab
 let AISLE_REPORT_DATA = [];   // 走道報表（庫存查詢 SKU 列表）
 let STORAGE_MASTER = {};       // 儲位總表 {sheetName: [{slot, layout}]}
+// ★ 2026-08-09 Gordon：臨時擺法走道（儲位總表「臨時」sheet）— 可用不同擺法安排的走道之替代 layout。
+//   PLN_TEMP_LAYOUT={slot:layout}（獨立存放、不進 STORAGE_MASTER，避免同 slot 重複汙染 cells）。
+//   PLN_TEMP_APPLY={aisle:true}：本次 Run 各走道是否採臨時擺法（Run 前由對話框設定，經 plnBuildState 覆寫 cell.layout →
+//   引擎 isAgAisle/isAllADest/detectCBType 自動判對型別、走對溢出邏輯；未選/非臨時走道零影響。引擎函式不需改。
+let PLN_TEMP_LAYOUT = {};
+let PLN_TEMP_APPLY = {};
 let FORECAST_DATA = [];
 
 // ============================================================
@@ -2367,53 +2383,8 @@ function onSingleDatePick(v){
   compareLoadStored(v);
 }
 
-async function handleCompareUpload(event){
-  const file=event.target.files[0]; if(!file)return;
-  if(!DB||!DB.length){
-    alert('請先在主頁面上傳當前的 ERP 報表，再上傳歷史報表進行比對。');
-    event.target.value='';
-    return;
-  }
-  showLoading('讀取歷史 ERP 報表中...');
-  try{
-    const buf=await file.arrayBuffer();
-    const wb=XLSX.read(buf,{type:'array'});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-    const raw=XLSX.utils.sheet_to_json(ws,{defval:''});
-    const validate=validateReportFormat(raw,['商品編號','商品名稱','儲位','銷售庫存','倉庫庫存'],'EPR 主報表');
-    if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
-
-    const rows=raw.map(r=>({
-      商品編號:String(r['商品編號']||'').trim(),
-      商品名稱:r['商品名稱']||'',
-      顏色:r['顏色']||'',
-      尺寸:r['尺寸']||'',
-      儲位:r['儲位']||'',
-      銷售庫存:+r['銷售庫存']||0,
-      倉庫庫存:+r['倉庫庫存']||0,
-      未到量:+r['未到量']||0,
-      未抓貨:+r['未抓貨']||0,
-      可賣數量:+r['可賣數量']||0,
-      保留數量:+r['保留數量']||0,
-      總進貨量:+r['總進貨量']||0,
-      總採購量:+r['總採購量']||0,
-    })).filter(r=>r.商品編號);
-
-    // 從檔名中嘗試抓取日期（檔名格式可能含 YYYYMMDD）
-    let detectedDate='';
-    const m=file.name.match(/(\d{8})|(\d{4}-\d{2}-\d{2})|(\d{4}\/\d{2}\/\d{2})/);
-    if(m)detectedDate=m[0];
-
-    COMPARE_OLD_DATA={date:detectedDate||file.name,rows,fileName:file.name};
-    try{await idbPut('compare_old',COMPARE_OLD_DATA);}catch(e){}
-    document.getElementById('compare-status').textContent=`歷史報表：${file.name}（${rows.length.toLocaleString()} 筆）`;
-    document.getElementById('compare-clear-btn').style.display='inline-flex';
-    hideLoading();
-    renderSalesCompare();
-  }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
-  event.target.value='';
-}
-
+// handleCompareUpload 已刪（2026-08-13 死碼清理：手動上傳歷史 Excel 已被「選日期下拉／兩日期區間」取代，UI 入口早已移除）。
+// 歷史報表欄位需求（含 總進貨量/總採購量）見 histEprToCompareRows。
 async function clearCompareData(){
   if(!confirm('確定要清除歷史 ERP 報表？'))return;
   COMPARE_OLD_DATA=null;
@@ -2427,104 +2398,16 @@ async function clearCompareData(){
 }
 
 // ════════════════════════════════════════════════════════════
-// ★ 2026-07-25 Gordon #4：出貨統計匯入 ＋ 兩日期區間銷售對比
-//   目的：每天一早的 ERP SKU 總表(庫存快照)推導的期間銷售，會被「進貨誤差」干擾；
-//         用實打實的「匯出出貨統計」逐日出貨量去對照，擋住這些誤差、看真實銷售件數。
+// ★ 2026-07-25 Gordon #4（部分保留）：兩日期區間銷售對比
 //   ‧ 兩個日期都可從系統已存日期挑（不再限「已存日 → 當前」）。
-//   ‧ 出貨統計每日銷售量(Gordon 定義) = 店配完成數量(當日)件數 + 宅配件數 + 前一日 店配完成數量(預做隔日)件數
-//     （現場當天宅配(下午)出完後，下班前會先預做隔天上午的店配 → 那批算前一天的產出）
-//   ‧ 區間[起始,結束) 實際銷售 = Σ 各日銷售量（D 從起始日到結束日前一天；對應兩份晨間快照間的庫存下降）。
+//   ★ 2026-08-13 移除「出貨統計匯入」半邊（Gordon 裁示：該功能先前已刻意下架、UI 入口早已移除）：
+//     SHIPMENT_STATS / shipmentParseAoa / shipmentPrevDay / shipmentWindowTotal / periodSoldTotal /
+//     handleShipmentUpload / loadShipmentStats / renderShipmentStatus 已刪。
+//     若日後要重建，出貨統計每日銷售量(Gordon 定義) = 店配完成數量(當日)件數 + 宅配件數
+//     + 前一日 店配完成數量(預做隔日)件數；區間[起,迄) 銷售 = Σ 各日（迄不含）。
+//     舊 idb key 'shipment_stats' 殘值不主動清除（無載入點、無害）。
 //   ════════════════════════════════════════════════════════════
-let SHIPMENT_STATS=null;   // {rows:{'YYYY-MM-DD':{storeToday,home,prepickNext}}, dates:[...], months:[...]}
 
-// 出貨統計 xlsx → aoa(header:1) → 逐日 map。以表頭雙列文字定位欄位（抗欄位位移）。
-function shipmentParseAoa(aoa){
-  if(!aoa||aoa.length<3)return {rows:{},dates:[]};
-  const row0=aoa[0]||[],row1=aoa[1]||[];
-  const findGroup=(label)=>{for(let c=0;c<row0.length;c++){if(String(row0[c]||'').replace(/\s/g,'')===label)return c;}return -1;};
-  // 各群組件數欄＝群組起始欄 +1（子欄序：包裹數,件數,…）
-  const gToday=findGroup('店配完成數量(當日)');
-  const gHome=findGroup('宅配');
-  const gPre=findGroup('店配完成數量(預做隔日)');
-  const cToday=gToday>=0?gToday+1:13;   // fallback：已驗證的固定索引
-  const cHome=gHome>=0?gHome+1:15;
-  const cPre=gPre>=0?gPre+1:21;
-  const rows={};const dates=[];
-  for(let i=2;i<aoa.length;i++){
-    const r=aoa[i]||[];const dcell=String(r[0]||'').trim();
-    const md=dcell.match(/^(\d{4}-\d{2}-\d{2})/);
-    if(!md)continue;            // 跳過「合計」「平均」等非日期列
-    const d=md[1];
-    const n=(x)=>{const v=+x;return isFinite(v)?v:0;};   // '-'／空 → 0
-    rows[d]={storeToday:n(r[cToday]),home:n(r[cHome]),prepickNext:n(r[cPre])};
-    dates.push(d);
-  }
-  dates.sort();
-  return {rows,dates,cols:{cToday,cHome,cPre}};
-}
-// 前一日 YYYY-MM-DD
-function shipmentPrevDay(d){const t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()-1);return t.toISOString().slice(0,10);}
-// 區間[start,end) 出貨統計實際銷售總量。start<end，皆 YYYY-MM-DD。
-function shipmentWindowTotal(rows,start,end){
-  if(!rows||!start||!end||start>=end)return {total:0,days:[],missing:[],perDay:[]};
-  let total=0;const days=[],missing=[],perDay=[];
-  const cur=new Date(start+'T00:00:00Z');const endD=new Date(end+'T00:00:00Z');
-  while(cur<endD){
-    const d=cur.toISOString().slice(0,10);
-    const today=rows[d];const prev=rows[shipmentPrevDay(d)];
-    if(!today){missing.push(d);}
-    const v=(today?(today.storeToday+today.home):0)+(prev?prev.prepickNext:0);
-    total+=v;days.push(d);perDay.push({date:d,sold:v,hasData:!!today});
-    cur.setUTCDate(cur.getUTCDate()+1);
-  }
-  return {total,days,missing,perDay};
-}
-// 兩份晨間快照(earlier→later)間的 ERP 推導期間銷售（沿用銷售比對公式）。
-function periodSoldTotal(startRows,endRows){
-  const sMap={},eMap={};
-  (startRows||[]).forEach(r=>{sMap[r.商品編號]=r;});
-  (endRows||[]).forEach(r=>{eMap[r.商品編號]=r;});
-  const codes=new Set([...Object.keys(sMap),...Object.keys(eMap)]);
-  let total=0;
-  codes.forEach(code=>{
-    const s=sMap[code],e=eMap[code];
-    const sSell=s?(+s.銷售庫存||0):0,sPur=s?(+s.總進貨量||0):0;
-    const eSell=e?(+e.銷售庫存||0):0,ePur=e?(+e.總進貨量||0):0;
-    let sold;
-    if(s&&!e)sold=sSell;                       // 期末已下架 → 以期初銷售庫存為上限
-    else sold=(sSell-eSell)+(ePur-sPur);       // 標準：庫存下降 + 期間進貨
-    if(sold>0)total+=sold;
-  });
-  return total;
-}
-
-async function handleShipmentUpload(event){
-  const file=event.target.files[0];if(!file){return;}
-  showLoading('讀取出貨統計中...');
-  try{
-    const buf=await file.arrayBuffer();
-    const wb=XLSX.read(buf,{type:'array'});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-    const aoa=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    const parsed=shipmentParseAoa(aoa);
-    if(!parsed.dates.length){hideLoading();alert('讀不到出貨統計的日期列（請確認是「匯出出貨統計」報表）');event.target.value='';return;}
-    const months=[...new Set(parsed.dates.map(d=>d.slice(0,7)))].sort();
-    SHIPMENT_STATS={rows:parsed.rows,dates:parsed.dates,months};
-    try{await idbPut('shipment_stats',SHIPMENT_STATS);}catch(e){}
-    hideLoading();
-    renderShipmentStatus();
-    try{intervalRefreshAvailability();}catch(e){}
-    alert(`✓ 已匯入出貨統計\n\n涵蓋 ${parsed.dates.length} 天：${parsed.dates[0]} ～ ${parsed.dates[parsed.dates.length-1]}\n月份：${months.join('、')}`);
-  }catch(e){hideLoading();alert('讀取失敗：'+e.message);}
-  event.target.value='';
-}
-async function loadShipmentStats(){try{const s=await idbGet('shipment_stats');if(s&&s.rows)SHIPMENT_STATS=s;}catch(e){}}
-function renderShipmentStatus(){
-  const el=document.getElementById('ship-status');if(!el)return;
-  if(!SHIPMENT_STATS||!SHIPMENT_STATS.dates.length){el.textContent='尚未匯入出貨統計';el.style.color='var(--text3)';return;}
-  const d=SHIPMENT_STATS.dates;
-  el.innerHTML=`已匯入 <b>${d.length}</b> 天出貨統計（${d[0]} ～ ${d[d.length-1]}）`;el.style.color='var(--green)';
-}
 // 兩個日期下拉：填入系統已存日期
 function intervalRefreshAvailability(){
   const s=document.getElementById('iv-start'),e=document.getElementById('iv-end');
@@ -2616,6 +2499,7 @@ function renderSalesCompare(){
     const oldOrdered=old?(+old.總採購量||0):0;
     const curSell=cur?(+cur.銷售庫存||0):0;
     const curPending=cur?(+cur.未到量||0):0;
+    const curOrdered=cur?(+cur.總採購量||0):0;   // ★ 2026-08-13：補當前側總採購量（供「採購量減少」偵測）
     const curPurchased=cur?(+cur.總進貨量||0):0;
 
     // ★ 特例：當前已下架(查無) → 銷售 = 歷史 銷售庫存
@@ -2637,7 +2521,12 @@ function renderSalesCompare(){
       if(isSoldOutDelisted)remark.push('已下架(原庫存已售完)');
       else remark.push('已下架');
     }
-    if(old&&cur&&curPurchased<oldPurchased)remark.push('採購量減少');
+    // ★ 2026-08-13（Gordon 說明 ERP 語意後定案）：總採購量 ≈ 總進貨量＋未到量。
+    //   採購端/工廠端縮減剩餘訂單時，總採購量會下降（例：10000→8000）→ 這才是「採購量減少」的正確偵測，
+    //   比較 總採購量（oldOrdered vs curOrdered）。此備註不影響 sold 計算，純提醒該款後續到貨會比預期少。
+    //   另保留「進貨量減少(異常)」：總進貨量為累計實際進貨、正常不應倒退，倒退＝資料異常且會壓低 sold。
+    if(old&&cur&&curOrdered<oldOrdered)remark.push('採購量減少(訂單縮減)');
+    if(old&&cur&&curPurchased<oldPurchased)remark.push('進貨量減少(異常)');
 
     const ref=cur||old||{};
     // 儲位：優先用當前的（最新），其次用歷史的
@@ -2965,18 +2854,38 @@ function wkFcKey(r){
 function wkArrKey(r){return _wkN(r.code);}
 
 // 疊加合併（upsert）：同 key → 覆蓋，不同 key → 新增
-function wkMerge(archive,rows,keyFn,decorate){
-  const idx={};archive.forEach((r,i)=>{idx[r._key]=i;});
-  const dupInFile={};let added=0,updated=0;
+// ★2026-08-08 Gordon（貨櫃取消/改期案）：新增可選 inScope(archiveRec) predicate —— 傳入時對「本次上傳
+//   所涵蓋的權責範圍」做對帳：範圍內、但新報表已不存在的舊項目（取消/被換櫃/SKU縮水）一併移除；
+//   範圍外（別視窗別款）完全不動 → 保留原「跨週累積」設計（★2026-07-21），只補「消失項目」缺口。
+//   範圍定義：預告=報表實際日期欄視窗 [minCol,maxCol]（不用「週」，避免週跨視窗邊界誤刪視窗外貨櫃）；
+//            儲位安排=本次上傳出現過的款號前5碼集合。不傳 inScope → 行為與原本完全一致（純 upsert、不移除）。
+function wkMerge(archive,rows,keyFn,decorate,inScope){
+  // ① 先產生本次上傳的最終記錄（含檔內去重 key ~N 與 decorate），供對帳與 upsert 共用
+  const dupInFile={};const recs=[];
   rows.forEach(r=>{
     let k=keyFn(r);
     if(dupInFile[k]){dupInFile[k]++;k=k+'~'+dupInFile[k];}else dupInFile[k]=1;
     const rec=Object.assign({},r,{_key:k});
     if(decorate)decorate(rec);
-    if(idx[k]!=null){archive[idx[k]]=rec;updated++;}
-    else{idx[k]=archive.length;archive.push(rec);added++;}
+    recs.push(rec);
   });
-  return {added,updated};
+  // ② 權責範圍內對帳移除（僅在提供 inScope 時）：範圍內且新報表已無此 key → 移除
+  let removed=0;
+  if(typeof inScope==='function'){
+    const newKeys=new Set(recs.map(r=>r._key));
+    for(let i=archive.length-1;i>=0;i--){
+      const a=archive[i];
+      if(inScope(a)&&!newKeys.has(a._key)){archive.splice(i,1);removed++;}
+    }
+  }
+  // ③ upsert
+  const idx={};archive.forEach((r,i)=>{idx[r._key]=i;});
+  let added=0,updated=0;
+  recs.forEach(rec=>{
+    if(idx[rec._key]!=null){archive[idx[rec._key]]=rec;updated++;}
+    else{idx[rec._key]=archive.length;archive.push(rec);added++;}
+  });
+  return {added,updated,removed};
 }
 
 // 目前庫內有哪些週（新→舊，未定日期排最後）
@@ -3090,12 +2999,16 @@ async function handleArrangeUpload(event){
       arrival:String(r['貨到通知']||''),
     })).filter(r=>r.code);
     // ★2026-07-21 疊加：以商品編號 upsert 進 ARRANGE_ARCHIVE，不覆蓋前幾週已累積的 SKU 規格
+    // ★2026-08-08：權責範圍＝本次上傳出現過的款號前5碼；範圍內以新報表為準（同款換櫃/SKU縮水殘留 SKU 移除），
+    //   別款(其他週累積)不動。
     const _arrDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
-    const _am=wkMerge(ARRANGE_ARCHIVE,ARRANGE_DATA,wkArrKey,rec=>{rec._src=_arrDate;});
+    const _arrStyles=new Set(ARRANGE_DATA.map(r=>String(r.code||'').substring(0,5)).filter(Boolean));
+    const _am=wkMerge(ARRANGE_ARCHIVE,ARRANGE_DATA,wkArrKey,rec=>{rec._src=_arrDate;},
+      _arrStyles.size?(a=>_arrStyles.has(String(a.code||'').substring(0,5))):null);
     wkApplySelection();
     await wkPersist();
     try{localStorage.setItem('arrange_upload_date',_arrDate);}catch(e){}
-    document.getElementById('arrange-status').textContent=`儲位安排累積 ${ARRANGE_ARCHIVE.length} 筆（本次新增 ${_am.added} / 更新 ${_am.updated}；${_arrDate}）`;
+    document.getElementById('arrange-status').textContent=`儲位安排累積 ${ARRANGE_ARCHIVE.length} 筆（本次新增 ${_am.added} / 更新 ${_am.updated}${_am.removed?` / 移除 ${_am.removed}`:''}；${_arrDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     // ★ 2026-07-16 Gordon：儲位安排報表只是換一份待排清單，不是新一輪（新一輪由 EPR 報表觸發）
@@ -3141,15 +3054,23 @@ async function handleForecastUpload(event){
     // ★2026-07-21 疊加：同一貨櫃（採購單號|款號|櫃號|進口編號）重複匯入 → 覆蓋更新進倉日/箱數，不會重複出現
     const _fcDate=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
     const _ref=new Date();
+    // ★2026-08-08：權責範圍＝報表實際日期欄視窗 [minCol,maxCol]（不用「週」避免週跨視窗邊界誤刪）；
+    //   視窗內、新報表已無此貨櫃(取消/被換櫃)→移除；視窗外(更後面週次的既有貨櫃)保留。
+    const _dcols=Object.keys(raw[0]||{}).filter(k=>/^\d{1,2}\/\d{1,2}$/.test(String(k).trim()));
+    let _dymds=_dcols.map(d=>wkResolveYMD(d,_ref)).filter(Boolean);
+    if(!_dymds.length)_dymds=FORECAST_DATA.map(r=>wkResolveYMD(r.arrivalDate,_ref)).filter(Boolean); // fallback：日期欄標題偵測不到→用本次貨櫃日期範圍
+    _dymds.sort();
+    const _winMin=_dymds[0]||'', _winMax=_dymds[_dymds.length-1]||'';
+    const _inWin=(a)=>!!(_winMin&&a._ymd&&a._ymd>=_winMin&&a._ymd<=_winMax);
     const _fm=wkMerge(FORECAST_ARCHIVE,FORECAST_DATA,wkFcKey,rec=>{
       rec._ymd=wkResolveYMD(rec.arrivalDate,_ref);
       rec._week=rec._ymd?wkStart(rec._ymd):'';
       rec._src=_fcDate;
-    });
+    },_winMin?_inWin:null);
     wkApplySelection();
     await wkPersist();
     try{localStorage.setItem('forecast_upload_date',_fcDate);}catch(e){}
-    document.getElementById('forecast-status').textContent=`預告進貨累積 ${FORECAST_ARCHIVE.length} 筆／${wkWeeks().length} 週（本次新增 ${_fm.added} / 更新 ${_fm.updated}；${_fcDate}）`;
+    document.getElementById('forecast-status').textContent=`預告進貨累積 ${FORECAST_ARCHIVE.length} 筆／${wkWeeks().length} 週（本次新增 ${_fm.added} / 更新 ${_fm.updated}${_fm.removed?` / 移除 ${_fm.removed}`:''}；${_fcDate}）`;
     document.getElementById('arrange-clear-btn').style.display='inline-flex';
     hideLoading();
     // ★ 2026-07-16 Gordon：新的預告進貨表 → 已進倉/取消的款號要從待排新品佇列移除
@@ -3296,22 +3217,32 @@ function forecastBuildSelectedSkus(selection){
     const _s5=String(r.style||'').substring(0,5);
     if(_s5)groupToStyles[key].add(_s5);
   });
-  // 收集所有要納入的 款號 (前5碼) → 類別
-  const includeStyleCat={};  // style → cat
+  // ★ 2026-08-05 Gordon：同款不同尺寸可跨多類別（如 74208 小褲+童中袋）→ 過濾/標記一律用「9碼商品編號」
+  //   直接查 26FW 名單(SKU級)，不可用款號單一類別。否則勾「童中袋」會一筆都送不出（款號被記成小褲），
+  //   勾「小褲」又會把整款 42 筆含中袋一起抓走。fw26Lookup 查不到再回落款號層級 styleToCat。
+  const _selSkuCatOf=(code)=>{
+    const c=fw26Lookup[String(code||'').trim()];
+    if(c)return c;
+    return styleToCat[String(code||'').substring(0,5)]||'未匹配';
+  };
+  // 款號 → 該款出現的貨櫃所勾選的類別集合（跨多個選取合併）
+  const styleSelCats={};  // style → Set(選取類別)
   selection.forEach(sel=>{
     const styles=groupToStyles[sel.grpKey]||new Set();
     styles.forEach(st=>{
-      const cat=styleToCat[st]||'未匹配';
-      if(sel.cats.has(cat))includeStyleCat[st]=cat;
+      if(!styleSelCats[st])styleSelCats[st]=new Set();
+      sel.cats.forEach(c=>styleSelCats[st].add(c));
     });
   });
-  // 過濾 ARRANGE_DATA
+  // 過濾 ARRANGE_DATA — 以「該 SKU 真實類別」是否落在該款勾選類別集合為準
   // ★ 2026-07-16 Gordon：只留「待排」— ERP 儲位安排的「儲位」欄已填、或走道報表實況已在架上者
   //   一律排除，否則「匯出待排新品」/「傳送至儲位調整」會把 ERP 已排好的 SKU 再排一次。
   const _selPlacedIdx=plnBuildPlacedIndex();
   const rows=(ARRANGE_DATA||[]).filter(r=>{
     const st=String(r.code||'').substring(0,5);
-    if(!(st in includeStyleCat))return false;
+    const selCats=styleSelCats[st];
+    if(!selCats)return false;                         // 此款不在任何勾選的貨櫃
+    if(!selCats.has(_selSkuCatOf(r.code)))return false; // 此 SKU 的真實類別未被勾選
     return !plnIsPlacedCode(r.code,_selPlacedIdx);
   });
   // ★ 跨櫃 / ARRANGE_DATA 同 SKU 多筆 dedup: 保留首次出現的 row, 避免下游匯出/送 planner 重複
@@ -3326,19 +3257,20 @@ function forecastBuildSelectedSkus(selection){
   });
   const catLookup={};
   dedupedRows.forEach(r=>{
-    const st=String(r.code||'').substring(0,5);
-    catLookup[r.code]=includeStyleCat[st]||'';
+    catLookup[r.code]=_selSkuCatOf(r.code)||'';   // ★ 逐 SKU 真實類別（供匯出「類別」欄 + 送 planner 分群）
   });
-  return {rows:dedupedRows, includeStyleCat, catLookup};
+  return {rows:dedupedRows, styleSelCats, catLookup};
 }
 
 // 匯出待安排新品儲位報表 — 欄位: 商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 商品包材, 類別
+//   ★「預計倉位」直接以 26FW 新品報表的倉位（1F/3F/4F，依款號）覆蓋；未匹配的非 26FW 款號才保留原 ERP 值
 async function exportArrangeNewReport(){
   const selection=forecastCollectSelection();
   if(!selection.length){alert('請先勾選要匯出的櫃號或類別 (預告進貨明細左側 checkbox)');return;}
   if(!ARRANGE_DATA||!ARRANGE_DATA.length){alert('儲位安排報表尚未上傳, 無法匯出');return;}
   const {rows, catLookup}=forecastBuildSelectedSkus(selection);
   if(!rows.length){alert('勾選範圍內沒有可匯出的 SKU\n(可能該櫃內的款號未在儲位安排報表中)');return;}
+  buildFW26SlotLookup();  // ★ 以最新 26FW 名單建立款號→倉位
   // 按 (類別, 商品編號) 排序
   rows.sort((a,b)=>{
     const ca=catLookup[a.code]||'';
@@ -3349,7 +3281,7 @@ async function exportArrangeNewReport(){
   const cols=['商品編號','商品名稱','尺寸','儲位','材積','未到量','預計倉位','商品包材','類別'];
   const aoa=[cols];
   rows.forEach(r=>{
-    aoa.push([r.code,r.name,r.size,r.slot,r.volume||0,r.pending||0,r.plannedSlot||'',r.packaging||'',catLookup[r.code]||'']);
+    aoa.push([r.code,r.name,r.size,r.slot,r.volume||0,r.pending||0,fw26SlotOf(r.code)||(r.plannedSlot||''),r.packaging||'',catLookup[r.code]||'']);
   });
   const ws=XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:14},{wch:10}];
@@ -3422,21 +3354,8 @@ async function sendToPlannerFromForecast(){
 // ★ 儲位調整建議 TAB
 // ═══════════════════════════════════════════════════════
 // sheet 名稱正規化：全形→半形 + trim
-function plannerNormalizeSheetName(sn){
-  let s=String(sn||'').trim();
-  let out='';
-  for(let i=0;i<s.length;i++){
-    const code=s.charCodeAt(i);
-    out+=(code>=0xFF21&&code<=0xFF5A)?String.fromCharCode(code-0xFEE0):s[i];
-  }
-  return out;
-}
-// 取儲位前綴：E01-100-1 → E01, XX-011 → XX-, A03-001-3 → A03
-function plannerGetAislePrefix(slot){const s=String(slot||'').trim();return s.length>=3?s.substring(0,3):s;}
-// 走道 → 儲區字母（E01 → E, A03 → A, XX- → XX, TX- → TX）
-function plannerGetZoneLetter(prefix){const s=String(prefix||'');if(s.startsWith('XX')||s.startsWith('TX'))return s.substring(0,2);return s.charAt(0);}
-// Phase 1 主要 sheet 集合：A/B/C/D/E/F/L/M/P/XX
-function plannerIsPrimarySheet(normName){return ['A','B','C','D','E','F','L','M','P','XX'].includes(normName);}
+// plannerNormalizeSheetName/plannerGetAislePrefix/plannerGetZoneLetter/plannerIsPrimarySheet 已刪
+// （2026-08-13 死碼清理：早期儲位總表 sheet 解析工具，解析改寫後無呼叫端）
 
 async function handlePlannerAisleUpload(event){
   const file=event.target.files[0];if(!file)return;
@@ -3499,6 +3418,13 @@ async function handlePlannerMasterUpload(event){
         if(slots.length)sheets[sn]=slots;
       });
       if(!Object.keys(sheets).length){alert('儲位總表為空');return;}
+      // ★ 2026-08-09 Gordon：抽出「臨時」sheet → PLN_TEMP_LAYOUT（不進 STORAGE_MASTER，避免同 slot 重複）
+      PLN_TEMP_LAYOUT={};
+      if(sheets['臨時']){
+        (sheets['臨時']||[]).forEach(({slot,layout})=>{if(slot&&layout)PLN_TEMP_LAYOUT[slot]=String(layout).trim();});
+        delete sheets['臨時'];
+      }
+      try{await idbPut('planner_temp_layout',PLN_TEMP_LAYOUT);}catch(err){}
       STORAGE_MASTER=sheets;
       try{await idbPut('storage_master_sheets',sheets);}catch(err){}
       const today=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
@@ -4118,28 +4044,7 @@ const PLN_SPEC = {
 function plnSkuKuanSe(sku){return String(sku||'').substring(0,7);}
 function plnSkuKuan(sku){return String(sku||'').substring(0,5);}
 
-// 查相鄰同層儲位是否有同款色 SKU (cells 為實際 state 陣列)
-// ignoreCell 用於排除「正在被移走」的來源 cell，避免自我衝突
-function plnAdjConflictCount(cells,sku,cellId,ignoreCell){
-  // §1.3a 相鄰守則。層範圍政策集中於 PLN_SPEC_FLAGS.adjAllLayerForAdjust：
-  //   false(預設)＝同層(現行已驗證行為)；true＝整欄任一層(對齊規格鎖定)。
-  const p=plnParseCell(cellId);if(!p)return 0;
-  const ks=plnSkuKuanSe(sku);if(!ks)return 0;
-  const allLayer=PLN_SPEC_FLAGS.adjAllLayerForAdjust;
-  const layers=allLayer?[1,2,3,4]:[p.layer];
-  let cnt=0;
-  for(const dc of [-1,1]){
-    let hit=false;
-    for(const L of layers){
-      const nb=plnCellId(p.aisle,p.col+dc,L);
-      if(ignoreCell && nb===ignoreCell)continue;
-      const nc=cells.find(c=>c.cell===nb);
-      if(nc && nc.sku && plnSkuKuanSe(nc.sku)===ks){hit=true;break;}
-    }
-    if(hit)cnt++;
-  }
-  return cnt;
-}
+// plnAdjConflictCount 已刪（2026-08-13 死碼清理：相鄰守則已統一走 PLN_PRIM.adjConflict/adjConflictCount，本獨立舊版無呼叫端）
 
 // 同上但使用 Map<cellId, sku> (用於 greedy 過程中暫存的 state)
 function plnAdjConflictByMap(skuMap,sku,cellId){
@@ -4204,7 +4109,10 @@ function plnBuildState(){
   const cells={};
   Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(({slot,layout})=>{
     const p=plnParseCell(slot);if(!p)return;
-    cells[slot]={cell:slot,aisle:p.aisle,col:p.col,layer:p.layer,layout:layout||'',sku:null,info:null,locked:false};
+    // ★ 2026-08-09 Gordon：本次 Run 若該走道選用臨時擺法 → 以臨時 layout 覆寫（引擎自動改走對應溢出邏輯；未選/非臨時走道保持原 layout）
+    let _lay=layout||'';
+    if(PLN_TEMP_APPLY[p.aisle]&&PLN_TEMP_LAYOUT[slot]!==undefined)_lay=PLN_TEMP_LAYOUT[slot];
+    cells[slot]={cell:slot,aisle:p.aisle,col:p.col,layer:p.layer,layout:_lay,sku:null,info:null,locked:false};
   }));
   AISLE_REPORT_DATA.forEach(r=>{
     const c=String(r['儲位']||'').trim();
@@ -4513,20 +4421,13 @@ function plnAutoFitGroups(groups,C){
   if(!G||!(C>0))return empty;
   const sumAll=groups.reduce((s,g)=>s+g.size,0);
   const CAP=Math.min(C,sumAll);
-  // ★2026-08-13（Gordon C08 案）密度優先：填滿目標的整色組合有多組時，優先選「碎片最少」者。
-  //   舊式 cost=i*W+spill 以佇列序(index)為主鍵 → 會硬吃佇列最前的大款；若那是 5 尺寸色，
-  //   其溢出碼在「4 層欄」會留下填不滿的碎片，導致實排比空格少（C08：92 格只排入 90，
-  //   剩 172-4/173-4）。改以「碎片＝|尺寸-4|」為主鍵、佇列序為次鍵：4 尺寸色(剛好鋪滿一欄)
-  //   碎片=0 最優先，5 尺寸(多一碼溢出)與 3 尺寸(缺一層)同罰 → 自動選到能整齊鋪滿的整色組合
-  //   （C08 改選 6 款全 4 尺寸色、23 色×4＝92 完美填滿）。最高目標仍是「總和最大(best)」，
-  //   本鍵只在同總和的多組解間決定取捨，不影響容量。
-  const IDXMAX=G*G+1;                // 佇列序權重上限（Σindex < G²，確保碎片為主排序）
+  const W=4096;                      // 佇列序權重（>= 溢出碼總數上限，確保 index 為主排序）
   let prev=new Float64Array(CAP+1).fill(Infinity);prev[0]=0;
   const parent=[];
   for(let i=0;i<G;i++){
     const cur=Float64Array.from(prev);
     const pk=new Uint8Array(CAP+1);
-    const sz=groups[i].size, c=Math.abs(sz-4)*IDXMAX+i;   // 碎片(|尺寸-4|)為主、佇列序為次
+    const sz=groups[i].size, c=i*W+Math.max(0,sz-4);   // 溢出碼數 = 超過一欄(4層)的碼數
     for(let j=CAP;j>=sz;j--){
       const base=prev[j-sz];
       if(base===Infinity)continue;
@@ -4667,29 +4568,9 @@ function plnFindSkuCell(cells,sku,sourceAisles){
   return null;  // ★ 不再 fallback 到 C01，避免找到剛放置的 SKU
 }
 
-// ★ displacement 目的地: 只找 empty (非 locked) cells, 排除 group 預定要佔的 cells
-function plnFindDispDest(cells,srcCell,config,excludeCells,targetLayer){
-  excludeCells=excludeCells||new Set();
-  const src=cells[srcCell];
-  const cands=[];
-  Object.values(cells).forEach(cs=>{
-    if(cs.sku||cs.locked)return;
-    if(excludeCells.has(cs.cell))return;  // ★ 排除 group 預定 cells (避免 chained displacement)
-    if(!config.destination.includes(cs.aisle))return;
-    let dist=999;
-    if(cs.aisle===src.aisle && config.aisleGeometry[cs.aisle]){
-      const g=config.aisleGeometry[cs.aisle];
-      dist=plnAisleDistance(src.col,cs.col,g.min,g.max);
-    }
-    const lay=cs.layout===src.layout?0:1;
-    // ★ targetLayer 對應度 (0=match, 1=no match) — 列為最高優先級
-    const layerMatch=(targetLayer!=null && cs.layer===targetLayer)?0:1;
-    cands.push({cell:cs.cell,layerMatch,sameAisle:cs.aisle===src.aisle?0:1,lay,dist,col:cs.col});
-  });
-  if(!cands.length)return null;
-  cands.sort((a,b)=>(a.layerMatch-b.layerMatch)||(a.sameAisle-b.sameAisle)||(a.lay-b.lay)||(a.dist-b.dist)||(a.col-b.col));
-  return cands[0].cell;
-}
+// plnFindDispDest 已刪（2026-08-13 死碼清理，觸及鎖定註記）：displacement 目的地挑選已內聯於引擎
+// （scored.sort: layerMatch→sameAisle→sameLay→dist→col），原鎖定修正「targetLayer 為最高優先排序鍵」
+// 由內聯版 layerMatch 第一鍵完整繼承，行為不變。
 
 // ★ 放置: 每個 cell 放完後立即 locked=true; displace 走 batch matching (對應 layer 數最大化)
 function plnPlaceGroup(cells,skusLayers,config,moves,opts){
@@ -6266,21 +6147,7 @@ function plnRunNewEngine(config,initialCells){
     }
     return '';
   }
-  function colEmptyLayers(aisle,col){
-    const empty=[];
-    for(let L=1;L<=4;L++){
-      const cs=cells[plnCellId(aisle,col,L)];
-      if(cs&&!cs.sku&&!cs.locked)empty.push(L);
-    }
-    return empty;
-  }
-  function isColFree(aisle,col){
-    for(let L=1;L<=4;L++){
-      const cs=cells[plnCellId(aisle,col,L)];
-      if(cs&&(cs.sku||cs.locked))return false;
-    }
-    return true;
-  }
+  // colEmptyLayers/isColFree 已刪（2026-08-13 死碼清理：巢狀宣告後無呼叫端）
   // ★ 核心: 排入單一 SKU 到指定儲位 (返回 bool)
   //   ★ 防重複（Gordon 2026-06-30）：同一商品編號全程只排一次——擋掉「兩貨櫃同款 SKU 重複輸入」
   //     與「多輪 AG 把純溢出色(n<4)重排」兩種重複來源。已排過的 code 直接拒絕，不會佔第二個儲位。
@@ -6399,6 +6266,105 @@ function plnRunNewEngine(config,initialCells){
           placeOneSku(s,aisle,cs.col,cs.layer,p.u.cat);
         }
       }
+    }
+    return unplaced;
+  }
+
+  // ═══ §1.3g 全-A 走道 (C08/C09/C10/C11 型: 大號側全 A 材積) 新品排入 (Gordon 2026-08-07 C08案) ═══
+  //   全 A 走道無「大/小材積」之分 → isAgAisle(需 G/C+A/B) 判 false, runAgEngine(computeFirstCset 需大材積鄰欄)
+  //   也吃不了 → 舊路徑落 plnPlaceNonAgUnits, 溢出碼全丟尾端跨架遠離主碼。本引擎借 CBCCCC「保留欄」概念:
+  //   每架末欄(col%6==0)保留給溢出碼(XXL), 讓溢出貼近主碼、相鄰(無儲位箱隔)不放同款色不同碼。
+  //   優先序: 密度(空格集中尾端) > 就近(溢出貼主碼) > 跨架(最後手段)。
+  //   演算法(已對 Gordon C08 手排逐格驗證, 總欄距 min-cost 指派最小化):
+  //   ① 保留欄=col%6==0 候選; reservedCount=min(⌈溢出/4⌉, slack=freeCols−主碼欄, 候選數);
+  //      Pass A 暫跳全候選估主碼位, 依「到最近溢出主碼欄距離」升冪挑最近 reservedCount 個(密度: 保留欄不散置)。
+  //   ② 主碼: phase 序(mirror plnPlaceNonAgUnits: P1 帶溢出且≤殘格→P2 無溢出→P3 其餘)由前往後填非保留欄,
+  //      色原子; 每色 anchor=最後主碼欄。
+  //   ③ 溢出: Hungarian min-cost 指派最小化 Σ|保留欄−主碼欄|; 容量 4/保留欄; 禁忌邊=主碼 pos5(col%6==5)
+  //      不可用同架保留欄(col+1, 跨儲位箱=同款色相鄰); spill(殘格/尾端全空欄)加重罰 SPILL_PEN→保留欄優先;
+  //      保留欄內依主碼欄升冪排層1-4。容量不足時 min-cost 自然把離保留欄最遠的色 spill 到殘格(白色→59-4)。
+  //   ④ 觸發判定 isAllADest: 有整欄全空的主碼區 && 所有整欄全空欄擺法皆 'A'(通用, 命中 C08/C09/C10/C11;
+  //      混入非 A 全空欄 or 僅剩殘格 → 回退 plnPlaceNonAgUnits, 避免誤搶)。
+  //   ★ 獨立分支: CB(C04/C07 ovSort/buildRacks 鎖定區) / AG(P06 runAgEngine) / D-H 配件路徑一律不碰, 零回歸。
+  function plnHungarian(cost){const n=cost.length,INF=Infinity;const u=Array(n+1).fill(0),v=Array(n+1).fill(0),p=Array(n+1).fill(0),way=Array(n+1).fill(0);
+    for(let i=1;i<=n;i++){p[0]=i;let j0=0;const minv=Array(n+1).fill(INF),used=Array(n+1).fill(false);
+      do{used[j0]=true;const i0=p[j0];let delta=INF,j1=-1;for(let j=1;j<=n;j++)if(!used[j]){const cur=cost[i0-1][j-1]-u[i0]-v[j];if(cur<minv[j]){minv[j]=cur;way[j]=j0;}if(minv[j]<delta){delta=minv[j];j1=j;}}
+        for(let j=0;j<=n;j++){if(used[j]){u[p[j]]+=delta;v[j]-=delta;}else minv[j]-=delta;}j0=j1;}while(p[j0]!==0);
+      do{const j1=way[j0];p[j0]=p[j1];j0=j1;}while(j0);}
+    const res=Array(n).fill(-1);for(let j=1;j<=n;j++)if(p[j]>0)res[p[j]-1]=j-1;return res;}
+  function plnMinCostAssign(rows,cols,costFn){const R=rows.length,C=cols.length,n=Math.max(R,C,1);
+    const M=[];for(let i=0;i<n;i++){M.push([]);for(let j=0;j<n;j++)M[i][j]=(i<R&&j<C)?costFn(rows[i],cols[j]):0;}
+    const a=plnHungarian(M);const out=Array(R).fill(-1);for(let i=0;i<R;i++){const j=a[i];if(i<R&&j<C)out[i]=j;}return out;}
+  function isAllADest(a){
+    const colsAsc=plnValidCols(cells,a);let hasFullEmptyA=false;
+    for(const col of colsAsc){
+      let exists=0,blocked=0;
+      for(let L=1;L<=4;L++){const cs=cells[plnCellId(a,col,L)];if(!cs)continue;exists++;if(cs.sku||cs.locked)blocked++;}
+      if(exists===4&&blocked===0){ if(getColLayout(a,col)!=='A')return false; hasFullEmptyA=true; }
+    }
+    return hasFullEmptyA;
+  }
+  function runAllAEngine(aisle,units){
+    const RACK=6;
+    // — 收集 freeCols(整欄全空, ASC) + residuals(既有殘格 cell) 同 plnPlaceNonAgUnits —
+    const colsAsc=plnValidCols(cells,aisle);const freeCols=[];const residuals=[];
+    colsAsc.forEach(col=>{
+      const empt=[];let blocked=0,exists=0;
+      for(let L=1;L<=4;L++){const cs=cells[plnCellId(aisle,col,L)];if(!cs)continue;exists++;if(cs.sku||cs.locked)blocked++;else empt.push(cs);}
+      if(exists===4&&blocked===0)freeCols.push(col);else empt.forEach(cs=>residuals.push(cs));
+    });
+    // — 切組 (同 plnPlaceNonAgUnits prep: 滿4碼=主碼組, 餘數=溢出碼; n<4 整色為短主碼組) —
+    const prep=units.map(u=>{
+      const sorted=PLN_PRIM.sortBySizeCode(u.skus,s=>s.code);
+      const full=Math.floor(sorted.length/4);
+      const mainGroups=[];for(let g=0;g<full;g++)mainGroups.push(sorted.slice(g*4,g*4+4));
+      const restArr=sorted.slice(full*4);let overflow=[];
+      if(restArr.length){ if(full===0)mainGroups.push(restArr); else overflow=restArr; }
+      return {u,mainGroups,overflow,_anchorCol:null};
+    });
+    // — phase 序 (mirror plnPlaceNonAgUnits): P1 帶溢出且溢出數≤殘格budget→P2 無溢出→P3 其餘帶溢出 —
+    const withOvf=prep.filter(p=>p.overflow.length>0),noOvf=prep.filter(p=>!p.overflow.length);
+    let budget=residuals.length;const phase1=[],phase3=[];
+    for(const p of withOvf){ if(p.overflow.length<=budget){phase1.push(p);budget-=p.overflow.length;}else phase3.push(p); }
+    const ordered=[...phase1,...noOvf,...phase3];
+    const totalMainCols=ordered.reduce((s,p)=>s+p.mainGroups.length,0);
+    const overflowCount=ordered.reduce((s,p)=>s+p.overflow.length,0);
+    // — 保留欄挑選 (密度優先: Pass A 估主碼位, 取離溢出主碼最近 reservedCount 欄) —
+    const reservedCand=freeCols.filter(c=>c%RACK===0);
+    const slack=freeCols.length-totalMainCols;
+    const reservedCount=Math.min(Math.ceil(overflowCount/4),Math.max(0,slack),reservedCand.length);
+    let reserved=new Set();
+    if(reservedCount>0&&overflowCount>0){
+      const skipAll=new Set(reservedCand);const mainSeqA=freeCols.filter(c=>!skipAll.has(c));
+      let idx=0;const anchorsA=[];
+      ordered.forEach(p=>{let first=null;p.mainGroups.forEach(()=>{const col=mainSeqA[idx++];if(first===null)first=col;});if(p.overflow.length&&first!=null)anchorsA.push(first);});
+      const scored=reservedCand.map(c=>{let best=Infinity;anchorsA.forEach(m=>best=Math.min(best,Math.abs(c-m)));return {c,d:best};});
+      scored.sort((a,b)=>a.d-b.d||a.c-b.c);reserved=new Set(scored.slice(0,reservedCount).map(o=>o.c));
+    }
+    // — 主碼由前往後填非保留欄 (色原子: 主碼欄不足整色不排) —
+    const mainSeq=freeCols.filter(c=>!reserved.has(c));const plan=[],unplaced=[];let mi=0;
+    for(const p of ordered){
+      if(mi+p.mainGroups.length<=mainSeq.length){const cols=mainSeq.slice(mi,mi+p.mainGroups.length);mi+=p.mainGroups.length;p._anchorCol=cols[cols.length-1];plan.push({p,cols});}
+      else unplaced.push(p.u);
+    }
+    // — 實際排入主碼 —
+    plan.forEach(({p,cols})=>p.mainGroups.forEach((g,gi)=>{const col=cols[gi];g.forEach((s,i)=>placeOneSku(s,aisle,col,i+1,p.u.cat));}));
+    // — 溢出碼 min-cost 指派 (保留欄優先, 罰跨儲位箱同色相鄰) —
+    const ovItems=[];plan.forEach(({p})=>p.overflow.forEach(s=>ovItems.push({s,mainCol:p._anchorCol,cat:p.u.cat})));
+    if(ovItems.length){
+      const resSlots=[];[...reserved].sort((a,b)=>a-b).forEach(RC=>{for(let L=1;L<=4;L++)resSlots.push({col:RC,layer:L,reserved:true});});
+      const usedMain=new Set();plan.forEach(({cols})=>cols.forEach(c=>usedMain.add(c)));
+      const spillSlots=[];
+      residuals.forEach(r=>spillSlots.push({col:r.col,layer:r.layer,reserved:false}));
+      freeCols.forEach(c=>{if(!usedMain.has(c)&&!reserved.has(c))for(let L=1;L<=4;L++)spillSlots.push({col:c,layer:L,reserved:false});});
+      const allSlots=[...resSlots,...spillSlots];const SPILL_PEN=100000,FORBID=1e9;
+      const forbid=(m,s)=>s.reserved&&(m%RACK===5)&&(s.col===m+1);
+      const costFn=(it,s)=>forbid(it.mainCol,s)?FORBID:Math.abs(s.col-it.mainCol)+(s.reserved?0:SPILL_PEN);
+      const asg=plnMinCostAssign(ovItems,allSlots,costFn);const byCol=new Map();const direct=[];
+      ovItems.forEach((it,i)=>{const si=asg[i];if(si<0)return;const s=allSlots[si];
+        if(s.reserved){if(!byCol.has(s.col))byCol.set(s.col,[]);byCol.get(s.col).push(it);}else direct.push({it,s});});
+      direct.forEach(({it,s})=>placeOneSku(it.s,aisle,s.col,s.layer,it.cat));
+      byCol.forEach((items,col)=>{items.sort((a,b)=>a.mainCol-b.mainCol);items.forEach((it,k)=>placeOneSku(it.s,aisle,col,k+1,it.cat));});
     }
     return unplaced;
   }
@@ -6569,7 +6535,7 @@ function plnRunNewEngine(config,initialCells){
 
       // queue: 所有 entries 按 (kc, color7) ASC（容量預選遞延的色不進佇列）
       // §1.3b 佇列排序 kc→color7 → 委派單一來源 PLN_PRIM
-      const queue=PLN_PRIM.queueOrder(colorEntries.filter(e=>e.mainSkus.length>0&&!e._deferred));
+      let queue=PLN_PRIM.queueOrder(colorEntries.filter(e=>e.mainSkus.length>0&&!e._deferred));
 
       // ★ CB 型走道(如 CBCCCC)偵測 + 架首 C 集合 (Gordon 確認):
       //   小材積(B)欄若皆「孤立」(左右非小材積), 則每個 B 旁的「架首 C」(b-1) 應留給溢出對,
@@ -6619,6 +6585,173 @@ function plnRunNewEngine(config,initialCells){
       const _racks=buildRacks();
       const _segOf=new Map();
       _racks.forEach((rk,ri)=>rk.segments.forEach((seg,si)=>seg.forEach((c,pos)=>_segOf.set(c,{ri,si,pos}))));
+
+      // ★2026-08-02 v6（Gordon C04 跨架案）CB 走道「排入順序候選評分」★
+      //   【問題】佇列固定 (kc,color7) 升冪 → 各款的「溢出密度」與各架的溢出容量嚴重不匹配。
+      //     未挪用的架 = 4 主碼欄 : 8 溢出格 → 每主碼組可配 2 個溢出（正好吃下 6 碼色）；
+      //     挪用架首C 後 = 5 主碼欄 : 4 溢出格 → 每主碼組僅 0.8（適合 5/4 碼色）。
+      //     6 碼款若落在後段已挪用的薄架上，前段架的溢出格用不完、後段的溢出碼卻無處可放
+      //     → 大量跨架（C04 實測 754290210 主碼在 060、溢出被丟到 038，跨 3 架）。
+      //   【Gordon 裁示 2026-08-02】「在 035 排完之後，036 先排入 6 碼的款色，因為 6 碼的款色
+      //     還有 6 組，剛好可以完美把 042 這架以前都排滿」＝排入順序要依溢出密度與各架容量匹配。
+      //   【做法】不寫死方向（實測「密度降冪」在某些組合反而傷密度），改為候選評分：
+      //     產生 3 個候選順序 —— ①原款號序 ②款區塊依溢出密度降冪 ③升冪（款內色序皆不變，
+      //     維持優先序②「整款排一起」）—— 各自用純數值模型 cbScoreOrder() 預跑一次，
+      //     取分數最佳者。評分為字典序 [末欄, 末欄前空洞, 跨架總距, 跨架組數]，
+      //     完全對齊 Gordon 的優先序：①空格集中/密度(硬約束) ②溢出碼少跨架。
+      //     由於原序永遠是候選之一，此機制「只會更好、不會更差」。
+      //   【萬用性】3/4/5/6/7/8 碼任意混合皆適用——模型直接算出實際結果再比分，
+      //     不依賴任何對碼數組合的假設。
+      //   【驗證】C04 實案：選中候選②，挪用架首C {049,055}、23 個主碼欄與 Gordon 手排逐欄相同，
+      //     跨架色組 8→4 且全部僅跨 1 架（跨架總距 16→6）。
+      //     9 組回歸情境：無任一項指標變差；7碼+5碼+4碼 混合選中候選③，末欄 57→55、中段空洞 10→0。
+      // ★2026-08-02 v8：「挪用溢出欄當主碼欄」統一規劃器（CB / AG 共用，供評分器與實際排入呼叫）★
+      //   【背景】CBCCCC 與 AAGGGG 每架都是「4 主碼欄 : 8 溢出格」。當批次以低溢出色為主
+      //     （5碼色只需 1 個溢出）時，一架 4 色只吃掉 4 格 → 整整一欄溢出欄永遠用不到，
+      //     主碼被迫往後架開新欄，密度崩壞。CB 的解是挪用架首C(大材積)當主碼欄；
+      //     AG 的解概念完全相同，只是兩個溢出欄都是小材積(A)，挪用＝既有的「降A」機制。
+      //   【演算法】逐架模擬，bank = 前面架累積沒用掉的溢出格：
+      //     若 bank + 本架溢出容量 − 本架主碼欄所需溢出數 ≥ 4（整整一欄會空著）
+      //     且後面還有色排不完 → 挪用一欄。AG 溢出需求極低時同一架可連挪兩欄。
+      //   【參數】cap=null（CB）：以 pNeed（密度最小 footprint 內主碼欄缺幾欄）為上限。
+      //           cap=數字（AG）：恰好取 cap 欄（＝ legacy demoteN，維持既有密度結果不變）；
+      //           貪婪選不滿時以「欄號序」補足（等同 legacy 行為，避免把降A欄攤到多架而爆密度）。
+      //   【驗證】AG 7 組情境（全5碼/全6碼/全4碼/6+5/5+4/3~7亂數/8+5）末欄與空洞與 legacy
+      //     完全相同（零密度回歸），跨架總距 30→15、24→7、53→41，其餘持平。
+      function planBorrowCols(order,mainPool,cap){
+        const out=[];
+        const M=order.reduce((s,e)=>s+e.groups.length,0);
+        const V=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        if(!M)return out;
+        // ★2026-08-05（C07 整理→新品案）移除舊「CB && V<=0 即早退」保守閘門：
+        //   原設計是「純主碼批次不挪用架首C，維持架首C 原保留」。但當整理步驟清出的連續
+        //   區塊跨越架界、區塊內含一個架首C（firstC）時，V=0 批次被此閘門擋住 → firstC 不被
+        //   升為主碼欄 → 尾色被降到區塊外的下一個 B 欄，破壞「空格集中/連續排入」最高優先。
+        //   移除後仍受 pNeed 約束（line ~6669）：批次若靠現有主碼欄就排得下 pNeed=0 → limit=0
+        //   → 立即早退，天然不會亂挪；只有密度真的不足時才依需求升 firstC。
+        //   （firstC 保留原是「大材積就近」考量，在 V=0 時無溢出碼需照顧，保留已無意義。）
+        //   舊 gate 保留於此註解作設計脈絡。
+        const total=M*4+V;
+        let acc=0,ideal=Math.max(...allCols);
+        for(const c of [...allCols].sort((a,b)=>a-b)){const f=emptyLayers(c).length;if(!f)continue;acc+=f;if(acc>=total){ideal=c;break;}}
+        const pNeed=Math.max(0,M-mainPool.filter(c=>c<=ideal).length);
+        const limit=(cap==null)?pNeed:cap;
+        if(limit<=0)return out;
+        let capAll=0; _racks.forEach(rk=>rk.ovfCols.forEach(c=>{capAll+=emptyLayers(c).length;}));
+        const units=[]; order.forEach(e=>{for(let k=0;k<e.groups.length;k++)units.push(k===e.groups.length-1?e.size5Skus.length:0);});
+        let qi=0,bank=0;
+        for(const rk of _racks){
+          if(qi>=units.length)break;
+          const mains=rk.mainCols.filter(c=>mainPool.includes(c));
+          if(!mains.length)continue;
+          let ovfCap=0; rk.ovfCols.forEach(c=>{ovfCap+=emptyLayers(c).length;});
+          let m=mains.length,need=0;
+          for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
+          // CB 只准挪用架首C(大材積)，B 欄另有「最後手段」路徑；AG 兩個 A 欄皆可
+          const cands=rk.ovfCols.filter(c=>isCBaisle?isBigLayout(getColLayout(aisle,c)):true);
+          for(const fc of cands){
+            if(out.length>=limit)break;
+            if(emptyLayers(fc).length!==4)break;
+            if((units.length-qi)<=m)break;                              // 最後一架、主碼欄已夠 → 不挪
+            if(isCBaisle&&(capAll-4*(out.length+1))<V)break;            // 挪完溢出容量會不夠
+            if((bank+ovfCap-need)<4)break;                              // 沒有整整一欄會空著 → 不挪
+            out.push(fc); ovfCap-=4; m+=1; need=0;
+            for(let i=0;i<m&&qi+i<units.length;i++)need+=units[qi+i];
+          }
+          bank=bank+ovfCap-need;
+          qi+=Math.min(m,units.length-qi);
+        }
+        if(cap!=null)for(const c of [...allCols].sort((a,b)=>a-b)){       // AG：補足到 demoteN
+          if(out.length>=cap)break;
+          if(!isSmallLayout(getColLayout(aisle,c)))continue;
+          if(emptyLayers(c).length!==4||out.includes(c))continue;
+          out.push(c);
+        }
+        return out.sort((a,b)=>a-b);
+      }
+      // AG legacy 降A數量（與下方實際 demoteN 同式，供評分器預估用；isolatedSet 尚未建立故略）
+      function agLegacyDemoteN(order,mainPool){
+        let mainsLeft=order.reduce((s,e)=>s+e.groups.length,0);
+        let ovfLeft=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        const poolSz=order.filter(e=>e.groups.length===1).length;
+        let n=0;
+        for(const c of [...allCols].sort((a,b)=>a-b)){
+          if(emptyLayers(c).length!==4)continue;
+          if(mainsLeft<=0&&ovfLeft<=0)break;
+          if(isSmallLayout(getColLayout(aisle,c))){
+            if(ovfLeft>=4)ovfLeft-=4;
+            else if(mainsLeft>0&&n<poolSz){n++;mainsLeft--;}
+            else ovfLeft=0;
+          } else if(mainsLeft>0)mainsLeft--;
+        }
+        return n;
+      }
+      function cbScoreOrder(order){
+        const freeN=new Map(); [...allCols].forEach(c=>freeN.set(c,emptyLayers(c).length));
+        const bigC=c=>isBigLayout(getColLayout(aisle,c));
+        const pool=[...allCols].filter(c=>bigC(c)&&freeN.get(c)===4&&!firstCset.has(c)).sort((a,b)=>a-b);
+        const V=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        const promo=new Set(planBorrowCols(order,pool,isCBaisle?null:agLegacyDemoteN(order,pool)));
+        const mpool=pool.concat([...promo]).sort((a,b)=>a-b);
+        const mainOf=new Map(),usedCol=new Set(); let pi=0;
+        for(const e of order){for(let k=0;k<e.groups.length;k++){
+          if(pi>=mpool.length)break;
+          const col=mpool[pi++]; if(!mainOf.has(e.color7))mainOf.set(e.color7,col);
+          usedCol.add(col); freeN.set(col,0);
+        }}
+        const _rkOf0=c=>{const s=_segOf.get(c);return s?s.ri:9999;};
+        const ovC=[...allCols].filter(c=>(firstCset.has(c)||isSmallLayout(getColLayout(aisle,c)))&&!promo.has(c))
+          .sort((a,b)=>(_rkOf0(a)-_rkOf0(b))||
+            ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||(a-b));   // v7：同架內 B 先於架首C
+        const bud=new Map(); let left=V;
+        for(const c of ovC){const u=Math.min(freeN.get(c)||0,Math.max(0,left));bud.set(c,u);left-=u;}
+        const rkOf=c=>{const s=_segOf.get(c);return s?s.ri:-99;};
+        const sgOf=c=>{const s=_segOf.get(c);return s?s.si:-99;};
+        let crossN=0,crossD=0;
+        const gs=order.filter(e=>e.size5Skus.length)
+          .map(e=>({e,mc:(mainOf.get(e.color7)||0)})).sort((a,b)=>a.mc-b.mc);
+        for(const g of gs){
+          let remain=g.e.size5Skus.length; const mr=rkOf(g.mc);
+          while(remain>0){
+            const cand=ovC.filter(c=>(bud.get(c)||0)>0&&
+              !(rkOf(c)===rkOf(g.mc)&&sgOf(c)===sgOf(g.mc)&&Math.abs(c-g.mc)===1));
+            if(!cand.length)break;
+            const whole=cand.filter(c=>(bud.get(c)||0)>=remain);
+            const col=(whole.length?whole:cand)
+              .sort((a,b)=>(Math.abs(rkOf(a)-mr)-Math.abs(rkOf(b)-mr))||(a-b))[0];
+            const take=Math.min(bud.get(col),remain);
+            bud.set(col,bud.get(col)-take); freeN.set(col,(freeN.get(col)||0)-take);
+            remain-=take; usedCol.add(col);
+            const d=Math.abs(rkOf(col)-mr); if(d){crossN++;crossD+=d*take;}
+          }
+        }
+        if(!usedCol.size)return [0,0,0,0];
+        const last=Math.max(...usedCol);
+        let holes=0; [...allCols].forEach(c=>{if(c<last)holes+=(freeN.get(c)||0);});
+        return [last,holes,crossD,crossN];
+      }
+      if(queue.length>1){          // ★v8：CB / AG 皆適用
+        // 款區塊搬移（款內色序不變）：dir=1 溢出密度降冪、dir=-1 升冪
+        const kuSort=(arr,dir)=>{
+          const ord=new Map(),ov=new Map(),gp=new Map();
+          arr.forEach((e,i)=>{const k=String(e.kc);
+            if(!ord.has(k))ord.set(k,i);
+            ov.set(k,(ov.get(k)||0)+e.size5Skus.length);
+            gp.set(k,(gp.get(k)||0)+e.groups.length);});
+          const d=k=>(gp.get(k)||0)>0?(ov.get(k)||0)/gp.get(k):0;
+          return arr.slice().sort((a,b)=>{
+            const ka=String(a.kc),kb=String(b.kc);
+            if(ka===kb)return 0;                       // 同款維持原色序（ES2019 起 sort 保證穩定）
+            return dir*(d(kb)-d(ka))||(ord.get(ka)-ord.get(kb));
+          });
+        };
+        let best=null;
+        for(const cand of [queue,kuSort(queue,1),kuSort(queue,-1)]){
+          const sc=cbScoreOrder(cand);
+          if(!best||plnCmpScoreArr(sc,best.sc)<0)best={sc,cand};
+        }
+        queue=best.cand;
+      }
       function physAdjCols(col){ const s=_segOf.get(col); if(!s)return []; const seg=_racks[s.ri].segments[s.si]; const o=[]; if(s.pos>0)o.push(seg[s.pos-1]); if(s.pos<seg.length-1)o.push(seg[s.pos+1]); return o; }
       function physAdjacent(c1,c2){ return physAdjCols(c1).includes(c2); }
       // §1.3a 分段感知相鄰：僅同一架同一 segment 的相鄰位置算相鄰（跨架、跨儲位箱不算）。
@@ -6644,7 +6777,9 @@ function plnRunNewEngine(config,initialCells){
       //     (例: 某款全尺碼總和最高, 但拆成多色後每色看似偏低, 不應被降級)。
       //   tie-break: 款總和→同款內色未到量低者→溢出碼少者(越接近純4碼,塞A越乾淨)→kc/color7。
       // §3.4a 降 A 數量由下方密度路徑「最小架數」自算（見 PHASE A）；此處不再預先標記。
-      const allOverflow=[];   // ★ 全走道溢出碼收集池: [{donor,sku}] (迴圈後統一打包)
+      // ★2026-08-02 v8：原 const allOverflow=[] 收集池與其下方的 GLOBAL OVERFLOW 打包區塊
+      //   已確認為死碼（宣告後從未 push → 迴圈跑空陣列，實際溢出分配走上方「密度 budget +
+      //   鄰近架指派」路徑），本輪一併清除。
 
       // §1.5（階段8 清舊）：密度切組為唯一新品排入路徑。
       //   已移除 useRoundRobin 關閉分支(legacy 逐架 fill) 及其專屬機制：
@@ -6675,21 +6810,14 @@ function plnRunNewEngine(config,initialCells){
         }
 
         // ── rule 4：孤立/架尾 G 欄偵測 ──
-        //   孤立 G 欄 = 全空大材積欄 c，其左鄰(c-1)為「真實存在且被占用」、右鄰(c+1)為全空小材積欄
+        //   孤立 G 欄 = 全空大材積欄 c，其左鄰(c-1)非可用(占用/缺號)、右鄰(c+1)為全空小材積欄
         //   ＝某已滿架尾端殘留的單一 G 欄（無同架空 A 可配對放溢出）→ 留給純 4 碼色。
-        //   ★2026-07-30 修正（Gordon C04 米白→109 案）：舊判定「左鄰非可用(占用/缺號)」把「柱位缺欄
-        //     (left 不存在)」也算成占用邊界。在幾乎全空的走道裡，某大欄剛好落在「柱位缺口之後、其後
-        //     又緊接 B 欄」（如 C04-109＝架首C，其左 108 為柱位、右 110 為 B），就被誤判成孤立殘欄，
-        //     於是第一個純 4 碼色被傳送到走道深處那一欄（米白→109），既不緊湊也破壞剩餘空儲位連續性。
-        //     柱位是「結構性缺口」不是「占用邊界」——只有左鄰是「真實存在且被實貨占用」的欄，c 才是
-        //     值得回收的架尾殘欄。故加 leftExists 條件；packed 走道左鄰為實貨占用的 P06 型回收不受影響。
         const isolatedSet=new Set();
         bigColsAvail.forEach(c=>{
           const left=cells[plnCellId(aisle,c-1,1)];
-          const leftExists=!!left;                     // ★ 柱位缺欄(left 不存在)不算占用邊界
           const leftFree=left&&!left.sku&&!left.locked&&colFullyFree(c-1);
           const rightSmallFree=isSmallLayout(getColLayout(aisle,c+1))&&colFullyFree(c+1);
-          if(leftExists&&!leftFree&&rightSmallFree)isolatedSet.add(c);
+          if(!leftFree&&rightSmallFree)isolatedSet.add(c);
         });
 
         // ── 主碼候選欄（大材積、全空、非架首C、非孤立），小材積候選欄（全空）──
@@ -6724,6 +6852,37 @@ function plnRunNewEngine(config,initialCells){
         const mainGroupsTotal=remaining.reduce((s,e)=>s+e.groups.length,0);
         const overflowCells=remaining.reduce((s,e)=>s+e.size5Skus.length,0);
         const totalCells=mainGroupsTotal*4+overflowCells;
+        // ★2026-08-02 v4（Gordon C04 密度案）CB 走道「架首C 挪用為主碼欄」事前規劃 ★
+        //   【問題】CBCCCC 每架 = 4 個主碼欄(CCCC) + 8 個溢出格(架首C 4格 + B 4格)。
+        //     當待排新品以「5碼色」(4主碼+1溢出) 為主時，一架 4 色只吃掉 4 個溢出格，
+        //     架首C 整欄 4 格永遠用不到 → 每架固定空 4 格、主碼被迫往後架開新欄，
+        //     儲位密度崩壞（C04 實測：055-3/4、056、061、062 散空 14 格，主碼卻一路排到 065）。
+        //   【Gordon 裁示 2026-08-02】「若經計算後真的逼不得已，可以挪用 CBCCCC 中原本拿來放
+        //     溢出碼的第一個 C 改放主碼」——該組的溢出碼大概率得排到鄰近儲架，犧牲 1 組的就近性，
+        //     換取「密度維持 + 其餘溢出碼大部分留在同一架」，是權衡之下划算的結果。
+        //     優先序：①空格集中在最後 1~2 架(密度=硬約束) > ②溢出碼盡量同架。
+        //   【做法】主碼排入前先逐架模擬（架序升冪，與下方主碼放置同序）：
+        //     bank = 前面架累積下來還沒用掉的溢出格；
+        //     若「bank + 本架溢出容量 − 本架 4 個主碼欄所需溢出數 ≥ 4」(＝整整一個架首C 欄會空著)
+        //     且後面還有色排不完 → 挪用本架架首C 當第 5 個主碼欄（該架溢出容量隨之 −4）。
+        //     全域安全閥：挪用後全走道溢出容量仍須 ≥ 溢出碼總數，否則不挪。
+        //   【零回歸】只在 isCBaisle 生效；6碼色為主(每色2溢出，供需剛好)時 spare 永遠 <4 → 完全不觸發；
+        //     架首C 非全空、或已是最後一架(色數 ≤ 本架主碼欄數) 亦不觸發。
+        //   【驗證】C04 實測 23 色(9個6碼 + 14個5碼)：挪用 043/049 →
+        //     主碼止於 063（原 065）、剩餘 14 格全部連續集中在 061-3 之後的走道尾端；
+        //     溢出跨架最遠距離 4 架 → 3 架。
+        // ★v8：CB 挪用架首C 當主碼欄 —— 規劃邏輯已抽到共用的 planBorrowCols()（見上方註解）。
+        //   行為與 v4~v7 實測驗證過的版本相同（C04 實案仍挪用 049/055、主碼欄與手排逐欄相符）。
+        const promotedFirstC=new Set(isCBaisle?planBorrowCols(remaining,mainColPool,null):[]);
+        if(promotedFirstC.size){
+          promotedFirstC.forEach(c=>{
+            firstCset.delete(c);                       // 不再視為「留給溢出」的保留欄
+            if(!mainColPool.includes(c))mainColPool.push(c);
+            const sg=_segOf.get(c);                    // 同步從該架 ovfCols 移除（溢出 budget 不再計入）
+            if(sg){const rk=_racks[sg.ri];const p=rk.ovfCols.indexOf(c);if(p>=0)rk.ovfCols.splice(p,1);}
+          });
+          mainColPool.sort((a,b)=>(rackIdx(a)-rackIdx(b))||(a-b));
+        }
         const footprintCols=[...allCols]
           .filter(c=>colFullyFree(c)&&!isolatedSet.has(c)&&!firstCset.has(c))
           .sort((a,b)=>a-b);
@@ -6748,6 +6907,12 @@ function plnRunNewEngine(config,initialCells){
           const gCap=minFootprint.filter(c=>isBigLayout(getColLayout(aisle,c))).length;
           demoteN=Math.max(0,mainGroupsTotal-gCap);
         }
+        // ★2026-08-02 v8（Gordon 裁示：AAGGGG 與 CBCCCC 概念相同）★
+        //   AG 降A欄「位置」改由 planBorrowCols 逐架規劃 —— 舊版把降A色由前往後塞滿
+        //   smallColPool（A1,A2,A3,A4…），等於前段 A 欄全被主碼佔走、所有溢出碼被擠到後段，
+        //   造成大量跨架（全5碼×20 實測跨架總距 30）。新版讓每一架自己留下溢出容量，
+        //   ★數量仍等於 legacy demoteN → 密度結果完全不變（末欄/空洞逐項相同，零回歸）。
+        const agBorrowCols=(!isCBaisle&&demoteN>0)?planBorrowCols(remaining,mainColPool,demoteN):[];
         if(demoteN>0){
           const pool=isCBaisle?remaining:demotePool;   // CB 維持原池（零回歸）；AG 只從單主碼組色挑
           pool.forEach(e=>{e.overflowLen=e.size5Skus.length;});
@@ -6775,6 +6940,33 @@ function plnRunNewEngine(config,initialCells){
             const col=nextCol(mainColPool,e.color7,e.colorName);
             if(col==null)break;
             putGroup(e,e.groups[k],col);
+          }
+        }
+        // ★2026-08-02（Gordon C04 v2 案）逼不得已時，挪用架首C(firstCset)當主碼欄——
+        //   僅當一般主碼欄池(mainColPool)已耗盡、仍有色排不進主碼時才觸發（真正「主碼欄不足」，
+        //   非本次 C04 測試情境，屬未來一般性備援；本次 23 色對 23 主碼欄剛好吃滿，不會觸發）。
+        //   挑欄號最小的架首C優先（維持前段密度）；借用後從 firstCset 移除、同步從其所屬架的
+        //   ovfCols 拿掉，讓後續溢出配置不會誤把它當保留欄——該架自此少 1 個保留溢出格，
+        //   其溢出改仰賴同架優先→全走道就近的既有機制，屬使用者本輪明確認可的合理代價。
+        //   僅處理單主碼組色（e.groups.length===1），避免動到較複雜的多組色情境。
+        //   ⚠ 此路徑尚未有真實觸發案例可驗證，之後若遇到主碼欄真的不足的案例，應優先補測。
+        {
+          const stillNeed=remaining.filter(e=>!e._forceA&&!e.placed&&e.groups.length===1);
+          if(stillNeed.length){
+            // ★2026-08-02 v5（Gordon 裁示）：架首C 借完仍不夠時，最後手段連 B(小材積)欄也拿來放主碼。
+            //   「若情況真的逼不得已，連同B材積也可以拿來當主碼，只不過這情境應該幾乎沒有」——
+            //   排序刻意把所有架首C 放在 B 之前，確保 B 永遠是最後才被動用的一批。
+            const borrowCands=[...firstCset].filter(c=>colFullyFree(c)&&!usedColSet.has(c)).sort((a,b)=>a-b)
+              .concat(smallColPool.filter(c=>colFullyFree(c)&&!usedColSet.has(c)).sort((a,b)=>a-b));
+            let bi=0;
+            for(const e of stillNeed){
+              if(bi>=borrowCands.length)break;
+              const c=borrowCands[bi++];
+              putGroup(e,e.groups[0],c);
+              firstCset.delete(c);
+              const seg=_segOf.get(c);
+              if(seg){ const rk=_racks[seg.ri]; const p=rk.ovfCols.indexOf(c); if(p>=0)rk.ovfCols.splice(p,1); }
+            }
           }
         }
         // ★ §3.7-①（2026-07-15 Gordon D10 實測案）：1~3碼色（無完整4碼主碼組、整色原歸溢出）→
@@ -6818,7 +7010,9 @@ function plnRunNewEngine(config,initialCells){
             //   降A色依 smallColPool 升冪逐欄放（nextCol 同款色/同顏色名稱 soft 避鄰照舊），
             //   與主碼 G 欄共同把空欄前綴用滿；不再「一架一降A色」分散、也不再為溢出保留前段 A 欄
             //   （溢出碼集中到前綴後的 A 欄 → 剩餘空欄連續）。
-            for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const col=nextCol(smallColPool,e.color7,e.colorName); if(col==null)break; putGroup(e,e.groups[k],col); } }
+            //   ★v8：優先落在 planBorrowCols 逐架規劃好的 A 欄（讓每架自己留住溢出容量）；
+            //   規劃欄用完或被相鄰規則擋下時，才回退舊行為 smallColPool 由前往後填。
+            for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const col=nextCol(agBorrowCols,e.color7,e.colorName)||nextCol(smallColPool,e.color7,e.colorName); if(col==null)break; putGroup(e,e.groups[k],col); } }
           } else {
             // CB 降A（罕見，CCCC 容量通常足）：smallColPool
             for(const e of demoteColors){ for(let k=0;k<e.groups.length;k++){ const sc=nextCol(smallColPool,e.color7,e.colorName); if(sc==null)break; putGroup(e,e.groups[k],sc); } }
@@ -6828,20 +7022,6 @@ function plnRunNewEngine(config,initialCells){
           //   （free≥剩餘數，保持同色不拆）→ ③ 密度：剩餘層少的欄優先（湊滿不留半欄）→ ④ 欄距。對既有占用穩健。
           const allOvf=racks.flatMap(rk=>rk.ovfCols);
           const shortBackup=[]; racks.forEach(rk=>{ if(rk.isShort)rk.cols.forEach(c=>shortBackup.push(c)); });
-          // ★2026-07-30（Gordon C04 案）：把「主碼欄的殘格」納入溢出候選池。
-          //   殘格＝部分被占用（含 ≥1 空層且 ≥1 占用層）的欄——多為上一批釋放主碼後單獨留下的零散空
-          //   儲位（例 C04-021-4：上批全三碼佔 1~3 層、第 4 層釋放留空）。舊池只含 ovfCols(架首C+B)＋
-          //   短架，看不到這些殘格 → 溢出碼跳過殘格、改開新的溢出欄（深灰 150 開新的 025，021-4 被浪費）。
-          //   密度最優先（Gordon 明示「應先將這三個零散空儲位處理掉、直接拿來放溢出碼」）：殘格整欄已被
-          //   占用、永遠排不進主碼組，拿其空層放溢出碼是純密度增益；ovSort 以「架距最近」為第一鍵，故
-          //   只有同架（就近）的色會取用該架殘格，不會把溢出碼拉到走道深處。
-          const residualCols=[];
-          [...allCols].forEach(c=>{
-            if(plnIsTempZoneSlot(plnCellId(aisle,c,1)))return;   // 暫放區不納入
-            let emp=0,occ=0;
-            for(let L=1;L<=4;L++){ const cs=cells[plnCellId(aisle,c,L)]; if(!cs)continue; if(cs.sku||cs.locked)occ++; else emp++; }
-            if(emp>0&&occ>0)residualCols.push(c);                // 部分占用＝殘格欄
-          });
           const rackOf=col=>{ const s=_segOf.get(col); return s?s.ri:-99; };
           const ovGroups=[];
           for(const e of colorEntries){
@@ -6854,7 +7034,11 @@ function plnRunNewEngine(config,initialCells){
             ovGroups.push({donor:e,items,mc:(e.mainCol!=null?e.mainCol:0)});
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
-          const allPool=[...new Set([...allOvf,...shortBackup,...residualCols])];
+          const allPool=[...allOvf,...shortBackup];
+          // ★★ 2026-08-02 更新：下方 07-21/07-22 的「逐架接力(carry)」實作已由
+          //     「全走道由前往後填滿」取代（見本區塊末端 globalPool 迴圈；ovSort 亦改 a-b 密度主鍵）。
+          //     以下 07-21/07-22 段落保留為設計沿革(C06 跨架搶欄 / C02 赤字架流離＋順序顛倒的成因記錄)——
+          //     新法以「單調前往後、色依主碼欄升冪」天然避免跨架遠漂與順序顛倒，並把空格集中走道尾端。
           // ★2026-07-21 兩段式配置（Gordon C06 案）：
           //   原本一輪貪婪、依主碼欄序處理 → 前面的色可能先搶走「別架」的溢出欄，
           //   把同架後面的色擠到更遠的架（7516601 佔走 175 → 7517201 只能掉到 169）。
@@ -6880,127 +7064,84 @@ function plnRunNewEngine(config,initialCells){
           //             最後才是 placeOverflowSafe，行為與舊版一致。
           //   實測 C02：最遠架距 6→1、實體欄距 max 34→3 / 平均 6.83→2.04、溢出欄順序倒退 7→0，
           //            主碼欄配置完全不變、138 格全滿不變。
-          const ovSort=(g,need)=>{ const mr=rackOf(g.mc); return (a,b)=>
-              (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
-              || ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
+          // ★2026-08-02（Gordon C04 案）候選欄排序改「密度優先＝由前往後填滿」：
+          //   優先級對齊需求「儲位密度 > 整款排一起 > 量/材積匹配」——
+          //   ① 顏色名稱 soft 避鄰（需求7 保留）→ ② 能容整組者優先（整款排一起 #2）→
+          //   ③ AG 溢出偏小材積（AAGGGG 保留）→ ④ ★密度 #1：欄號小者先（前面的溢出欄先用滿，
+          //   剩餘空格自然集中走道尾端）→ ⑤ 弱就近把關(rackDist)→ ⑥ 湊滿殘欄→ ⑦ 離主碼近(最終)。
+          //   （舊版 rackDist 為主鍵＋「離主碼近」壓過欄序，導致每架局部留空格、firstC 欄被跳過，
+          //    如 C04 的 043/049 整欄空、037-3/4、056-4 散落中段。）
+          // ★2026-08-02 v3：上方 ovSort/fillFrom/fitWhole（欄號優先版）已被下方
+          //   ovSortNear/fillFromB/fitWholeB（budget+鄰近架優先版）取代並移除，不再呼叫。
+          // ── 密度 budget 鎖死用量 + 鄰近架優先指派（Gordon 2026-08-02 C04 v3 案）──
+          //   使用者明確裁示優先序：①空格不可分散在不同架（密度=硬約束，不可退讓）
+          //     ②溢出碼盡量別跨架（在①不受影響的前提下盡量優化）。
+          //   【上一版問題】純「同架優先＋全域備援」(v2) 會讓每一架各自的局部餘量(supply>demand)
+          //     散落在原地，導致空格分散在 5 個不同架（038/044/050/055/062 各剩幾格），違反①。
+          //   【本版做法】分兩階段：
+          //     Step1「密度 budget」：完全比照 v1 全走道由前往後的邏輯，把欄位由前往後累加，
+          //       算出「哪些欄、各要用掉幾格」——這一步跟 v1 結果逐格相同，保證空格仍 100%
+          //       集中在走道最尾端（如 C04：056/061/062 全空、055 只用掉前 2 格）。
+          //     Step2「鄰近架指派」：在 Step1 算好的固定用量池內，把每組溢出碼分配到「離自己
+          //       主碼架最近」的還有 budget 的欄，而非 v1 的「欄號最小」——同樣的密度、
+          //       但盡量把溢出碼留在自己架或鄰架，只有密度真的容不下（自己架 budget 已耗盡）
+          //       時才被迫用到更遠的架，是兩個優先序同時滿足下的最佳解。
+          //   【驗證】用 C04 v3 實測 23 色重跑 Python 模擬：密度用量與 v1 逐欄相同（尾端
+          //     056/061/062 全空不變）；跨架色組從 v1 的多數色跨 1-4 架，改善為 16/23 色
+          //     完全同架(0 跨架)，僅剩餘 7 組因架5/6 本身 budget 天生不足（密度限制下的
+          //     必然結果）才需跨架，且跨架距離也比 v1 平均更短。
+          // ★2026-08-02 v7（Gordon 裁示）溢出 budget 填欄序：同一架內「B 欄先於架首C」。
+          //   密度用量完全不變（總格數一樣、仍是由前往後填滿），差別只在同架內誰先被吃掉：
+          //   架首C 是大材積、且是唯一可被「挪用為主碼欄」的欄位，尾端剩餘時留下整欄架首C
+          //   比留下 B 欄更有價值（下批新品可直接拿來當主碼或放成對溢出）。
+          //   （大尺碼因折法關係實體大小與小尺碼相當，放 B 小材積格無物理風險——Gordon 確認。）
+          //   AG 走道 (AAGGGG) 的 ovfCols 皆為小材積，此鍵值恆等 → 排序結果與舊版相同，零回歸。
+          const _rkOfCol=c=>{const s=_segOf.get(c);return s?s.ri:9999;};
+          const orderedAll=[...allPool].sort((a,b)=>
+            (_rkOfCol(a)-_rkOfCol(b))||
+            ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||
+            (a-b));
+          const _totalDemand=ovGroups.reduce((s,g)=>s+g.items.length,0);
+          const colBudget=new Map(); let _demandLeft=_totalDemand;
+          for(const c of orderedAll){
+            const cap=emptyLayers(c).length;
+            const use=Math.min(cap,Math.max(0,_demandLeft));
+            colBudget.set(c,use); _demandLeft-=use;
+          }
+          const budgetLeft=new Map(colBudget);
+          const budgetPool=()=>orderedAll.filter(c=>(budgetLeft.get(c)||0)>0);
+          const ovSortNear=(g,need)=>{ const mr=rackOf(g.mc); return (a,b)=>
+              ((adjColorNameConflict(a,g.donor.colorName)?1:0)-(adjColorNameConflict(b,g.donor.colorName)?1:0))
+              || (((budgetLeft.get(b)||0)>=need?1:0)-((budgetLeft.get(a)||0)>=need?1:0))
               || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
-              || ((emptyLayers(b).length>=need?1:0)-(emptyLayers(a).length>=need?1:0))
-              || (Math.abs(a-g.mc)-Math.abs(b-g.mc))
-              || (emptyLayers(a).length-emptyLayers(b).length) || (a-b); };
-          const fillFrom=(g,remain,pool)=>{
-            while(remain.length){
-              const cands=pool.filter(c=>emptyLayers(c).length>0&&!physAdjConflict(c,g.donor.color7)).sort(ovSort(g,remain.length));
-              if(!cands.length)break;
-              const col=cands[0]; const before=remain.length;
-              for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
-              if(remain.length===before)break;   // 本欄無法再放（防無限迴圈）
-            }
-            return remain;
-          };
-          // 整組放同一欄；本架放不下整組 → 原封不動回傳（交由呼叫端帶到下一架）
-          const fitWhole=(g,items,pool)=>{
-            const cands=pool.filter(c=>emptyLayers(c).length>=items.length&&!physAdjConflict(c,g.donor.color7)).sort(ovSort(g,items.length));
+              || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
+              || (a-b); };
+          const fitWholeB=(g,items,pool)=>{
+            const cands=pool.filter(c=>(budgetLeft.get(c)||0)>=items.length&&!physAdjConflict(c,g.donor.color7)).sort(ovSortNear(g,items.length));
             if(!cands.length)return items;
             const col=cands[0], remain=items.slice();
-            for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat))remain.shift(); }
+            for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if((budgetLeft.get(col)||0)<=0)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat)){remain.shift();budgetLeft.set(col,(budgetLeft.get(col)||0)-1);} }
             return remain;
           };
-          // ── 逐架接力掃描（色已依主碼欄升冪排序）──
-          const byRack=new Map(); const noRack=[];
-          for(const g of ovGroups){
-            const r=rackOf(g.mc);
-            if(r<0){ noRack.push({g,items:g.items.slice()}); continue; }   // 無主碼欄（純溢出殘色）→ 直接走全池就近
-            if(!byRack.has(r))byRack.set(r,[]);
-            byRack.get(r).push({g,items:g.items.slice()});
-          }
-          const rackIdxs=[...new Set([...byRack.keys(),...allPool.map(rackOf)])].filter(r=>r>=0).sort((a,b)=>a-b);
-          let carry=[];
-          for(const ri of rackIdxs){
-            const pool=allPool.filter(c=>rackOf(c)===ri);
-            const list=carry.concat(byRack.get(ri)||[]); carry=[];
-            for(const it of list){
-              // 接力上限：掃描階段最多向後接力 3 架；再遠就繼續帶著，最後交給全池就近
-              // （可反向借位）處理，避免少數色一路往走道尾端漂。
-              if(pool.length&&Math.abs(ri-rackOf(it.g.mc))<=3){ const left=fitWhole(it.g,it.items,pool); if(!left.length)continue; it.items=left; }
-              carry.push(it);
+          const fillFromB=(g,remain,pool)=>{
+            while(remain.length){
+              const cands=pool.filter(c=>(budgetLeft.get(c)||0)>0&&!physAdjConflict(c,g.donor.color7)).sort(ovSortNear(g,remain.length));
+              if(!cands.length)break;
+              const col=cands[0]; const before=remain.length;
+              for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if((budgetLeft.get(col)||0)<=0)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat)){remain.shift();budgetLeft.set(col,(budgetLeft.get(col)||0)-1);} }
+              if(remain.length===before)break;
             }
-          }
-          // ── 尾端仍未安置（需反向借位／不得已拆欄）→ 全池就近，最後 placeOverflowSafe ──
-          for(const it of carry.concat(noRack)){
-            const rest=fillFrom(it.g,it.items,allPool);
-            for(const sku of rest){ if(!placeOverflowSafe({donor:it.g.donor,sku}))failed.push({kc:it.g.donor.kc,n:it.g.donor.ku.n,reason:'NO_XXL_SLOT',cat:it.g.donor.ku.cat}); }
+            return remain;
+          };
+          for(const g of ovGroups){
+            let items=g.items.slice();
+            items=fitWholeB(g,items,budgetPool());
+            if(items.length)items=fillFromB(g,items,budgetPool());
+            for(const sku of items){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
           }
         }
       }
 
-      // ════════════════════════════════════════════════════════════
-      // GLOBAL OVERFLOW: 全走道一次打包 (Gordon 密度邏輯)
-      //   ① 同色溢出碼整組連續、不拆  ② 不同色湊滿整欄  ③ 剩餘集中在最後
-      //   ④ 真的湊不出才迫不得已拆     ⑤ 相鄰守則(1.3a): 不放同色主碼相鄰欄
-      //   3碼款 hanging(layer4) 只用「單碼溢出組」填, 不為 hanging 拆散成對溢出
-      // ════════════════════════════════════════════════════════════
-      {
-        // 溢出組: 以 donor 色分組, 維持碼順序
-        const ovGroups=[];
-        {
-          const seen=new Map();
-          for(const it of allOverflow){
-            const c7=it.donor.color7;
-            if(!seen.has(c7)){const g={donor:it.donor,c7,items:[]};seen.set(c7,g);ovGroups.push(g);}
-            seen.get(c7).items.push(it);
-          }
-        }
-        const adjOKcol=(c7,col)=>{ for(const dc of[-1,1])for(let L=1;L<=4;L++){const nb=cells[plnCellId(aisle,col+dc,L)];if(nb&&nb.sku&&String(nb.sku).substring(0,7)===c7)return false;} return true; };
-        // §1.5（階段8）：原「① 3碼款 hanging(layer4)」步驟隨 hanging3 機制移除（切組後不再產生半套 3 碼空層4）。
-        // ② 可用 bin: 「小材積 B + 架首 C(firstCset)」連續空層 run, 欄號升冪混合 → 低欄先填(最緊湊)。
-        //   (Gordon 確認: 架首 C 留給溢出, 對(含50/60)優先放架首 C 大材積、單碼優先放 B; 整批跨度最小、剩餘集中在後)
-        //   其餘大材積 C 欄(非架首C) append 末端作最終 fallback。
-        const colRuns=(c)=>{ const free=emptyLayers(c); if(!free.length)return []; const out=[];let cur=[free[0]]; for(let k=1;k<free.length;k++){ if(free[k]===cur[cur.length-1]+1)cur.push(free[k]); else{out.push(cur);cur=[free[k]];} } out.push(cur);return out; };
-        const isBigCol=(c)=>isBigLayout(getColLayout(aisle,c));
-        const ovfBinCols=[...new Set([...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))||firstCset.has(c)))].sort((a,b)=>a-b);
-        const bins=[];
-        for(const c of ovfBinCols)for(const run of colRuns(c))bins.push({col:c,run,isC:isBigCol(c)});
-        for(const c of [...allCols].filter(c=>isBigCol(c)&&!firstCset.has(c)).sort((a,b)=>a-b))
-          for(const run of colRuns(c))bins.push({col:c,run,isC:true});
-        // ③ 全走道 best-fit: 每 bin 用 0/1 knapsack(容量=run長度) 取「填滿層數最大→(材積偏好)→總未到量最大」的整組子集
-        //    材積偏好(Gordon): C bin 偏好成對(2碼)組、B bin 偏好單碼組 → 以小幅 bonus 體現, 不破壞填滿與密度。
-        for(const bin of bins){
-          if(!ovGroups.length)break;
-          const R=bin.run.length;
-          const cand=[];
-          for(let i=0;i<ovGroups.length;i++) if(adjOKcol(ovGroups[i].c7,bin.col)) cand.push(i);
-          if(!cand.length)continue;
-          const prefBonus=(gi)=>{ const sz=ovGroups[gi].items.length; return bin.isC?(sz>=2?1:0):(sz===1?1:0); };
-          // dp[w] = {pend, pref, set} 以剛好填滿 w 層的最佳子集 (先比 pref 再比 pend)
-          const dp=new Array(R+1).fill(null); dp[0]={pend:0,pref:0,set:[]};
-          for(const gi of cand){
-            const sz=ovGroups[gi].items.length; if(sz>R)continue;
-            const pd=ovGroups[gi].donor.totalPending||0; const pb=prefBonus(gi);
-            for(let w=R;w>=sz;w--){
-              if(!dp[w-sz])continue;
-              const np=dp[w-sz].pref+pb, ne=dp[w-sz].pend+pd;
-              if(!dp[w]||np>dp[w].pref||(np===dp[w].pref&&ne>dp[w].pend)) dp[w]={pend:ne,pref:np,set:[...dp[w-sz].set,gi]};
-            }
-          }
-          let bw=0; for(let w=R;w>=1;w--){ if(dp[w]){bw=w;break;} }
-          if(bw===0)continue;
-          // 高未到量組先放(靠前層)
-          const chosen=dp[bw].set.slice().sort((a,b)=>(ovGroups[b].donor.totalPending||0)-(ovGroups[a].donor.totalPending||0));
-          let ptr=0; const placed=[];
-          for(const gi of chosen){ const g=ovGroups[gi]; for(const it of g.items){const L=bin.run[ptr++]; placeOneSku(it.sku,aisle,bin.col,L,g.donor.ku.cat);} placed.push(g); }
-          for(const g of placed){const idx=ovGroups.indexOf(g); if(idx>=0)ovGroups.splice(idx,1);}
-        }
-        // ④ 仍未排(整組放不下任何 bin) → 迫不得已逐碼 placeOverflowSafe, 最後手段強放
-        for(const g of ovGroups){
-          for(const it of g.items){
-            if(placeOverflowSafe(it))continue;
-            let done=false;
-            const colsSorted=[...allCols].sort((a,b)=>(isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)||a-b);
-            for(const c of colsSorted){ if(done)break; for(let L=1;L<=4;L++){const cs=cells[plnCellId(aisle,c,L)]; if(cs&&!cs.sku&&!cs.locked){placeOneSku(it.sku,aisle,c,L,g.donor.ku.cat);done=true;break;}} }
-            if(!done)failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat});
-          }
-        }
-      }
     }
 
     // ════════════════════════════════════════════════════════════
@@ -7122,7 +7263,8 @@ function plnRunNewEngine(config,initialCells){
   }
   for(const a of nonAgAisles){
     if(!pendingUnits.length)break;
-    pendingUnits=plnPlaceNonAgUnits(a,pendingUnits);
+    // ★2026-08-07 C08案: 全A走道(大號側全A材積)走保留欄引擎, 溢出碼貼近主碼; 其餘(D/H配件)走原路徑
+    pendingUnits=isAllADest(a)?runAllAEngine(a,pendingUnits):plnPlaceNonAgUnits(a,pendingUnits);
   }
   // 仍排不完 → 內部整理騰位後重試 (§1.6 精神)
   if(pendingUnits.length){
@@ -7136,7 +7278,7 @@ function plnRunNewEngine(config,initialCells){
       if(intR&&!intR._internalError){
         intR.moves.forEach(m=>moves.push({...m,phase:'NEW_PRODUCT_CONSOLIDATION'}));
         Object.keys(intR.finalCells).forEach(k=>{cells[k]=intR.finalCells[k];});
-        pendingUnits=plnPlaceNonAgUnits(a,pendingUnits);
+        pendingUnits=isAllADest(a)?runAllAEngine(a,pendingUnits):plnPlaceNonAgUnits(a,pendingUnits);
       }
     }
   }
@@ -7156,7 +7298,12 @@ let PLN_STEPS_COUNT=1;
 // ★ 重設情境配置: 清除從「傳送至儲位調整」傳入的新品佇列, 還原至初始狀態
 function plannerResetConfig(){
   if(!window.NEW_PRODUCT_QUEUE||!window.NEW_PRODUCT_QUEUE.length){
-    // 沒有傳送過新品 → 只重新渲染
+    // 沒有傳送過新品（內部整理模式）→ 只重新渲染
+    // ★2026-08-02 修正：此早退路徑原漏清執行結果 → Run 後按「重設」下方結果殘留不消失。
+    //   補上與下方 has-queue 路徑相同的清除（此分支無 confirm，直接清除安全）。
+    PLN_LAST_RESULT=null;
+    const rc=document.getElementById('planner-result-card');
+    if(rc)rc.style.display='none';
     PLN_STEPS_COUNT=1;
     plannerRenderConfigUI();
     return;
@@ -7209,7 +7356,7 @@ function plannerRenderConfigUI(){
     <div style="display:flex;align-items:center;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid var(--border)">
       <button onclick="plannerAddStep()" class="upload-btn" style="font-size:12px;padding:4px 12px">+ 新增步驟</button>
       <span style="color:var(--text3);font-size:11px">${ovfTxt}</span>
-      <button onclick="plannerRunAllSteps()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
+      <button onclick="plannerRunAllStepsGated()" class="upload-btn" style="margin-left:auto;background:var(--accent);color:#fff;font-size:13px;padding:5px 16px">▶ Run All Steps</button>
     </div>
   `;
   // ★ FIX: 單走道有新品佇列時預設「new」；無新品佇列才預設「internal」；多走道預設「自動」
@@ -7697,6 +7844,107 @@ function plannerRefreshStepCounts(){
 
 let PLN_LAST_RESULT=null;
 
+// ════════ 臨時擺法（可用不同擺法安排的走道）— 逐走道確認 ════════
+// PLN_TEMP_LAYOUT={slot:layout}；本區負責：偵測 step 用到的臨時走道 → 彈對話框讓使用者選擺法 → 設 PLN_TEMP_APPLY → 跑。
+// 擺法碼顯示排序：大材積優先（對齊 CB/CBCCCC 慣例，如 C·B 而非 B·C）
+function plnCodeCmp(a,b){
+  const v=c=>(typeof RM_MATERIALS!=='undefined'&&RM_MATERIALS[c]&&RM_MATERIALS[c].vol)||0;
+  return v(b)-v(a) || (a<b?-1:a>b?1:0);
+}
+function plnTempAisleCodes(){   // {aisle:[distinct codes]} 來自臨時 sheet
+  const m={};
+  Object.keys(PLN_TEMP_LAYOUT||{}).forEach(slot=>{
+    const a=String(slot).split('-')[0];const c=PLN_TEMP_LAYOUT[slot];if(!a||!c)return;
+    (m[a]=m[a]||new Set()).add(c);
+  });
+  const out={};Object.keys(m).forEach(a=>out[a]=[...m[a]].sort(plnCodeCmp));return out;
+}
+function plnMasterAisleCodes(aisle){   // [distinct codes] 來自 STORAGE_MASTER（原本擺法）
+  const s=new Set();
+  Object.values(STORAGE_MASTER||{}).forEach(arr=>(arr||[]).forEach(({slot,layout})=>{
+    if(slot&&layout&&String(slot).split('-')[0]===aisle)s.add(String(layout).trim());
+  }));
+  return [...s].sort(plnCodeCmp);
+}
+// 收集本次要跑的所有 step 用到的臨時走道（★只掃「目的走道」，排除「新品-」虛擬走道），逐走道去重
+function plnCollectTempUsage(){
+  const tempCodes=plnTempAisleCodes();
+  if(!Object.keys(tempCodes).length)return [];
+  const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
+  const byAisle={};   // aisle → {aisle, steps:Set, def:[], temp:[]}
+  stepDivs.forEach(d=>{
+    const idx=parseInt(d.id.replace('pln-step-',''));
+    let cfg;try{cfg=plannerCollectStepConfig(idx);}catch(e){return;}
+    // ★2026-08-10 只看「目的走道」：臨時擺法(PLN_TEMP_APPLY→plnBuildState)僅影響「商品排入該走道」的
+    //   欄位/溢出邏輯（放入端）。純來源走道是把商品搬走、不放入，其 layout 對本次 Run 零影響 → 不詢問。
+    //   （整理模式 src=dst，該走道仍在 destination 內，照樣會問；跨 step 當作目的時也會問。）
+    const aisles=new Set([...(cfg.destination||[])].map(String).filter(a=>a&&!a.startsWith('新品-')));
+    aisles.forEach(a=>{
+      if(!tempCodes[a])return;
+      const def=plnMasterAisleCodes(a),temp=tempCodes[a];
+      if(def.join(',')===temp.join(','))return;   // 原本與臨時擺法相同 → 無需詢問
+      if(!byAisle[a])byAisle[a]={aisle:a,steps:new Set(),def:def,temp:temp};
+      byAisle[a].steps.add(idx);
+    });
+  });
+  return Object.values(byAisle).map(x=>({aisle:x.aisle,steps:[...x.steps].sort((a,b)=>a-b),def:x.def,temp:x.temp}));
+}
+// ▶ Run All Steps 的實際入口：先 gate 臨時擺法
+function plannerRunAllStepsGated(){
+  const usage=plnCollectTempUsage();
+  if(!usage.length){PLN_TEMP_APPLY={};plannerRunAllSteps();return;}
+  plnShowTempLayoutModal(usage);
+}
+// 設定 PLN_TEMP_APPLY → 跑 → 跑完清除（確保臨時擺法僅作用於本次 Run）
+function _plnRunWithTempChoices(applyMap){
+  PLN_TEMP_APPLY=applyMap||{};
+  try{plannerRunAllSteps();}finally{PLN_TEMP_APPLY={};}
+}
+function plnShowTempLayoutModal(usage){
+  const old=document.getElementById('pln-temp-modal');if(old)old.remove();
+  const ov=document.createElement('div');ov.id='pln-temp-modal';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100000;display:flex;align-items:center;justify-content:center;font-family:var(--font,sans-serif)';
+  const rows=usage.map((u,i)=>{
+    const defLbl='擺法 '+u.def.join('·'),tempLbl='擺法 '+u.temp.join('·');
+    return '<div style="border:1px solid var(--border,#ddd);border-radius:8px;padding:10px 12px;margin-bottom:10px">'
+      +'<div style="font-weight:700;margin-bottom:8px">'+u.aisle+' <span style="font-weight:400;color:var(--text3,#888);font-size:12px">（Step '+u.steps.join('、')+' 使用）</span></div>'
+      +'<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer">'
+        +'<input type="radio" name="pln-temp-'+i+'" value="def" checked style="cursor:pointer"> '
+        +'<span><b>原本 '+defLbl+'</b> <span style="color:var(--text3,#888);font-size:12px">'+plnLayoutHint(u.def)+'</span></span></label>'
+      +'<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer">'
+        +'<input type="radio" name="pln-temp-'+i+'" value="temp" style="cursor:pointer"> '
+        +'<span><b>臨時 '+tempLbl+'</b> <span style="color:var(--text3,#888);font-size:12px">'+plnLayoutHint(u.temp)+'</span></span></label>'
+      +'</div>';
+  }).join('');
+  ov.innerHTML='<div style="background:var(--bg,#fff);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.3);max-width:520px;width:92vw;max-height:86vh;overflow:auto;padding:20px">'
+    +'<div style="font-size:16px;font-weight:700;margin-bottom:6px">臨時擺法確認</div>'
+    +'<div style="font-size:12.5px;color:var(--text2,#666);margin-bottom:14px">以下走道在「臨時」表中有替代擺法，請選擇本次各走道要用哪種擺法安排（依所選擺法對應的溢出碼邏輯排入）：</div>'
+    +rows
+    +'<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">'
+      +'<button onclick="document.getElementById(\'pln-temp-modal\').remove()" style="font-size:13px;cursor:pointer;border:1px solid #ccc;border-radius:6px;padding:6px 16px;background:#f7f7f7">取消</button>'
+      +'<button id="pln-temp-go" style="font-size:13px;cursor:pointer;border:none;border-radius:6px;padding:6px 18px;background:var(--accent,#6B4F35);color:#fff;font-weight:600">開始安排</button>'
+    +'</div></div>';
+  ov.addEventListener('click',e=>{if(e.target===ov)ov.remove();});
+  document.body.appendChild(ov);
+  document.getElementById('pln-temp-go').onclick=function(){
+    const applyMap={};
+    usage.forEach((u,i)=>{
+      const sel=ov.querySelector('input[name="pln-temp-'+i+'"]:checked');
+      if(sel&&sel.value==='temp')applyMap[u.aisle]=true;
+    });
+    ov.remove();
+    _plnRunWithTempChoices(applyMap);
+  };
+}
+// 擺法碼 → 溢出邏輯提示（供對話框說明；純顯示，不影響引擎判定）
+function plnLayoutHint(codes){
+  const big=codes.some(c=>c==='G'||c==='C'),small=codes.some(c=>c==='A'||c==='B');
+  if(codes.length===1&&codes[0]==='A')return '（全A：每架末欄保留）';
+  if(codes.includes('C')&&codes.includes('B'))return '（CB：架首C保留欄）';
+  if(big&&small)return '（AG：溢出就近保留欄）';
+  if(codes.includes('D')||codes.includes('H'))return '（配件：溢出排尾端）';
+  return '';
+}
 function plannerRunAllSteps(){
   // 收集所有 step 設定
   const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
@@ -7928,6 +8176,7 @@ function plannerRenderResult(r){
 function plannerExportResult(){
   if(!PLN_LAST_RESULT){alert('先執行計畫');return;}
   const r=PLN_LAST_RESULT;
+  buildFW26SlotLookup();  // ★ 以最新 26FW 名單建立款號→倉位（1F/3F/4F）
   // === Sheet 1: 新品安排 (含擺法欄位, 不含顏色) ===
   const cols1=['商品編號','商品名稱','尺寸','儲位','擺法','倉位','未到量'];
   const aoa1=[cols1];
@@ -7939,7 +8188,7 @@ function plannerExportResult(){
     .sort((a,b)=>String(a['商品編號']).localeCompare(String(b['商品編號']))).forEach(s=>{
     const slot=s['儲位']||'';
     const layout=moveLayoutMap[slot]||'';
-    aoa1.push([s['商品編號'],s['商品名稱'],s['尺寸'],slot,layout,'',s['未到量']||0]);
+    aoa1.push([s['商品編號'],s['商品名稱'],s['尺寸'],slot,layout,fw26SlotOf(s['商品編號']),s['未到量']||0]);
   });
 
   const wb=XLSX.utils.book_new();
@@ -7964,44 +8213,58 @@ function plannerExportResult(){
     if(!validMoves.length){
       return [['商品編號','NEW','擺法','儲位']]; // 空 sheet 保底
     }
-    // 按 src 走道分組 + 組內排序
-    const byAisle={};
-    validMoves.forEach(m=>{
-      const a=aisleOf(m.src);
-      if(!a)return;
-      if(!byAisle[a])byAisle[a]=[];
-      byAisle[a].push(m);
-    });
-    Object.values(byAisle).forEach(arr=>{
-      arr.sort((a,b)=>colOf(a.src)-colOf(b.src)||layerOf(a.src)-layerOf(b.src));
-    });
-    // 切 chunks (每 chunk ≤57 moves)
-    const TY_BLOCK=57;
-    const multiPages=[];const openSlots=[];const singleChunks=[];
-    Object.keys(byAisle).sort().forEach(a=>{
-      const mvs=byAisle[a];
-      const cs=[];
-      for(let i=0;i<mvs.length;i+=TY_BLOCK) cs.push({aisle:a,moves:mvs.slice(i,i+TY_BLOCK)});
-      if(cs.length>=2){
-        for(let i=0;i<cs.length;i+=2){
-          if(i+1<cs.length){multiPages.push([cs[i],cs[i+1]]);}
-          else{const p=[cs[i]];multiPages.push(p);openSlots.push(p);}
-        }
-      } else if(cs.length===1){singleChunks.push(cs[0]);}
-    });
-    // 填 openSlots + pairing
-    singleChunks.sort((a,b)=>b.moves.length-a.moves.length);
-    let si2=0;
-    while(si2<singleChunks.length&&openSlots.length>0) openSlots.shift().push(singleChunks[si2++]);
-    const singles=singleChunks.slice(si2);const pairedPages=[];
-    let L=0,R=singles.length-1;
-    while(L<=R){
-      if(L===R){pairedPages.push([singles[L]]);L++;}
-      else{pairedPages.push([singles[L],singles[R]]);L++;R--;}
+    // ★2026-08-10 待移執行順序：先「就地騰位/移溢位」(free-up) 後「主移入」(SOURCE_TO_DEST)。
+    //   實體倉需先清空目的走道空格才能把來源走道商品移入；原本純按 src 走道字母排序，
+    //   會把 A07→A10 主移排在 A10→A10 就地騰位「前面」導致執行順序顛倒 (Gordon 附截圖案)。
+    //   純顯示/匯出層：不動 moves 內容與引擎；既有「src 走道→col→layer ASC」排序完全保留，
+    //   僅把待移頁面拆成 free-up 段、主移段，兩段各自 bin-pack 後串接 (free-up 在前)。
+    const isFreeUp=m=>m.phase==='INTERNAL_DISPLACEMENT'||m.phase==='INTERNAL_CONSOLIDATION'
+      ||m.phase==='OVERFLOW_ZONE'||m.phase==='XX_OVERFLOW'||m.phase==='NEW_PRODUCT_CONSOLIDATION';
+    // 將一組 moves 做「按 src 走道分組 + 組內排序 + bin-packing」→ 回傳 pages
+    function buildPagesFor(mvsArr){
+      if(!mvsArr.length) return [];
+      const byAisle={};
+      mvsArr.forEach(m=>{
+        const a=aisleOf(m.src);
+        if(!a)return;
+        if(!byAisle[a])byAisle[a]=[];
+        byAisle[a].push(m);
+      });
+      Object.values(byAisle).forEach(arr=>{
+        arr.sort((a,b)=>colOf(a.src)-colOf(b.src)||layerOf(a.src)-layerOf(b.src));
+      });
+      // 切 chunks (每 chunk ≤57 moves)
+      const TY_BLOCK=57;
+      const multiPages=[];const openSlots=[];const singleChunks=[];
+      Object.keys(byAisle).sort().forEach(a=>{
+        const mvs=byAisle[a];
+        const cs=[];
+        for(let i=0;i<mvs.length;i+=TY_BLOCK) cs.push({aisle:a,moves:mvs.slice(i,i+TY_BLOCK)});
+        if(cs.length>=2){
+          for(let i=0;i<cs.length;i+=2){
+            if(i+1<cs.length){multiPages.push([cs[i],cs[i+1]]);}
+            else{const p=[cs[i]];multiPages.push(p);openSlots.push(p);}
+          }
+        } else if(cs.length===1){singleChunks.push(cs[0]);}
+      });
+      // 填 openSlots + pairing
+      singleChunks.sort((a,b)=>b.moves.length-a.moves.length);
+      let si2=0;
+      while(si2<singleChunks.length&&openSlots.length>0) openSlots.shift().push(singleChunks[si2++]);
+      const singles=singleChunks.slice(si2);const pairedPages=[];
+      let L=0,R=singles.length-1;
+      while(L<=R){
+        if(L===R){pairedPages.push([singles[L]]);L++;}
+        else{pairedPages.push([singles[L],singles[R]]);L++;R--;}
+      }
+      const pgs=[...multiPages,...pairedPages];
+      pgs.forEach(p=>{if(p.length===2&&p[0].aisle>p[1].aisle)[p[0],p[1]]=[p[1],p[0]];});
+      pgs.sort((a,b)=>a[0].aisle.localeCompare(b[0].aisle));
+      return pgs;
     }
-    const pages=[...multiPages,...pairedPages];
-    pages.forEach(p=>{if(p.length===2&&p[0].aisle>p[1].aisle)[p[0],p[1]]=[p[1],p[0]];});
-    pages.sort((a,b)=>a[0].aisle.localeCompare(b[0].aisle));
+    // free-up 段在前、主移段在後；各段內維持原本 src 走道→col→layer 排序
+    const pages=[...buildPagesFor(validMoves.filter(isFreeUp)),
+                 ...buildPagesFor(validMoves.filter(m=>!isFreeUp(m)))];
     // 渲染 aoa
     const maxRows=pages.length?Math.max(...pages.flatMap(p=>p.map(c=>c.moves.length+1))):1;
     const aoa=[];
@@ -8338,10 +8601,17 @@ function renderArrangeCompare(){
     catBody.innerHTML='';
     let _umPendForTotal=0;  // ★ 2026-07-16: 未匹配的待排數（供合計）
     const sorted=Object.entries(catStats).sort((a,b)=>b[1].skuCount-a[1].skuCount);
+    // ★ 2026-08-09 Gordon：區分兩種空狀態——①完全沒比對到 26FW（原訊息）；②有比對到但本週全部已排入/無待排 → 明確提示，不留「合計 0」空殼
+    const _hasPendingCat=sorted.some(([,s])=>(s.skuCount||0)>0);
+    const _umPendCount=newSeasonUnmatched.filter(r=>!plnIsPlacedCode(r.code,_pIdx)).length;
     if(!sorted.length && !newSeasonUnmatched.length){
       catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未比對到 26FW 新品（請先確認已上傳 26FW 報表）</td></tr>';
+    }else if(!_hasPendingCat && _umPendCount===0){
+      catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">本週無待安排新品</td></tr>';
     }else{
       sorted.forEach(([cat,s])=>{
+        // ★ 2026-08-09 Gordon：該類別待排 SKU=0（本週已無待安排）→ 整列隱藏，不顯示（display-layer only；不影響合計/圓餅，兩者本就只計 skuCount>0）
+        if((s.skuCount||0)<=0)return;
         const zone=catZoneLookup[cat]||'—';
         const tr=document.createElement('tr');
         tr.style.borderBottom='1px solid var(--border)';
@@ -8433,14 +8703,34 @@ function renderArrangeCompare(){
     //   排入儲位後重新上傳報表，這裡的 SKU 數完全不會變。改為以 plnIsPlacedCode() 分流。
     const arrangeByStyle={};
     const _fcPlacedIdx=plnBuildPlacedIndex();
+    // ★ 2026-08-05 Gordon：同一款號(前5碼)可能同款不同尺寸走不同包材 → 不同類別
+    //   （如 74208：100~120→小袋/小褲，130~160→中袋/童中袋）。類別必須以「9碼商品編號」直接查
+    //   26FW 名單(SKU級)，不能塌縮成款號單一類別，否則其中一類會被整批吃掉、在明細/待排/送 planner 全消失。
+    //   fw26Lookup 查不到該 SKU 時再回落款號層級 styleToCat（不惡化既有行為）。
+    const _fcSkuCatOf=(code)=>{
+      const c=fw26Lookup[String(code||'').trim()];
+      if(c)return c;
+      return styleToCat[String(code||'').substring(0,5)]||null;
+    };
     (ARRANGE_DATA||[]).forEach(ar=>{
       const style=String(ar.code||'').substring(0,5);
       if(!style)return;
-      if(!arrangeByStyle[style])arrangeByStyle[style]={skuCount:0,placedCount:0,plannedSlots:new Set()};
-      if(plnIsPlacedCode(ar.code,_fcPlacedIdx))arrangeByStyle[style].placedCount++;
-      else arrangeByStyle[style].skuCount++;
-      if(ar.plannedSlot)arrangeByStyle[style].plannedSlots.add(ar.plannedSlot);
+      if(!arrangeByStyle[style])arrangeByStyle[style]={skuCount:0,placedCount:0,plannedSlots:new Set(),cats:{}};
+      const _ck=_fcSkuCatOf(ar.code)||'未匹配';
+      if(!arrangeByStyle[style].cats[_ck])arrangeByStyle[style].cats[_ck]={skuCount:0,placedCount:0,plannedSlots:new Set()};
+      const _placed=plnIsPlacedCode(ar.code,_fcPlacedIdx);
+      if(_placed){arrangeByStyle[style].placedCount++;arrangeByStyle[style].cats[_ck].placedCount++;}
+      else{arrangeByStyle[style].skuCount++;arrangeByStyle[style].cats[_ck].skuCount++;}
+      if(ar.plannedSlot){arrangeByStyle[style].plannedSlots.add(ar.plannedSlot);arrangeByStyle[style].cats[_ck].plannedSlots.add(ar.plannedSlot);}
     });
+    // 款號 → 類別分佈（依 SKU 真實類別，待排+已排；無 ARRANGE 資料回 null）— 供箱數比例分攤用
+    const _styleCatDist=(style)=>{
+      const arr=arrangeByStyle[style];
+      if(!arr||!arr.cats)return null;
+      const dist={}; let sum=0;
+      Object.entries(arr.cats).forEach(([c,cb])=>{const n=(cb.skuCount||0)+(cb.placedCount||0);if(n>0){dist[c]=n;sum+=n;}});
+      return sum>0?{dist,sum}:null;
+    };
 
     // 第一步：按 (進倉日期 + 進口編號 + 櫃號) 分組
     //   套用補空規則：櫃號有/進口空 → 進口=廠商；兩空+散貨提醒 → 櫃號=散貨,進口=廠商；兩空無提醒 → 櫃號=廠商
@@ -8506,6 +8796,8 @@ function renderArrangeCompare(){
       _expNote.textContent=_expiredN?`已隱藏 ${_expiredN} 個已過進倉日的貨櫃`:'';
       _expNote.title=_expiredN?'進倉日早於今天的貨櫃已進倉，不再列入待排清單':'';
     }
+    // ★ 以最新 26FW 名單建立款號→倉位（供彙總「倉位」欄直接帶入，免 ERP 上傳即顯示）
+    buildFW26SlotLookup();
     _grpEntries.forEach(([grpKey,grp])=>{
       const catStats={};  // {類別: {skuCount, plannedSlots:Set, styles:Set (用於提示), unmatchedStyles:Set}}
       const catBoxes={};  // {類別: 箱數加總}
@@ -8513,59 +8805,84 @@ function renderArrangeCompare(){
       const catFcPlannedSlots={};  // {類別: Set of 倉位（如 '1F','2F'）} — 來自預告進貨表 plannedSlot
       const catReminders={};       // {類別: Set of 進倉提醒（去重）}
       // ★ 先按 rowBoxList 累計箱數 + 儲區/倉位 + 進倉提醒 到類別
+      // ★ 2026-08-05 Gordon：款號可能跨多類別（同款不同尺寸不同包材）→
+      //   箱數（款號級數字，無法逐類別得知）依該款 SKU 數比例分攤，餘數給最大類別，整櫃箱數總和不變；
+      //   儲區/倉位（forecast slot 會覆蓋 catZoneLookup）僅「單一類別款」沿用，多類別款留給各類別自身 catZoneLookup 判定，避免把某類別的 slot 誤蓋到另一類別；
+      //   進倉提醒屬整個款號 → 套用到該款所有目標類別。
       grp.rowBoxList.forEach(({style,boxCount,slot,plannedSlot,reminder})=>{
         if(!style)return;
-        const cat=styleToCat[style]||'未匹配';
-        catBoxes[cat]=(catBoxes[cat]||0)+boxCount;
-        // 儲區：取 slot 首字（C09 → C），只取字母 A-Z
-        if(slot){
-          const _c=String(slot).charAt(0).toUpperCase();
-          if(/[A-Z]/.test(_c)){
-            if(!catSlotZones[cat])catSlotZones[cat]=new Set();
-            catSlotZones[cat].add(_c);
+        const _cd=_styleCatDist(style);
+        const _targets=_cd?Object.keys(_cd.dist):[styleToCat[style]||'未匹配'];
+        const _isMixed=!!(_cd&&_targets.length>1);
+        // 箱數分攤
+        if(_cd){
+          const _ent=Object.entries(_cd.dist);
+          let _assigned=0,_maxCat=_ent[0][0],_maxN=-1;
+          _ent.forEach(([c,n])=>{const v=Math.floor((Number(boxCount)||0)*n/_cd.sum);catBoxes[c]=(catBoxes[c]||0)+v;_assigned+=v;if(n>_maxN){_maxN=n;_maxCat=c;}});
+          catBoxes[_maxCat]=(catBoxes[_maxCat]||0)+((Number(boxCount)||0)-_assigned);
+        }else{
+          const cat=styleToCat[style]||'未匹配';
+          catBoxes[cat]=(catBoxes[cat]||0)+(Number(boxCount)||0);
+        }
+        // 儲區/倉位（forecast slot）：僅單一類別款沿用
+        if(!_isMixed){
+          const cat=_targets[0];
+          if(slot){
+            const _c=String(slot).charAt(0).toUpperCase();
+            if(/[A-Z]/.test(_c)){
+              if(!catSlotZones[cat])catSlotZones[cat]=new Set();
+              catSlotZones[cat].add(_c);
+            }
+          }
+          if(plannedSlot){
+            const _p=String(plannedSlot).trim();
+            if(_p){
+              if(!catFcPlannedSlots[cat])catFcPlannedSlots[cat]=new Set();
+              catFcPlannedSlots[cat].add(_p);
+            }
           }
         }
-        // 倉位：plannedSlot 原值（去頭尾空白）
-        if(plannedSlot){
-          const _p=String(plannedSlot).trim();
-          if(_p){
-            if(!catFcPlannedSlots[cat])catFcPlannedSlots[cat]=new Set();
-            catFcPlannedSlots[cat].add(_p);
-          }
-        }
-        // 進倉提醒：per 款號去重後集合（顯示時 join）
+        // 進倉提醒：per 款號去重後集合（顯示時 join）→ 套用到該款所有目標類別
         const _rm=String(reminder||'').trim();
         if(_rm){
-          if(!catReminders[cat])catReminders[cat]=new Set();
-          catReminders[cat].add(_rm);
+          _targets.forEach(cat=>{
+            if(!catReminders[cat])catReminders[cat]=new Set();
+            catReminders[cat].add(_rm);
+          });
         }
       });
       // ★ 同一貨櫃內同款號可能有多列（不同進倉批次）→ 去重後才累計 SKU 數，
       //   否則 arrangeByStyle 的 skuCount 會被重複加總（如 73567 兩批次 16→32）
       const _seenGrpStyles=new Set();
+      const _ensureCat=(c)=>{if(!catStats[c])catStats[c]={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};return catStats[c];};
       grp.styles.forEach(style=>{
         if(!style)return;
         if(_seenGrpStyles.has(style))return;
         _seenGrpStyles.add(style);
-        const cat=styleToCat[style];
         const arr=arrangeByStyle[style];
-        const skuNum=arr?arr.skuCount:0;            // 待排
-        const placedNum=arr?arr.placedCount:0;      // 已排入（ERP 或實況）
-
-        if(cat){
-          if(!catStats[cat])catStats[cat]={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set()};
-          catStats[cat].skuCount+=skuNum;
-          catStats[cat].placedCount+=placedNum;
-          catStats[cat].styles.add(style);
-          if(arr)arr.plannedSlots.forEach(s=>catStats[cat].plannedSlots.add(s));
+        const catBreak=(arr&&arr.cats&&Object.keys(arr.cats).length)?arr.cats:null;
+        if(catBreak){
+          // ★ 2026-08-05 Gordon：依 SKU 真實類別拆分（同款可跨小褲/童中袋等多類別）
+          Object.entries(catBreak).forEach(([bcat,cb])=>{
+            const isUn=(bcat==='未匹配');
+            const cat=isUn?'未匹配':bcat;
+            const st=_ensureCat(cat);
+            st.skuCount+=cb.skuCount;
+            st.placedCount+=cb.placedCount;
+            st.styles.add(style);
+            if(isUn)st.unmatchedStyles.add(style);
+            cb.plannedSlots.forEach(s=>st.plannedSlots.add(s));
+          });
         }else{
-          // 不在 26FW 名單：全部歸為「未匹配」（含 73 等其他季別前綴）
-          if(!catStats['未匹配'])catStats['未匹配']={skuCount:0,placedCount:0,plannedSlots:new Set(),styles:new Set(),unmatchedStyles:new Set()};
-          catStats['未匹配'].skuCount+=skuNum;
-          catStats['未匹配'].placedCount+=placedNum;
-          catStats['未匹配'].unmatchedStyles.add(style);
-          catStats['未匹配'].styles.add(style);
-          if(arr)arr.plannedSlots.forEach(s=>catStats['未匹配'].plannedSlots.add(s));
+          // 無 ARRANGE 資料：維持原本「款號層級、skuCount=0 仍顯示一列」的行為
+          const cat=styleToCat[style];
+          if(cat){
+            _ensureCat(cat).styles.add(style);
+          }else{
+            const st=_ensureCat('未匹配');
+            st.unmatchedStyles.add(style);
+            st.styles.add(style);
+          }
         }
       });
 
@@ -8593,11 +8910,15 @@ function renderArrangeCompare(){
         //   - 若預告進貨表有 plannedSlot 資料 → 直接顯示，不用 ARRANGE_DATA 的 plannedSlots
         const hasFcSlot=catSlotZones[cat]&&catSlotZones[cat].size>0;
         const hasFcPlanned=catFcPlannedSlots[cat]&&catFcPlannedSlots[cat].size>0;
+        // ★ 26FW 倉位（依款號直接帶入；免 ERP 上傳即可顯示，優先於 ERP 預計倉位）
+        const _fw26SlotSet=new Set();
+        s.styles.forEach(st=>{const _v=fw26SlotOf(st);if(_v)_fw26SlotSet.add(_v);});
+        const fw26SlotStr=_fw26SlotSet.size>0?Array.from(_fw26SlotSet).sort().join(','):'';
         let zone, slots;
         if(isReEntry){
           // 再次進倉: 用預告進貨表的 slot/plannedSlot
           zone=hasFcSlot?Array.from(catSlotZones[cat]).sort().join(','):'—';
-          slots=hasFcPlanned?Array.from(catFcPlannedSlots[cat]).sort().join(','):'—';
+          slots=fw26SlotStr||(hasFcPlanned?Array.from(catFcPlannedSlots[cat]).sort().join(','):'—');
         }else{
           // 一般新品: 若預告進貨表有 slot/plannedSlot 則覆蓋，否則用 SKU儲位tab資料
           if(hasFcSlot){
@@ -8605,7 +8926,10 @@ function renderArrangeCompare(){
           } else {
             zone=cat==='未匹配'?'—':(catZoneLookup[cat]||'—');
           }
-          if(hasFcPlanned){
+          // 倉位：26FW 值優先；無 26FW 對應時退回 ERP 預計倉位／儲位安排
+          if(fw26SlotStr){
+            slots=fw26SlotStr;
+          } else if(hasFcPlanned){
             slots=Array.from(catFcPlannedSlots[cat]).sort().join(',');
           } else {
             slots=Array.from(s.plannedSlots).filter(x=>x).join(',')||'—';
@@ -8645,7 +8969,8 @@ function renderArrangeCompare(){
         const cbHtml=catHasPending(s)?`<input type="checkbox" class="forecast-cb-category" data-key="${_gkEsc}" data-cat="${_catEsc}" onchange="forecastCbToggle(this)" style="cursor:pointer;margin-right:4px">`:'';
         html+=`<td style="padding:4px 8px;text-align:center;border-right:1px solid var(--border);${catColor}" title="${catTitle}">${cbHtml}<span style="cursor:default">${displayCat}</span></td>`;
         // SKU 數欄位：顯示「待排」；已排入另以灰字標註（2026-07-16）＋跨櫃重複提醒
-        const _pendTxt=s.skuCount?String(s.skuCount):(s.placedCount?'0':'—');
+        // ★ 2026-08-09 Gordon：無待排新品（skuCount=0，含已排完儲位者）→ SKU 數顯示「—」而非「0」（display-layer only；列仍保留、已排/再次進倉沿用原邏輯）
+        const _pendTxt=s.skuCount?String(s.skuCount):'—';
         // ★2026-07-21：標示此類別內有幾筆是「暫放在 XX/TX」被拉回待排的
         let _tempN=0;
         s.styles.forEach(st=>{(ARRANGE_DATA||[]).forEach(ar=>{
@@ -8684,6 +9009,25 @@ function renderArrangeCompare(){
 // 26FW — 排序狀態
 let FW26_SORT = { col: '', asc: true };
 
+// ★ 26FW 倉位查表：以款號（=商品編號前5碼）為鍵，值 1F/3F/4F。
+//   來源＝FW26_FILTER_DATA[8]款號 → [13]倉位（同款號一致）。
+//   供「匯出待排新品」「情境配置匯出」以款號自動帶入倉位。
+function buildFW26SlotLookup(){
+  const m={};
+  (FW26_FILTER_DATA||[]).forEach(r=>{
+    const kh=String(r&&r[8]||'').trim();
+    const slot=String(r&&r[13]||'').trim();
+    if(kh&&slot)m[kh]=slot;
+  });
+  window.EMBEDDED_FW26_SLOT=m;
+  return m;
+}
+function fw26SlotOf(code){
+  const m=window.EMBEDDED_FW26_SLOT||buildFW26SlotLookup();
+  const kh=String(code||'').trim().slice(0,5);
+  return m[kh]||'';
+}
+
 // 26FW — 上傳報表
 async function handleFW26Upload(event){
   const file=event.target.files[0];if(!file)return;
@@ -8696,7 +9040,7 @@ async function handleFW26Upload(event){
     // ★ 格式驗證
     const validate = validateReportFormat(raw, ['商品編號','商品名稱','類別','預計交期','款號'], '26FW 新品報表');
     if(!validate.ok){ hideLoading(); alert(validate.msg); event.target.value=''; return; }
-    // A~M: 採購人員,採購單季別,分類,款號,商品編號,商品名稱,顏色名稱,尺寸,預計交期,顏色數,尺寸段,包裝耗材,類別
+    // A~N: 採購人員,採購單季別,分類,款號,商品編號,商品名稱,顏色名稱,尺寸,預計交期,顏色數,尺寸段,包裝耗材,類別,倉位
     FW26_FILTER_DATA=raw.map(r=>[
       String(r['商品編號']||'').trim(),
       r['商品名稱']||'',
@@ -8710,8 +9054,11 @@ async function handleFW26Upload(event){
       r['尺寸']||'',
       r['顏色數']||'',
       r['尺寸段']||'',
-      r['包裝耗材']||''
+      r['包裝耗材']||'',
+      String(r['倉位']||'').trim()   // [13] 預計倉位（1F/3F/4F，依款號一致）
     ]);
+    // ★ 建立 26FW 款號→倉位 查表（供待排新品/情境配置匯出帶入）
+    buildFW26SlotLookup();
     // 更新 EMBEDDED_FW26_LOOKUP
     window.EMBEDDED_FW26_LOOKUP={};
     FW26_FILTER_DATA.forEach(r=>{if(r[0]&&r[3])window.EMBEDDED_FW26_LOOKUP[r[0]]=r[3];});
@@ -9036,10 +9383,10 @@ function renderFW26Table(){
   data.slice(0,1000).forEach(row=>{
     const isArrived=arrivedSet.has(row[0]);
     const tr=document.createElement('tr');
-    tr.innerHTML=`<td style="font-size:11px">${row[5]||'—'}</td><td style="font-size:11px">${row[6]||'—'}</td><td style="font-size:11px">${row[7]||'—'}</td><td class="num" style="font-size:11px">${row[8]||'—'}</td><td class="num" style="font-size:11px">${row[0]}</td><td class="label-cell" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;font-size:11px">${row[1]||''}</td><td style="font-size:11px">${row[2]||''}</td><td style="font-size:11px">${row[9]||''}</td><td style="font-size:11px">${row[4]||''}</td><td class="num" style="font-size:11px">${row[10]||''}</td><td class="num" style="font-size:11px">${row[11]||''}</td><td style="font-size:11px;max-width:100px;overflow:hidden;text-overflow:ellipsis">${row[12]||''}</td><td style="font-size:11px">${row[3]||''}</td><td><span class="fw-tag ${isArrived?'fw-in':'fw-out'}">${isArrived?'已進倉':'未進倉'}</span></td>`;
+    tr.innerHTML=`<td style="font-size:11px">${row[5]||'—'}</td><td style="font-size:11px">${row[6]||'—'}</td><td style="font-size:11px">${row[7]||'—'}</td><td class="num" style="font-size:11px">${row[8]||'—'}</td><td class="num" style="font-size:11px">${row[0]}</td><td class="label-cell" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;font-size:11px">${row[1]||''}</td><td style="font-size:11px">${row[2]||''}</td><td style="font-size:11px">${row[9]||''}</td><td style="font-size:11px">${row[4]||''}</td><td class="num" style="font-size:11px">${row[10]||''}</td><td class="num" style="font-size:11px">${row[11]||''}</td><td style="font-size:11px;max-width:100px;overflow:hidden;text-overflow:ellipsis">${row[12]||''}</td><td style="font-size:11px">${row[3]||''}</td><td style="font-size:11px;text-align:center;font-weight:600;color:var(--accent)">${row[13]||'—'}</td><td><span class="fw-tag ${isArrived?'fw-in':'fw-out'}">${isArrived?'已進倉':'未進倉'}</span></td>`;
     tbody.appendChild(tr);
   });
-  if(data.length>1000){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="14" style="color:var(--text3);text-align:center;padding:10px">共 ${data.length} 筆，顯示前 1000 筆</td>`;tbody.appendChild(tr);}
+  if(data.length>1000){const tr=document.createElement('tr');tr.innerHTML=`<td colspan="15" style="color:var(--text3);text-align:center;padding:10px">共 ${data.length} 筆，顯示前 1000 筆</td>`;tbody.appendChild(tr);}
   // 區間進倉統計
   renderFW26PeriodStats(dateFrom,dateTo,catFilter);
 }
@@ -9486,6 +9833,76 @@ function renderXXTable(zone,rows,defaultCapacity){
   });
   const pre=zone.toLowerCase();
   document.getElementById(`${pre}-total-ungrab`).textContent=num(totalUngrab);document.getElementById(`${pre}-total-stock`).textContent=num(totalStock);document.getElementById(`${pre}-total-shelf`).textContent=num(totalShelf);document.getElementById(`${pre}-total-vol`).textContent=totalVol.toFixed(2);document.getElementById(`${pre}-total-sku`).textContent=num(totalSKU);
+}
+// ★ 2026-08-13 匯出 XX/TX 區統計報表 — 彙總邏輯與 renderXXTable 完全一致，確保匯出數字＝畫面數字
+//   Sheet1 儲位統計（區域/儲位/未抓貨/銷售庫存/架上數量/剩餘材積/使用率/SKU數 + 合計）
+//   Sheet2 SKU明細（儲位/區域/商品編號/商品名稱/顏色/尺寸/架上數量/單品材積/材積小計）
+//   ★ 區域欄 carry-forward：範圍外儲位沿用上一個有效標籤 → 對應畫面「分隔列只在標籤變動時插入」的視覺分組
+//     （例：TX-161~184 落在配件區 111~154 之後、無獨立設定 → 畫面上接在配件區底下、匯出亦繼承配件區）
+function exportXXZoneReport(zone){
+  if(!XX_DB||!XX_DB.length){alert('尚未上傳 XX/TX 報表，無可匯出資料');return;}
+  const rows=XX_DB.filter(r=>r.儲位.startsWith(zone+'-'));
+  if(!rows.length){alert(`目前沒有 ${zone} 區資料可匯出`);return;}
+  // 依 renderXXTable 同邏輯：按儲位彙總
+  const byLoc={};
+  rows.forEach(r=>{
+    if(!byLoc[r.儲位])byLoc[r.儲位]={ungrab:0,stock:0,shelf:0,vol:0,skus:[]};
+    const loc=byLoc[r.儲位];loc.ungrab+=r.未抓貨;loc.stock+=r.銷售庫存;loc.shelf+=r.架上數量;loc.vol+=r.商品材積*r.架上數量;loc.skus.push(r);
+  });
+  const locs=Object.keys(byLoc).sort((a,b)=>parseInt(a.split('-')[1])-parseInt(b.split('-')[1]));
+  const defaultCapacity=zone==='XX'?XX_DEFAULT_CAPACITY:TX_DEFAULT_CAPACITY;
+  // 區域標籤（衣服區/配件區），同 renderXXTable getZoneLabel
+  const inRange=(loc,range)=>{const n=parseInt(loc.split('-')[1]);const s=parseInt(range[0].split('-')[1]);const e=parseInt(range[1].split('-')[1]);return n>=s&&n<=e;};
+  const getZoneLabel=(loc)=>{const config=XX_ZONE_CONFIG[zone];if(!config)return'';const clothes=Array.isArray(config.clothes[0])?config.clothes:[config.clothes];const acc=Array.isArray(config.accessories[0])?config.accessories:[config.accessories];for(const r of clothes)if(inRange(loc,r))return'衣服區';for(const r of acc)if(inRange(loc,r))return'配件區';return'';};
+  // ★ carry-forward：範圍外儲位繼承上一個有效標籤（對應畫面分隔列語意）；先算好每儲位最終區域
+  const zoneOf={};let _lastZone='';
+  locs.forEach(loc=>{const z=getZoneLabel(loc);if(z)_lastZone=z;zoneOf[loc]=_lastZone;});
+  // Sheet1: 儲位統計（移除「商品材積」「狀態」欄）
+  const sum=[['區域','儲位','未抓貨','銷售庫存','架上數量','剩餘材積','使用率(%)','SKU數']];
+  let tU=0,tS=0,tSh=0,tSKU=0;
+  locs.forEach(locCode=>{
+    const loc=byLoc[locCode];
+    const capacity=XX_CAPACITY[locCode]||defaultCapacity;
+    const remain=capacity-loc.vol;const usage=capacity>0?(loc.vol/capacity*100):0;const skuCount=loc.skus.length;
+    tU+=loc.ungrab;tS+=loc.stock;tSh+=loc.shelf;tSKU+=skuCount;
+    sum.push([zoneOf[locCode],locCode,loc.ungrab,loc.stock,loc.shelf,+remain.toFixed(2),+usage.toFixed(1),skuCount]);
+  });
+  sum.push(['','合計',tU,tS,tSh,'','',tSKU]);
+  // Sheet2: SKU明細（同畫面展開列順序：先儲位排序、儲位內照原始上傳序）
+  const det=[['儲位','區域','商品編號','商品名稱','顏色','尺寸','架上數量','單品材積','材積小計']];
+  locs.forEach(locCode=>{
+    const zl=zoneOf[locCode];
+    byLoc[locCode].skus.forEach(item=>{
+      det.push([locCode,zl,item.商品編號,item.商品名稱,item.顏色,item.尺寸,item.架上數量,+item.商品材積.toFixed(2),+(item.商品材積*item.架上數量).toFixed(2)]);
+    });
+  });
+  // ★ 全部儲存格置中 + 表頭樣式（沿用 exportDBFiltered 樣式模式，xlsx-js-style 支援）
+  const thinB={style:'thin',color:{rgb:'000000'}};const allB={top:thinB,bottom:thinB,left:thinB,right:thinB};const medB={style:'medium',color:{rgb:'000000'}};
+  const styleSheet=ws=>{
+    const range=XLSX.utils.decode_range(ws['!ref']||'A1');
+    for(let R=range.s.r;R<=range.e.r;R++)for(let C=range.s.c;C<=range.e.c;C++){
+      const addr=XLSX.utils.encode_cell({r:R,c:C});if(!ws[addr])continue;
+      ws[addr].s={
+        alignment:{horizontal:'center',vertical:'center'},
+        border:R===0?{...allB,bottom:medB}:allB,
+        font:R===0?{bold:true,name:'Microsoft JhengHei',sz:11}:{name:'Microsoft JhengHei',sz:11},
+        ...(R===0?{fill:{patternType:'solid',fgColor:{rgb:'F2EDE8'}}}:{})
+      };
+    }
+    if(!ws['!sheetViews'])ws['!sheetViews']=[{}];ws['!sheetViews'][0].showGridLines=false;
+  };
+  const wb=XLSX.utils.book_new();
+  const ws1=XLSX.utils.aoa_to_sheet(sum);
+  ws1['!cols']=[{wch:8},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:7}];
+  styleSheet(ws1);
+  XLSX.utils.book_append_sheet(wb,ws1,`${zone}區儲位統計`);
+  const ws2=XLSX.utils.aoa_to_sheet(det);
+  ws2['!cols']=[{wch:10},{wch:8},{wch:14},{wch:30},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9}];
+  styleSheet(ws2);
+  XLSX.utils.book_append_sheet(wb,ws2,`${zone}區SKU明細`);
+  const d=new Date();const pad=n=>String(n).padStart(2,'0');
+  const ts=`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  XLSX.writeFile(wb,`${zone}區統計_${ts}.xlsx`,{bookSST:false,cellStyles:true});
 }
 function toggleXXDetail(td,locCode){
   const tr=td.parentElement;const nextTr=tr.nextElementSibling;
@@ -10217,7 +10634,7 @@ const SLOT_ZONES=[
   {floor:'2F',zone:'L',aisles:['L01','L02','L03','L04','L05','L06','L07','L08','L09','L10','L11','L12','L13','L14','L15']},
   {floor:'2F',zone:'M',aisles:['M06','M07','M08']},
 ];
-const SLOT_MONTHLY_HIST={
+const SLOT_MONTHLY_HIST_DEFAULT={
   2020:[12903,12201,15030,15107,12482,10668,10000,11615,12791,12921,11446,10449],
   2021:[10105,9748,12403,14347,14389,12676,13132,13873,14507,14177,13143,13027],
   2022:[13679,13733,16604,17510,16721,16523,16546,19501,21149,20026,18733,20585],
@@ -10225,6 +10642,17 @@ const SLOT_MONTHLY_HIST={
   2024:[23608,23586,23113,22779,21903,22072,23122,27289,27639,26149,23842,23623],
   2025:[25183,24714,26893,25332,23950,23447,23870,28914,30265,28569,26398,26898],
 };
+// ★ 2026-08-13 修正：原本寫入 localStorage('slot_monthly_hist')＋列入匯出/匯入，但啟動從不讀回
+//   （與 SLOT_SEASON_HIST 不對稱）→ 寫入/匯入的月度歷史值重新整理即遺失。比照 SLOT_SEASON_HIST 模式還原：
+//   已存年份逐年覆蓋預設值，未存年份沿用 hardcode 預設（匯入舊備份檔不會弄丟內建歷史）。
+const SLOT_MONTHLY_HIST=(()=>{
+  const base=JSON.parse(JSON.stringify(SLOT_MONTHLY_HIST_DEFAULT));
+  try{
+    const saved=JSON.parse(localStorage.getItem('slot_monthly_hist')||'null');
+    if(saved&&typeof saved==='object'){Object.keys(saved).forEach(y=>{if(Array.isArray(saved[y])&&saved[y].length===12)base[y]=saved[y];});}
+  }catch(e){}
+  return base;
+})();
 // 歷史季別 SKU（可雙擊編輯，存 localStorage）
 const SLOT_SEASON_HIST_DEFAULT={
   春夏:{2020:11475,2021:13890,2022:17097,2023:17447,2024:18207,2025:19310},
@@ -10238,11 +10666,40 @@ const SLOT_SEASON_HIST=(()=>{
   return JSON.parse(JSON.stringify(SLOT_SEASON_HIST_DEFAULT));
 })();
 function saveSlotSeasonHist(){try{localStorage.setItem('slot_season_hist',JSON.stringify(SLOT_SEASON_HIST));}catch(e){}}
-let SLOT_MONTHLY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_2026');if(s){const o=JSON.parse(s);if(Object.keys(o).length>0)return o;}}catch(e){}return {1:28624,2:29476,3:29373,4:26521};})();
+// ★ 2026-08-13 D案（年度滾動）：SLOT_MONTHLY_2026／SLOT_MONTHLY_DAY_2026／SLOT_SEASON_2026 的「_2026」
+//   為歷史沿革命名，實際語意＝「SLOT_LIVE_YEAR（當前追蹤年）」的即時追蹤值；localStorage 鍵名同步沿用不改。
+//   跨年（報表年份 > SLOT_LIVE_YEAR）時 slotRolloverLiveYear() 自動把即時值封存進 *_HIST，再重置追蹤新年份。
+//   ⚠ SLOT_LIVE_YEAR 必須先於 SLOT_MONTHLY_2026/SLOT_SEASON_2026 宣告：兩者的 hardcode 預設值只在
+//   live=2026 時套用，否則滾動後（store 為空物件）重新載入會把 2026 預設值「復活」成新年份的資料。
+let SLOT_LIVE_YEAR=(()=>{try{const v=parseInt(localStorage.getItem('slot_live_year'));if(v>=2026)return v;}catch(e){}return 2026;})();
+let SLOT_MONTHLY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_2026');if(s){const o=JSON.parse(s);if(Object.keys(o).length>0)return o;}}catch(e){}return SLOT_LIVE_YEAR===2026?{1:28624,2:29476,3:29373,4:26521}:{};})();
+function slotRolloverLiveYear(newY){
+  const oldY=SLOT_LIVE_YEAR;
+  // 1) 月度封存：{月:值} → 12 格陣列（無值＝null），寫入 SLOT_MONTHLY_HIST[oldY]
+  const arr=Array(12).fill(null);
+  for(let m=1;m<=12;m++){const v=+SLOT_MONTHLY_2026[m];if(v>0)arr[m-1]=v;}
+  if(arr.some(v=>v!=null)){SLOT_MONTHLY_HIST[oldY]=arr;try{localStorage.setItem('slot_monthly_hist',JSON.stringify(SLOT_MONTHLY_HIST));}catch(e){}}
+  // 2) 季別封存：春夏/秋冬 → SLOT_SEASON_HIST（秋冬若當年由 26FW 報表自動計算，取當下值封存）
+  ['春夏','秋冬'].forEach(s=>{
+    let v=SLOT_SEASON_2026[s];
+    if(v==null&&s==='秋冬'&&oldY===2026&&FW26_FILTER_DATA.length>0){const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});v=seen.size;}
+    if(v!=null){if(!SLOT_SEASON_HIST[s])SLOT_SEASON_HIST[s]={};SLOT_SEASON_HIST[s][oldY]=v;}
+  });
+  saveSlotSeasonHist();
+  // 3) 重置即時追蹤 → 新年份（跨多年亦一次到位；中間年份本無資料）
+  SLOT_MONTHLY_2026={};SLOT_MONTHLY_DAY_2026={};SLOT_SEASON_2026={};
+  SLOT_LIVE_YEAR=newY;
+  try{
+    localStorage.setItem('slot_monthly_2026','{}');
+    localStorage.setItem('slot_monthly_day_2026','{}');
+    localStorage.setItem('slot_season_2026','{}');
+    localStorage.setItem('slot_live_year',String(newY));
+  }catch(e){}
+}
 // ★ 2026-07-25：記錄每月底 SKU 數是「哪一天的報表」設定的（{月:'YYYY-MM-DD'}）。
 //   用途：當月一律顯示最新一天（後上傳的日期覆寫前一天）；跨月後自然停止更新＝鎖定於該月最後上傳日。
 let SLOT_MONTHLY_DAY_2026=(()=>{try{const s=localStorage.getItem('slot_monthly_day_2026');if(s){const o=JSON.parse(s);if(o&&typeof o==='object')return o;}}catch(e){}return {};})();
-let SLOT_SEASON_2026=(()=>{try{return JSON.parse(localStorage.getItem('slot_season_2026')||'{"春夏":17777}');}catch(e){return {"春夏":17777};}})();
+let SLOT_SEASON_2026=(()=>{try{return JSON.parse(localStorage.getItem('slot_season_2026')||(SLOT_LIVE_YEAR===2026?'{"春夏":17777}':'{}'));}catch(e){return SLOT_LIVE_YEAR===2026?{"春夏":17777}:{};}})();
 
 function exportSlotData(){
   const wb=XLSX.utils.book_new();
@@ -10309,7 +10766,7 @@ function exportSlotData(){
 
   // 2026 season
   const ss2026=SLOT_SEASON_2026['春夏']??null;
-  const fw2026=(()=>{if(SLOT_SEASON_2026['秋冬']!=null)return SLOT_SEASON_2026['秋冬'];if(FW26_FILTER_DATA.length>0){const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});return seen.size;}return null;})();
+  const fw2026=(()=>{if(SLOT_SEASON_2026['秋冬']!=null)return SLOT_SEASON_2026['秋冬'];if(FW26_FILTER_DATA.length>0&&SLOT_LIVE_YEAR===2026){const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});return seen.size;}return null;})();
 
   // ── 通用樣式 ──
   const sData =(extra={})=>Object.assign({font:fJH,alignment:cC,border:bAll},extra);
@@ -10349,8 +10806,8 @@ function exportSlotData(){
   put(1,10,'剩餘',sData({alignment:cCn}));
   // O2: 月份, 年份欄（底色標頭，非粗體）
   put(1,14,'月份',sHead());
-  const histYears=[2020,2021,2022,2023,2024,2025];
-  const allYears=has2026?[...histYears,2026]:histYears;
+  const histYears=Object.keys(SLOT_MONTHLY_HIST).map(Number).filter(y=>y!==SLOT_LIVE_YEAR).sort((a,b)=>a-b);   // ★ D案：動態歷史年
+  const allYears=has2026?[...histYears,SLOT_LIVE_YEAR]:histYears;
   allYears.forEach((y,i)=>{
     const col=15+i*2;
     put(1,col,y,sHead());
@@ -10428,17 +10885,17 @@ function exportSlotData(){
   put(7,12,'',sMergeInner());
 
   // ── 每季度採購 SKU (F~M, rows 9-11) ──
-  const seasonYears=[2020,2021,2022,2023,2024,2025,2026];
+  const seasonYears=[...new Set([...Object.keys(SLOT_SEASON_HIST['春夏']||{}),...Object.keys(SLOT_SEASON_HIST['秋冬']||{})].map(Number))].filter(y=>y!==SLOT_LIVE_YEAR).sort((a,b)=>a-b).concat([SLOT_LIVE_YEAR]);   // ★ D案：動態
   put(9,5,'季別',sHead());
   seasonYears.forEach((y,i)=>put(9,6+i,y,sHead()));
   put(10,5,'春夏 SKU',sData());
   seasonYears.forEach((y,i)=>{
-    const v=y===2026?(ss2026??''):(SLOT_SEASON_HIST['春夏'][y]??'');
+    const v=y===SLOT_LIVE_YEAR?(ss2026??''):(SLOT_SEASON_HIST['春夏'][y]??'');
     put(10,6+i,v,sData());
   });
   put(11,5,'秋冬 SKU',sData());
   seasonYears.forEach((y,i)=>{
-    const v=y===2026?(fw2026??''):(SLOT_SEASON_HIST['秋冬'][y]??'');
+    const v=y===SLOT_LIVE_YEAR?(fw2026??''):(SLOT_SEASON_HIST['秋冬'][y]??'');
     put(11,6+i,v,sData());
   });
 
@@ -10471,7 +10928,7 @@ function exportSlotData(){
     put(r,14,m,sData());
     allYears.forEach((y,yi)=>{
       const col=15+yi*2;
-      const v=y===2026?(SLOT_MONTHLY_2026[i+1]??''):(SLOT_MONTHLY_HIST[y]?.[i]??'');
+      const v=y===SLOT_LIVE_YEAR?(SLOT_MONTHLY_2026[i+1]??''):(SLOT_MONTHLY_HIST[y]?.[i]??'');
       put(r,col,v,sData());
       put(r,col+1,'',sMergeInner());  // ★ 合併右側格也需完整框線
     });
@@ -10481,7 +10938,7 @@ function exportSlotData(){
   allYears.forEach((y,yi)=>{
     const col=15+yi*2;
     let avg=null;
-    if(y===2026){
+    if(y===SLOT_LIVE_YEAR){
       const vals=Object.entries(SLOT_MONTHLY_2026).filter(([,v])=>v>0).map(([,v])=>v);
       avg=vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):null;
     } else {
@@ -10559,7 +11016,10 @@ function checkMonthlyAutoSave(reportDateStr){
   const isCurrentMonth=(y===curY&&month===curM);
   const isPastMonth=(y<curY)||(y===curY&&month<curM);
 
-  if(y===2026){
+  // ★ 2026-08-13 D案：報表年份超過當前追蹤年 → 先封存舊年、切換追蹤新年（2027 起月度追蹤不再停擺）
+  if(y>SLOT_LIVE_YEAR)slotRolloverLiveYear(y);
+
+  if(y===SLOT_LIVE_YEAR){
     const prevDay=SLOT_MONTHLY_DAY_2026[month]||'';
     const hasVal=(SLOT_MONTHLY_2026[month]!=null&&SLOT_MONTHLY_2026[month]!==''&&+SLOT_MONTHLY_2026[month]>0);
     // 當月：一律追蹤最新一天；過去月份：僅在尚無值時補登（不覆寫已鎖定的月底值）
@@ -10571,7 +11031,7 @@ function checkMonthlyAutoSave(reportDateStr){
       try{localStorage.setItem('slot_monthly_day_2026',JSON.stringify(SLOT_MONTHLY_DAY_2026));}catch(e){}
     }
   } else if(SLOT_MONTHLY_HIST[y]){
-    // 非 2026（歷史年份）：一律屬過去 → 沿用月底邏輯，僅在該月最後一天上傳時寫入（實務上不會再觸發）
+    // 早於追蹤年的歷史年份：沿用月底邏輯，僅在該月最後一天上傳時寫入（實務上不會再觸發）
     const lastDay=new Date(y,month,0).getDate();
     if(+rd.slice(8,10)===lastDay){
       SLOT_MONTHLY_HIST[y][month-1]=DB.length;
@@ -10581,6 +11041,7 @@ function checkMonthlyAutoSave(reportDateStr){
 }
 function updateSeasonSKUFromFW26(){
   if(!FW26_FILTER_DATA.length)return;
+  if(SLOT_LIVE_YEAR!==2026)return;   // ★ D案：26FW 名單只對應 2026 追蹤年；滾動後避免把 26FW 數誤寫成新年秋冬
   const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});
   SLOT_SEASON_2026['秋冬']=seen.size;
   localStorage.setItem('slot_season_2026',JSON.stringify(SLOT_SEASON_2026));
@@ -10723,20 +11184,20 @@ function renderSlotData(){
   }
 
   // ── 每月底 SKU 數 ──
-  const years=Object.keys(SLOT_MONTHLY_HIST).map(Number).sort();
+  const years=Object.keys(SLOT_MONTHLY_HIST).map(Number).filter(y=>y!==SLOT_LIVE_YEAR).sort();
   const months=['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-  const allYears=Object.keys(SLOT_MONTHLY_2026).length>0?[...years,2026]:years;
+  const allYears=Object.keys(SLOT_MONTHLY_2026).length>0?[...years,SLOT_LIVE_YEAR]:years;
   const mHead=document.getElementById('slot-monthly-head');
   const mBody=document.getElementById('slot-monthly-body');
   const mFoot=document.getElementById('slot-monthly-foot');
   if(mHead)mHead.innerHTML=`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">月份</th>`+allYears.map(y=>`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">${y}</th>`).join('');
   // ★ 2026-07-25：當月（今天所屬 2026 月份）以斜體＋tooltip 標示為「最新一天、跨月後鎖定」
   const _now=new Date();const _liveY=_now.getFullYear(),_liveM=_now.getMonth()+1;
-  if(mBody)mBody.innerHTML=months.map((m,i)=>`<tr><td style="padding:4px 8px;font-weight:600;text-align:center">${m}</td>${allYears.map(y=>{const v=y===2026?SLOT_MONTHLY_2026[i+1]:SLOT_MONTHLY_HIST[y]?.[i];const isLive=(y===2026&&_liveY===2026&&(i+1)===_liveM);const liveDay=isLive?(SLOT_MONTHLY_DAY_2026[i+1]||''):'';return`<td style="padding:4px 8px;text-align:center;font-size:11px${isLive?';font-style:italic;color:var(--accent)':''}"${isLive?` title="當月最新一天${liveDay?'（'+liveDay+'）':''}，跨月後鎖定為月底值"`:''}>${v!=null?num(v):'—'}</td>`;}).join('')}</tr>`).join('');
+  if(mBody)mBody.innerHTML=months.map((m,i)=>`<tr><td style="padding:4px 8px;font-weight:600;text-align:center">${m}</td>${allYears.map(y=>{const v=y===SLOT_LIVE_YEAR?SLOT_MONTHLY_2026[i+1]:SLOT_MONTHLY_HIST[y]?.[i];const isLive=(y===SLOT_LIVE_YEAR&&_liveY===SLOT_LIVE_YEAR&&(i+1)===_liveM);const liveDay=isLive?(SLOT_MONTHLY_DAY_2026[i+1]||''):'';return`<td style="padding:4px 8px;text-align:center;font-size:11px${isLive?';font-style:italic;color:var(--accent)':''}"${isLive?` title="當月最新一天${liveDay?'（'+liveDay+'）':''}，跨月後鎖定為月底值"`:''}>${v!=null?num(v):'—'}</td>`;}).join('')}</tr>`).join('');
   if(mFoot){
     const avgs=allYears.map(y=>{
       let vals;
-      if(y===2026){vals=Object.entries(SLOT_MONTHLY_2026).filter(([,v])=>v>0).map(([,v])=>v);}
+      if(y===SLOT_LIVE_YEAR){vals=Object.entries(SLOT_MONTHLY_2026).filter(([,v])=>v>0).map(([,v])=>v);}
       else{vals=(SLOT_MONTHLY_HIST[y]||[]).filter(v=>v!=null&&v>0);}
       // 用有資料的月份數去除（不固定除以12）
       return vals.length?Math.round(vals.reduce((a,b)=>a+b,0)/vals.length):null;
@@ -10747,14 +11208,14 @@ function renderSlotData(){
   // ── 每季採購 SKU 數 ──
   const sHead=document.getElementById('slot-season-head');
   const sBody=document.getElementById('slot-season-body');
-  const seasonYears=[2020,2021,2022,2023,2024,2025,2026];
+  const seasonYears=[...new Set([...Object.keys(SLOT_SEASON_HIST['春夏']||{}),...Object.keys(SLOT_SEASON_HIST['秋冬']||{})].map(Number))].filter(y=>y!==SLOT_LIVE_YEAR).sort((a,b)=>a-b).concat([SLOT_LIVE_YEAR]);   // ★ D案：歷史年動態＋當前追蹤年
   if(sHead)sHead.innerHTML=`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">季別</th>`+seasonYears.map(y=>`<th style="padding:5px 8px;border-bottom:1px solid var(--border)">${y}</th>`).join('');
   if(sBody){
     sBody.innerHTML=['春夏','秋冬'].map(s=>{
       const cols=seasonYears.map(y=>{
         let val,editable=true,autoCalc=false;
-        if(y===2026){
-          if(s==='秋冬'&&FW26_FILTER_DATA.length>0){
+        if(y===SLOT_LIVE_YEAR){
+          if(s==='秋冬'&&FW26_FILTER_DATA.length>0&&SLOT_LIVE_YEAR===2026){
             const seen=new Set();FW26_FILTER_DATA.forEach(r=>{if(r[0])seen.add(r[0]);});
             val=seen.size;editable=false;autoCalc=true;
           }else{val=SLOT_SEASON_2026[s];}
@@ -10782,7 +11243,7 @@ function renderSlotData(){
 function editSeasonCell(td){
   const season=td.dataset.season;
   const year=Number(td.dataset.year);
-  const oldVal=(year===2026)?(SLOT_SEASON_2026[season]??''):(SLOT_SEASON_HIST[season]?.[year]??'');
+  const oldVal=(year===SLOT_LIVE_YEAR)?(SLOT_SEASON_2026[season]??''):(SLOT_SEASON_HIST[season]?.[year]??'');
   const input=document.createElement('input');
   input.type='text';
   input.value=oldVal;
@@ -10793,9 +11254,9 @@ function editSeasonCell(td){
     if(saved)return;saved=true;
     const v=parseInt(input.value.replace(/[^\d-]/g,''),10);
     if(!isNaN(v)){
-      if(year===2026)SLOT_SEASON_2026[season]=v;
+      if(year===SLOT_LIVE_YEAR)SLOT_SEASON_2026[season]=v;
       else{if(!SLOT_SEASON_HIST[season])SLOT_SEASON_HIST[season]={};SLOT_SEASON_HIST[season][year]=v;}
-      if(year===2026)localStorage.setItem('slot_season_2026',JSON.stringify(SLOT_SEASON_2026));
+      if(year===SLOT_LIVE_YEAR)localStorage.setItem('slot_season_2026',JSON.stringify(SLOT_SEASON_2026));
       else saveSlotSeasonHist();
       // 記錄最後更新時間（僅日期）
       const nowStr=new Date().toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'});
@@ -11299,6 +11760,95 @@ function ph1Export(){
 }
 
 // 銷售比對 tab 的彙總狀態列
+// ════════════════════════════════════════════════════════════
+// ★ 2026-08-13 B案（Gordon 裁示繼續累積 rollup）：長期彙總趨勢檢視器
+//   目的：rollup 自 07-17 起純寫入累積，無任何讀取畫面 → 及早目視驗證資料正確，
+//   避免累積一年後才發現建置有 bug。期別列表用 env（不解壓、開卡即列）；
+//   Σ銷量與類別分佈需解壓 payload → 逐期懶載入（點「載入」）或一鍵全載，結果快取。
+//   資料量門檻備忘：週趨勢 8~12 週起有意義、月趨勢 3 個月起、去年同期需滿一年。
+// ════════════════════════════════════════════════════════════
+const ROLLUP_TREND_CACHE={};   // idbKey → {sold, byCat:{cat:sold}}
+async function renderRollupTrend(force){
+  const body=document.getElementById('rollup-trend-body');
+  const st=document.getElementById('rollup-trend-status');
+  if(!body)return;
+  let keys=[];
+  try{keys=(await idbKeys()).map(String);}catch(e){}
+  const wkKeys=keys.filter(k=>k.indexOf(ROLLUP_WK_PREFIX)===0).sort().reverse();   // 新→舊
+  const moKeys=keys.filter(k=>k.indexOf(ROLLUP_MO_PREFIX)===0).sort().reverse();
+  if(st)st.textContent=`週 ${wkKeys.length} 期・月 ${moKeys.length} 期（每天上傳 EPR 自動累積）`;
+  if(!wkKeys.length&&!moKeys.length){
+    body.innerHTML='<div style="padding:16px;text-align:center;color:var(--text3);font-size:13px">尚未累積任何彙總。每天上傳 EPR 報表時會自動建置（週=SKU 級、月=款色級）。</div>';
+    return;
+  }
+  const envOf=async k=>{try{return await idbGet(k);}catch(e){return null;}};
+  const rowHtml=(k,env)=>{
+    const c=ROLLUP_TREND_CACHE[k];
+    const soldTd=c?`<td class="num" style="padding:4px 8px;text-align:right;font-weight:700">${(c.sold||0).toLocaleString()}</td>`
+      :`<td style="padding:4px 8px;text-align:center"><button onclick="rollupTrendLoadOne('${k}')" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 10px;font-size:12px;cursor:pointer;font-family:var(--font)">載入</button></td>`;
+    const built=(env.builtAt||'').slice(0,10);
+    const cov=env.daysCovered!=null?env.daysCovered:'—';
+    const nD=(env.dates||[]).length;
+    const gap=(env.daysCovered!=null&&nD&&env.daysCovered>nD)?` <span title="涵蓋日數 > 報表天數：期間內有缺日（正常，日均會換算）" style="color:var(--orange)">⚠缺${env.daysCovered-nD}日</span>`:'';
+    const catBtn=c?`<button onclick="rollupTrendToggleCat('${k}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:12px;font-family:var(--font)">類別 ▾</button>`:'';
+    return `<tr id="rt-row-${k}"><td style="padding:4px 8px;font-weight:600">${env.period||k}</td>`+
+      `<td style="padding:4px 8px;text-align:center">${nD}${gap}</td>`+
+      `<td style="padding:4px 8px;text-align:center">${cov}</td>`+
+      `<td class="num" style="padding:4px 8px;text-align:right">${(env.nCodes||0).toLocaleString()}</td>`+
+      soldTd+
+      `<td style="padding:4px 8px;text-align:center;color:var(--text3);font-size:11px">${built}</td>`+
+      `<td style="padding:4px 8px;text-align:center">${catBtn}</td></tr>`+
+      `<tr id="rt-cat-${k}" style="display:none"><td colspan="7" style="padding:2px 8px 8px 24px" id="rt-catcell-${k}"></td></tr>`;
+  };
+  const section=async(title,ks,levelNote)=>{
+    if(!ks.length)return '';
+    let rows='';
+    for(const k of ks){const env=await envOf(k);if(env)rows+=rowHtml(k,env);}
+    return `<div style="font-weight:700;font-size:13px;margin:10px 0 4px">${title} <span style="font-weight:400;color:var(--text3);font-size:12px">${levelNote}</span></div>`+
+      `<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text3)">`+
+      `<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">期別</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">報表天數</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">涵蓋日數</th>`+
+      `<th style="padding:4px 8px;text-align:right;border-bottom:1px solid var(--border)">筆數</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">Σ銷量</th>`+
+      `<th style="padding:4px 8px;border-bottom:1px solid var(--border)">建置於</th>`+
+      `<th style="border-bottom:1px solid var(--border)"></th></tr></thead><tbody>${rows}</tbody></table>`;
+  };
+  body.innerHTML=(await section('週彙總',wkKeys,'（SKU 級・ISO 週）'))+(await section('月彙總',moKeys,'（款色級）'))+
+    `<div style="margin-top:8px;font-size:11px;color:var(--text3)">Σ銷量＝期內逐日配對銷量加總（同銷售比對公式）。判讀門檻：週趨勢約 8~12 週起、月趨勢 3 個月起、「去年同期」需滿一年。此表主要用途＝目視驗證累積資料合理（數量級、缺日、筆數）。</div>`;
+}
+async function rollupTrendLoadOne(idbKey){
+  try{
+    if(!ROLLUP_TREND_CACHE[idbKey]){
+      const r=await rollupLoad(idbKey);
+      if(!r||!r.payload){alert('讀取失敗：'+idbKey);return;}
+      const p=r.payload;let sold=0;const byCat={};
+      (p.sold||[]).forEach((v,i)=>{sold+=(v||0);const c=(p.cat&&p.cat[i])||'未分類';byCat[c]=(byCat[c]||0)+(v||0);});
+      ROLLUP_TREND_CACHE[idbKey]={sold,byCat};
+    }
+    await renderRollupTrend();
+  }catch(e){alert('載入失敗：'+e.message);}
+}
+async function rollupTrendLoadAll(){
+  let keys=[];
+  try{keys=(await idbKeys()).map(String);}catch(e){}
+  const ks=keys.filter(k=>k.indexOf('rollup_')===0).sort().reverse().slice(0,40);   // 上限 40 期防久等
+  showLoading('載入彙總銷量中…');
+  try{for(const k of ks){if(!ROLLUP_TREND_CACHE[k]){const r=await rollupLoad(k);if(r&&r.payload){const p=r.payload;let sold=0;const byCat={};(p.sold||[]).forEach((v,i)=>{sold+=(v||0);const c=(p.cat&&p.cat[i])||'未分類';byCat[c]=(byCat[c]||0)+(v||0);});ROLLUP_TREND_CACHE[k]={sold,byCat};}}}}finally{hideLoading();}
+  await renderRollupTrend();
+}
+function rollupTrendToggleCat(idbKey){
+  const tr=document.getElementById('rt-cat-'+idbKey);
+  const cell=document.getElementById('rt-catcell-'+idbKey);
+  if(!tr||!cell)return;
+  if(tr.style.display==='none'){
+    const c=ROLLUP_TREND_CACHE[idbKey];if(!c)return;
+    const ents=Object.entries(c.byCat).sort((a,b)=>b[1]-a[1]);
+    cell.innerHTML='<table style="border-collapse:collapse;font-size:12px">'+ents.map(([cat,v])=>`<tr><td style="padding:2px 12px 2px 0;color:var(--text2)">${cat}</td><td style="padding:2px 0;text-align:right;font-weight:600">${v.toLocaleString()}</td></tr>`).join('')+'</table>';
+    tr.style.display='';
+  }else{tr.style.display='none';}
+}
+
 async function rollupUpdateStatusUI(){
   const el=document.getElementById('rollup-status');if(!el)return;
   try{
@@ -11555,7 +12105,6 @@ function populateCompareHistSelect(){
   sel.title=dates.length?('可選 '+dates.length+' 天（系統暫存 近40天 ＋ 已上傳備份檔，重疊自動去重）'):'尚無可選日期（上傳 ERP 報表或每月備份檔後才有）';
   try{rollupUpdateStatusUI();}catch(e){}
   try{intervalRefreshAvailability();}catch(e){}   // ★ #4：同步區間對比日期下拉
-  try{renderShipmentStatus();}catch(e){}
 }
 function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIST_MAX_DAYS);const cutStr=cutoff.toISOString().slice(0,10);Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)&&/^\d{4}-\d{2}-\d{2}$/.test(k.slice(HIST_PREFIX.length))).forEach(k=>{if(k.slice(HIST_PREFIX.length)<cutStr)localStorage.removeItem(k);});}
 // ★ 2026-07-25：只認 YYYY-MM-DD 形態的歷史 key。
@@ -11563,8 +12112,7 @@ function histPrune(){const cutoff=new Date();cutoff.setDate(cutoff.getDate()-HIS
 //   舊寫法會把它 strip 成一筆假日期「epr_dates」混進歷史下拉選單（圖4）。
 //   加日期形態 guard 即可濾掉，且防止未來任何非日期 key 再洩漏；不動索引 key 本身（下載該日報表需要它）。
 function histList(){return Object.keys(localStorage).filter(k=>k.startsWith(HIST_PREFIX)&&/^\d{4}-\d{2}-\d{2}$/.test(k.slice(HIST_PREFIX.length))).map(k=>k.slice(HIST_PREFIX.length)).sort().reverse();}
-function histExport(){const dates=histList();if(!dates.length){alert('沒有歷史記錄可匯出');return;}const all={};dates.forEach(d=>{try{all[d]=JSON.parse(localStorage.getItem(HIST_PREFIX+d));}catch(e){}});const blob=new Blob([JSON.stringify(all,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`lativ_history_${dates[0].slice(0,7).replace('-','')}.json`;a.click();URL.revokeObjectURL(url);}
-function histImport(file){if(!file)return;const reader=new FileReader();reader.onload=e=>{try{const all=JSON.parse(e.target.result);let count=0;Object.entries(all).forEach(([d,snap])=>{localStorage.setItem(HIST_PREFIX+d,JSON.stringify(snap));count++;});histUpdateUI();alert(`已匯入 ${count} 筆歷史記錄`);}catch(err){alert('匯入失敗：'+err.message);}};reader.readAsText(file);}
+// histExport/histImport 已刪（2026-08-13 死碼清理：僅匯歷史摘要的舊功能，已被右上角整包匯出/匯入取代）
 
 // ============================================================
 // ★ 整包資料匯出 / 匯入（跨裝置同步用）
@@ -11586,7 +12134,7 @@ async function exportAllData(){
 
     // 2. 收集所有 localStorage 設定
     const settings={};
-    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','reserve_reasons','fw26_last_update','slot_season_last_update','arrange_upload_date','forecast_upload_date','planner_aisle_upload_date','planner_master_upload_date'];
+    const settingKeys=['lativ_aisle_config','lativ_manual_edits','lativ_xx_capacity','lativ_xx_zone_config','lativ_packaging_rules','slot_zones','slot_monthly_2026','slot_monthly_day_2026','slot_season_2026','slot_monthly_hist','slot_season_hist','slot_live_year','reserve_reasons','fw26_last_update','slot_season_last_update','arrange_upload_date','forecast_upload_date','planner_aisle_upload_date','planner_master_upload_date'];
     settingKeys.forEach(k=>{
       try{const v=localStorage.getItem(k);if(v!==null)settings[k]=JSON.parse(v);}catch(e){
         try{const v=localStorage.getItem(k);if(v!==null)settings[k]=v;}catch(e2){}
@@ -11767,8 +12315,6 @@ function monthlyExportReminderCheck(){
 }
 function showMonthlyExportReminder(ym){
   if(document.getElementById('monthly-remind-modal'))return;
-  const subj=encodeURIComponent('lativ 每月每日報表備份 '+ym);
-  const bodyTxt=encodeURIComponent('提醒：請將「銷售比對 → 📦 匯出當月每日報表」下載的檔案，以附件方式寄到本信箱備份存查。\n\n月份：'+ym);
   const ov=document.createElement('div');
   ov.id='monthly-remind-modal';
   ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:var(--font)';
@@ -11776,10 +12322,7 @@ function showMonthlyExportReminder(ym){
     <div style="background:var(--surface,#fff);border-radius:10px;max-width:450px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,0.25);overflow:hidden">
       <div style="padding:15px 20px;background:var(--accent);color:#fff;font-size:16px;font-weight:700">📦 每月備份提醒</div>
       <div style="padding:18px 20px;font-size:14px;color:var(--text,#222);line-height:1.75">
-        新的月份到了！請到 <b>銷售比對</b> 分頁按 <b>「📦 匯出當月每日報表」</b>，把上個整月的每日 ERP 報表封存成單一備份檔，<br>並<b>以附件夾帶 email 寄到你自己的信箱</b>存查（跨裝置／超過 40 天也能回溯）。
-        <div style="margin-top:13px">
-          <a href="mailto:?subject=${subj}&body=${bodyTxt}" style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2,#eee);border:1px solid var(--border,#ccc);color:var(--text2,#444);border-radius:5px;padding:7px 12px;font-size:13px;text-decoration:none">✉ 開啟寄信（記得手動夾帶匯出檔）</a>
-        </div>
+        新的月份到了！請到 <b>銷售比對</b> 分頁按 <b>「📦 匯出當月每日報表」</b>，把上個整月的每日 ERP 報表封存成單一備份檔，並自行存查（跨裝置／超過 40 天也能回溯）。
         <label style="display:flex;align-items:center;gap:7px;margin-top:16px;font-size:13px;color:var(--text3,#666);cursor:pointer">
           <input type="checkbox" id="monthly-remind-nomore" style="width:15px;height:15px;cursor:pointer">此月不再提醒（此裝置）
         </label>
@@ -11852,8 +12395,7 @@ function showMonthlyExportReminder(ym){
       document.getElementById('compare-clear-btn').style.display='inline-flex';
     }
   }catch(e){}
-  // ★ 2026-07-25 #4：載入出貨統計 + 初始化區間對比日期下拉
-  try{await loadShipmentStats();renderShipmentStatus();}catch(e){}
+  // ★ 2026-07-25 #4：初始化區間對比日期下拉（出貨統計載入已於 2026-08-13 隨模組移除）
   try{intervalRefreshAvailability();}catch(e){}
   // 載入 儲位調整建議 tab 的資料
   try{
@@ -11863,6 +12405,8 @@ function showMonthlyExportReminder(ym){
   try{
     const sm=await idbGet('storage_master_sheets');
     if(sm&&typeof sm==='object'){STORAGE_MASTER=sm;}
+    // ★ 2026-08-09 Gordon：還原臨時擺法對照（重開頁免重傳儲位總表）
+    try{const tl=await idbGet('planner_temp_layout');if(tl&&typeof tl==='object')PLN_TEMP_LAYOUT=tl;}catch(_){}
   }catch(e){}
   // ★ R1（2026-07-18 重整）：還原共用 XX/TX 報表 → 儲位釋放 tab 重開頁免重傳
   try{
@@ -12201,6 +12745,17 @@ function showMonthlyExportReminder(ym){
         <span id="cmp-page-info" style="color:var(--text3)"></span>
         <span style="margin-left:auto;color:var(--text3)">每頁 <input type="number" min="10" step="50" value="100" onchange="cmpSetPageSize(this.value)" style="width:64px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font)"> 筆</span>
       </div>
+    </div>
+
+    <!-- ★ 2026-08-13 B案：長期彙總趨勢（rollup 檢視器）——目的：及早驗證累積中的週/月彙總資料正確性 -->
+    <div class="card" id="rollup-trend-card" style="margin-top:14px">
+      <div class="card-title" style="gap:8px;flex-wrap:wrap">
+        <span class="dot"></span>長期彙總趨勢（累積驗證）
+        <button onclick="rollupTrendLoadAll()" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font)">📊 載入全部銷量</button>
+        <button onclick="renderRollupTrend(true)" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:5px 12px;font-size:13px;cursor:pointer;font-family:var(--font)">🔄 刷新</button>
+        <span id="rollup-trend-status" style="font-size:12px;color:var(--text3)"></span>
+      </div>
+      <div id="rollup-trend-body" style="padding:4px 12px 12px"><div style="padding:16px;text-align:center;color:var(--text3);font-size:13px">載入中…</div></div>
     </div>
 
     <!-- 階段1：過季款色 1F/2F 調換排名 -->
@@ -12552,13 +13107,7 @@ function rmCapacity(bay){
 function rmCapSig(bay){return (bay.L||175)+'|'+bay.s.map(function(s){return rmSlotPlace(s)||'';}).sort().join(',');}
 
 // ---------- 幾何 ----------
-function rmSpan(bay){ // 佔用儲位數（含缺號）
-  if(bay.t==='柱'&&bay.pw)return bay.pw;
-  var m=/^(\d+)-(\d+)$/.exec(bay.r||'');
-  var sp=m?Math.abs(parseInt(m[2],10)-parseInt(m[1],10))+1:(/^\d+$/.test(bay.r||'')?1:1);
-  if(bay.t==='架'||bay.t==='待確認')sp=Math.max(sp,bay.s.length||1);
-  return sp;
-}
+// rmSpan 已刪（2026-08-13 死碼清理：無呼叫端）
 function rmUnitN(a){ // 每標準架的號碼數（號碼格線密度）：AB/C/D=6、E=5（E08/E09=6）、F=5
   if(a==='E08'||a==='E09')return 6;
   return ({A:6,B:6,C:6,D:6,E:5,F:5})[a.charAt(0)]||6;
@@ -13155,53 +13704,51 @@ function rmCmpSaveChk(){try{localStorage.setItem('rm_cmp_chk_v1',JSON.stringify(
 var RM_CMP_SORT=1;        // 儲位排序方向：1=遞增、-1=遞減
 var RM_CMP_ORDER=[];      // 目前表格顯示順序（slot 清單，供 shift 區間勾選）
 var RM_CMP_LAST=null;     // 最後點擊的 slot（shift 區間錨點）
-// 2026-07-15 改版：欄序=商品編號→儲位(可排序)→原始儲位材積(碼/材積)→實際材積(碼/材積)→異常確認
-// 依儲位排序、已勾選（刻意異常）沉底；checkbox 支援 shift+點擊區間勾選
 function rmCmpSorted(){
   return RM_CMP_ANOM.slice().sort(function(u,v){
     var cu=RM_CMP_CHK[u.slot]?1:0,cv=RM_CMP_CHK[v.slot]?1:0;
-    if(cu!==cv)return cu-cv;                                   // 已確認的沉到最下面
+    if(cu!==cv)return cu-cv;   // 未確認（未勾選）排前面
     return (u.slot<v.slot?-1:u.slot>v.slot?1:0)*RM_CMP_SORT;   // 依儲位排序
   });
 }
+// ★ 2026-08-09 重建說明：本函式（異常表格渲染）為刪除後重建版；欄位＝儲位/商品編號/原始儲位材積/實際材積/異常確認，
+//   邏輯與匯出欄位一致、支援排序與 shift 區間勾選。若與刪除前版面有細微差異，可重傳刪除前檔案由 Claude 換回逐字原版。
 function rmCmpDrawTable(){
-  var el=document.getElementById('rm-cmp-tbl');if(!el)return;
+  var tbl=document.getElementById('rm-cmp-tbl');if(!tbl)return;
   var arr=rmCmpSorted();
   RM_CMP_ORDER=arr.map(function(x){return x.slot;});
-  var t='<div style="max-height:280px;overflow:auto;border:1px solid #eee;border-radius:6px"><table style="width:100%;border-collapse:collapse;font-size:11.5px"><thead><tr style="position:sticky;top:0;background:#f2efe9;color:#555">'+
-    '<th style="padding:4px 6px;text-align:left">商品編號</th>'+
+  var h='<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+    '<thead><tr style="background:var(--surface2,#f2eee6)">'+
     '<th style="padding:4px 6px;text-align:left;cursor:pointer;user-select:none" onclick="rmCmpSortToggle()" title="點擊切換儲位排序方向">儲位 '+(RM_CMP_SORT===1?'▲':'▼')+'</th>'+
-    '<th style="padding:4px 6px">原始儲位材積</th>'+
-    '<th style="padding:4px 6px">實際材積</th>'+
-    '<th style="padding:4px 6px">異常確認</th></tr></thead><tbody>';
+    '<th style="padding:4px 6px;text-align:left">商品編號</th>'+
+    '<th style="padding:4px 6px;text-align:left">原始儲位材積</th>'+
+    '<th style="padding:4px 6px;text-align:left">實際材積</th>'+
+    '<th style="padding:4px 6px;text-align:center">異常確認</th>'+
+    '</tr></thead><tbody>';
   arr.forEach(function(x,i){
     var chk=!!RM_CMP_CHK[x.slot];
-    var col=x.dir==='變大'?'#c0392b':'#a67c00';
-    var rowSt=chk?'border-top:1px solid #eee;background:#f6f6f6;color:#999':'border-top:1px solid #eee';
-    t+='<tr style="'+rowSt+'">'+
-      '<td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.sku||'—')+'</td>'+
-      '<td style="padding:3px 6px;font-family:monospace">'+rmEsc(x.slot)+'</td>'+
-      '<td style="padding:3px 6px;text-align:center">'+rmEsc(x.code)+' / '+x.cfg+'</td>'+
-      '<td style="padding:3px 6px;text-align:center;font-weight:600;'+(chk?'':'color:'+col)+'">'+rmEsc(x.rc)+' / '+x.real+'</td>'+
+    h+='<tr style="border-top:1px solid var(--border,#eee)'+(chk?';opacity:.5':'')+'">'+
+      '<td style="padding:3px 6px;text-align:left">'+x.slot+'</td>'+
+      '<td style="padding:3px 6px;text-align:left">'+(x.sku||'')+'</td>'+
+      '<td style="padding:3px 6px;text-align:left">'+x.code+' / '+x.cfg+'</td>'+
+      '<td style="padding:3px 6px;text-align:left">'+x.rc+' / '+x.real+'（'+x.dir+'）</td>'+
       '<td style="padding:3px 6px;text-align:center"><input type="checkbox" data-i="'+i+'" onclick="rmCmpChk(event,this)"'+(chk?' checked':'')+' style="cursor:pointer"></td></tr>';
   });
-  t+='</tbody></table></div>';
-  el.innerHTML=t;
+  h+='</tbody></table>';
+  tbl.innerHTML=h;
 }
 function rmCmpSortToggle(){RM_CMP_SORT=-RM_CMP_SORT;rmCmpDrawTable();}
 function rmCmpChk(e,el){
-  var i=parseInt(el.getAttribute('data-i'),10),st=el.checked;
+  var i=+el.getAttribute('data-i');
   var slot=RM_CMP_ORDER[i];
   if(e.shiftKey&&RM_CMP_LAST!=null){
-    // shift+點擊：整段一起勾/取消。區間以「儲位排序」為準（勾選沉底不影響區間判定），
-    // 對應「一整段連續儲位需要勾選」的情境
+    var st=el.checked;
     var base=RM_CMP_ANOM.map(function(x){return x.slot;}).sort();
     var p=base.indexOf(RM_CMP_LAST),q=base.indexOf(slot);
-    if(p<0)p=q;
     var a=Math.min(p,q),b=Math.max(p,q);
     for(var k=a;k<=b;k++)RM_CMP_CHK[base[k]]=st;
   }else{
-    RM_CMP_CHK[slot]=st;
+    RM_CMP_CHK[slot]=el.checked;
   }
   RM_CMP_LAST=slot;
   rmCmpSaveChk();   // ★ 記憶功能：每次勾選即存
