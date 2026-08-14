@@ -7422,6 +7422,7 @@ function plannerRenderStep(idx,aisles,defaultSrc,defaultDst,defaultN,defaultSort
       <span id="pln-step-${idx}-status" style="font-size:11px;color:var(--text3)"></span>
       <button onclick="plannerRemoveStep(${idx})" style="margin-left:auto;background:transparent;border:1px solid var(--border);color:var(--text3);border-radius:3px;font-size:11px;padding:2px 8px;cursor:pointer" title="移除此步驟">×</button>
     </div>
+    <div id="pln-step-${idx}-warn" style="display:none;margin-bottom:6px;font-size:12px;color:#b0342b;background:rgba(220,50,50,0.08);border:1px solid rgba(220,50,50,0.35);border-radius:4px;padding:4px 8px;line-height:1.4"></div>
     <div style="display:grid;grid-template-columns:70px 1fr;gap:4px 8px;align-items:center;font-size:13px">
       <span style="color:var(--text2)">來源走道</span><div>${srcHtml}</div>
       <span style="color:var(--text2)">目的走道</span><div>${dstHtml}</div>
@@ -7773,6 +7774,34 @@ function plannerUpdateSortModeLocks(stepEl){
   }
 }
 
+// ★ 2026-08-14 防呆：回傳此 step 設定不完整的原因字串（可預覽/可 Run 則回 ''）。
+//   供 plannerRefreshStepCounts 即時標示「是哪一步、缺什麼」，避免只在後續 step 顯示無說明的「?」。
+function plnStepConfigIssue(config){
+  const mode=config.sortMode;
+  if(mode==='new'){
+    const virt=(config.source||[]).filter(v=>String(v).startsWith('新品-'));
+    if(!config.source.length)return '尚未勾選新品來源';
+    if(virt.length!==config.source.length)return '新品模式不可混勾真實走道';
+    if(!config.destination.length)return '尚未勾選目的走道';
+    return '';
+  }
+  if(mode==='internal'){
+    if(config.source.length!==1||config.destination.length!==1)return '整理模式：來源與目的各須勾 1 條走道';
+    if(config.source[0]!==config.destination[0])return '整理模式：來源與目的須為同一條走道';
+    if(!config.nToPick||config.nToPick<=0)return 'SKU數（連續空格數）需 > 0';
+    return '';
+  }
+  if(!config.source.length)return '尚未勾選來源走道';
+  if(!config.destination.length)return '尚未勾選目的走道';
+  if(config.nToPick<=0)return 'SKU數 需 > 0';
+  return '';
+}
+function plnSetStepWarn(idx,msg){
+  const el=document.getElementById(`pln-step-${idx}-warn`);
+  if(!el)return;
+  if(msg){el.textContent='⚠ '+msg;el.style.display='';}
+  else{el.textContent='';el.style.display='none';}
+}
 function plannerRefreshStepCounts(){
   const stepDivs=[...document.querySelectorAll('[id^="pln-step-"]')].filter(d=>/^pln-step-\d+$/.test(d.id));
   if(!stepDivs.length)return;
@@ -7780,6 +7809,7 @@ function plannerRefreshStepCounts(){
   const aisles=plnGetAislesInReport();
   let cells=plnBuildState();  // 初始狀態
   let simBroken=false;        // 前置 step 模擬失敗 → 後續 step 顯示 ?
+  let brokenBy=0;             // ★ 2026-08-14 防呆：第一個設定不全/試算失敗的 step 編號，供後續 step 提示來源
 
   for(let i=0;i<stepDivs.length;i++){
     const idx=parseInt(stepDivs[i].id.replace('pln-step-',''));
@@ -7794,6 +7824,7 @@ function plannerRefreshStepCounts(){
         if(s2)s2.textContent='?';
       });
       stepEl.querySelectorAll('.newq-count').forEach(sp=>{sp.textContent='?';});
+      plnSetStepWarn(idx, brokenBy?`因 Step ${brokenBy} 設定尚未完成，此步暫無法預覽`:'因前面步驟尚未完成，此步暫無法預覽');
       continue;
     }
 
@@ -7827,36 +7858,28 @@ function plannerRefreshStepCounts(){
 
     // 嘗試模擬此 step (給下一個 step 用); 設定不完整則停止後續 step 的數字計算
     const config=plannerCollectStepConfig(idx);
-    // ★ 2026-07-10 FIX: 新品模式原本沒有模擬分支 → 直接掉進高/低庫存檢查而 simBroken,
-    //   造成後續 step 的來源/目的 SKU 數全部顯示「?」。補上 plnRunNewEngine 模擬。
-    if(config.sortMode==='new'){
-      const virtSrc=config.source.filter(v=>String(v).startsWith('新品-'));
-      if(!virtSrc.length||virtSrc.length!==config.source.length||!config.destination.length){simBroken=true;continue;}
-      try{
-        const r=plnRunNewEngine(config,cells);
-        cells=r.finalCells;
-      }catch(e){console.warn('Step',idx,'新品模擬失敗:',e);simBroken=true;}
-      continue;
-    }
-    if(config.sortMode==='internal'){
-      // 內部整理: 需要單一同走道 + N>0
-      if(config.source.length!==1||config.destination.length!==1||config.source[0]!==config.destination[0]||!config.nToPick){simBroken=true;continue;}
-      try{
-        const r=plnRunInternalEngine(config,cells);
-        if(r._internalError){simBroken=true;continue;}
-        cells=r.finalCells;
-      }catch(e){console.warn('Step',idx,'內部整理模擬失敗:',e);simBroken=true;}
-      continue;
-    }
-    if(!config.source.length||!config.destination.length||config.nToPick<=0){simBroken=true;continue;}
+    // ★ 2026-08-14 防呆：設定不全 → 就地標出「缺什麼」，不再讓後續 step 只顯示無說明的「?」。
+    const issue=plnStepConfigIssue(config);
+    if(issue){ plnSetStepWarn(idx, issue+'（後續步驟將無法預覽）'); simBroken=true; brokenBy=idx; continue; }
+    plnSetStepWarn(idx,'');   // 設定完整 → 清除舊警示
+    // 模擬（依模式）。引擎試算失敗也就地標示，並停止後續 step 計算。
+    // ★ 2026-07-10: 新品模式補 plnRunNewEngine 模擬（否則後續 step 全 ?）。
     try{
-      const selected=plnSelectSourceSKUs(config,cells);
-      if(!selected.length){simBroken=true;continue;}
-      const r=plnRunEngine(config,5,cells,selected);
-      cells=r.finalCells;
+      if(config.sortMode==='new'){
+        const r=plnRunNewEngine(config,cells); cells=r.finalCells;
+      } else if(config.sortMode==='internal'){
+        const r=plnRunInternalEngine(config,cells);
+        if(r._internalError){ plnSetStepWarn(idx,'整理試算失敗：'+r._internalError); simBroken=true; brokenBy=idx; continue; }
+        cells=r.finalCells;
+      } else {
+        const selected=plnSelectSourceSKUs(config,cells);
+        if(!selected.length){ plnSetStepWarn(idx,'依目前設定挑不到任何 SKU（來源走道無 SKU 或條件過嚴）'); simBroken=true; brokenBy=idx; continue; }
+        const r=plnRunEngine(config,5,cells,selected); cells=r.finalCells;
+      }
     }catch(e){
       console.warn('Step',idx,'模擬失敗:',e);
-      simBroken=true;
+      plnSetStepWarn(idx,'此步驟試算失敗（引擎錯誤，詳見瀏覽器 Console）');
+      simBroken=true; brokenBy=idx;
     }
   }
 }
