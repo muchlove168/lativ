@@ -5175,7 +5175,11 @@ function plnFindHoleFill(config, ctx, opts){
         dist=geo[cs.aisle]?plnAisleDistance(src.col,cs.col,geo[cs.aisle].min,geo[cs.aisle].max)
                           :Math.abs(src.col-cs.col);
       } else {
-        dist=cohesionDist(cs.aisle,cs.col,row.sku);   // ★ 跨走道: 目的走道內部集中度
+        // ★ 2026-08-14 (Gordon E06→E09 案)：找洞塞_排序(match=false)跨走道不套 cohesion，
+        //   dist 中性化 → 評分退回 [volKey, col, layer]＝純照儲位(欄→層)順序接續填，
+        //   空格集中往走道後段（符合密度優先、最低階「純找空洞塞」語意）。
+        //   cohesion(離同款近)保留給 找洞塞_匹配(match=true)及以色/以款集中等更高階。
+        dist=match?cohesionDist(cs.aisle,cs.col,row.sku):0;   // ★ 跨走道: 匹配級以上才用內部集中度
       }
       const layerMatch=(match && codeLayer!=null && cs.layer===codeLayer)?0:1;
       // ★ 2026-07-05 (Gordon): 銷售≥50 → 材積 → 碼對層 → 距離 (庫存多盡量對層);
