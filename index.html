@@ -7860,7 +7860,14 @@ function plannerRefreshStepCounts(){
     const config=plannerCollectStepConfig(idx);
     // ★ 2026-08-14 防呆：設定不全 → 就地標出「缺什麼」，不再讓後續 step 只顯示無說明的「?」。
     const issue=plnStepConfigIssue(config);
-    if(issue){ plnSetStepWarn(idx, issue+'（後續步驟將無法預覽）'); simBroken=true; brokenBy=idx; continue; }
+    if(issue){
+      // ★ 2026-08-14：尾端「完全空白（未開始設定）」的 step 不嘮叨——它後面沒有步驟會被擋。
+      //   非尾端的空 step、或已開始設定但缺項的 step 仍提示（那才真的擋到後續預覽）。
+      const isLast=(i===stepDivs.length-1);
+      const isBlank=!config.source.length&&!config.destination.length&&(!config.nToPick||config.nToPick<=0);
+      if(isLast&&isBlank){ plnSetStepWarn(idx,''); continue; }
+      plnSetStepWarn(idx, issue+'（後續步驟將無法預覽）'); simBroken=true; brokenBy=idx; continue;
+    }
     plnSetStepWarn(idx,'');   // 設定完整 → 清除舊警示
     // 模擬（依模式）。引擎試算失敗也就地標示，並停止後續 step 計算。
     // ★ 2026-07-10: 新品模式補 plnRunNewEngine 模擬（否則後續 step 全 ?）。
