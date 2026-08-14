@@ -5111,6 +5111,12 @@ function plnFindHoleFill(config, ctx, opts){
   const match=!!(opts&&opts.match);
   const geo=config.aisleGeometry||plnGetAisleGeometry();
   const dests=config.destination||[];
+  // ★ 2026-08-14 (Gordon E06→E09 案)：低庫存模式材積偏好翻轉為「小材積優先」。
+  //   找洞塞首鍵原為 -vol（材積大優先，符合高庫存「銷售多→大材積」§5a）；但低庫存散戶
+  //   本就設計小材積優先（見 plnPackScatteredLow），走複雜度階梯時卻誤用大材積優先，
+  //   導致 H 空格充足時，高銷售 SKU 仍先被塞進較大的 D 空格。低庫存改小材積優先，
+  //   H 用完才溢到 D；高庫存/整理/自動維持 -vol 大材積優先（零回歸）。
+  const isLow=(config.sortMode==='low');
 
   // 目的走道空洞（未佔用、非 locked）
   const empties=[];
@@ -5174,9 +5180,11 @@ function plnFindHoleFill(config, ctx, opts){
       const layerMatch=(match && codeLayer!=null && cs.layer===codeLayer)?0:1;
       // ★ 2026-07-05 (Gordon): 銷售≥50 → 材積 → 碼對層 → 距離 (庫存多盡量對層);
       //   銷售<50 → 材積 → 距離 → 碼對層 (庫存低不在意對層, 能省距離就省距離)
-      const key=match ? (row.sales>=50 ? [-vol, layerMatch, dist, cs.col, cs.layer]
-                                       : [-vol, dist, layerMatch, cs.col, cs.layer])
-                      : [-vol, dist, cs.col, cs.layer];
+      // ★ 2026-08-14: 低庫存→小材積優先(vol ASC，未知擺法排最後)；其餘→大材積優先(-vol)
+      const volKey=isLow?(vol<0?1e9:vol):-vol;
+      const key=match ? (row.sales>=50 ? [volKey, layerMatch, dist, cs.col, cs.layer]
+                                       : [volKey, dist, layerMatch, cs.col, cs.layer])
+                      : [volKey, dist, cs.col, cs.layer];
       if(bestKey===null || plnCmpScoreArr(key,bestKey)<0){ bestKey=key; best=cs; }
     }
     if(!best){ failed.push({kc:plnSkuKuan(row.sku),n:1}); continue; }
