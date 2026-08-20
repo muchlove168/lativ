@@ -7587,6 +7587,26 @@ function plannerAutoFillN(stepEl){
   if(nEl.dataset.auto==='0')return;                 // 使用者手動指定過 → 不覆寫
   // ★2026-07-22：欄位正在被編輯（有焦點）→ 一律不覆寫，任何殘留路徑都不會再吃掉打到一半的數字
   try{ if(nEl.ownerDocument&&nEl.ownerDocument.activeElement===nEl)return; }catch(err){}
+  const sortInp=stepEl.querySelector('input[data-grp="sortMode"]:checked');
+  const mode=sortInp?sortInp.value:'';
+  // ★2026-08-20：整理(internal)模式的「SKU數」語意＝要整理出的「連續空格數」，其天然上限
+  //   就是目的走道(=來源走道)的空儲位總數，而非來源走道 SKU 數（後者對整理無意義、且必然
+  //   大於空格數而觸發引擎 deficit）。改以「目的走道空格數」自動帶入。
+  //   （原本此模式刻意跳過封頂、直接吃來源 SKU 數 → 例：E04 帶 379 而非空格 181。）
+  if(mode==='internal'){
+    let empty=0,eUnknown=false;
+    stepEl.querySelectorAll('input[data-grp="dst"]:checked').forEach(cb=>{
+      const sp=stepEl.querySelector(`.aisle-count[data-grp="dst"][data-aisle="${cb.value}"]`);
+      const v=parseInt(sp?String(sp.textContent||'').trim():'',10);
+      if(!isFinite(v)){eUnknown=true;return;}
+      empty+=v;
+    });
+    if(eUnknown)return;                              // 空格數尚未算出（顯示「-」/「?」）→ 不覆寫
+    const nextI=empty>0?String(empty):'';
+    if(nEl.value!==nextI)nEl.value=nextI;
+    nEl.title='整理模式：自動帶入＝目的走道空儲位數（可整理出的連續空格上限）；想少整理直接改小，改過後就不再自動更新（除非再變動走道）';
+    return;
+  }
   let sum=0,unknown=false;
   stepEl.querySelectorAll('input[data-grp="src"]:checked').forEach(cb=>{
     const a=cb.value;
@@ -7599,11 +7619,9 @@ function plannerAutoFillN(stepEl){
     sum+=v;
   });
   if(unknown)return;
-  // 目的走道空格封頂
-  const sortInp=stepEl.querySelector('input[data-grp="sortMode"]:checked');
-  const mode=sortInp?sortInp.value:'';
+  // 目的走道空格封頂（自動/高/低/新品模式；整理模式已於上方 early-return）
   const dstChecked=[...stepEl.querySelectorAll('input[data-grp="dst"]:checked')];
-  if(mode!=='internal'&&dstChecked.length){
+  if(dstChecked.length){
     let cap=0,capUnknown=false;
     dstChecked.forEach(cb=>{
       const sp=stepEl.querySelector(`.aisle-count[data-grp="dst"][data-aisle="${cb.value}"]`);
