@@ -741,6 +741,49 @@
 
 <script>
 // ============================================================
+// ★ 2026-08-23 Gordon｜匯出檔「垃圾格式」統一清理工具
+// ------------------------------------------------------------
+// 症狀：匯出的 xlsx（尤其「待移」sheet）在明明沒有資料的大後方仍有一大片
+//       看不見卻存在的儲存格，Excel Ctrl+↓ 會跳到最底、用到範圍虛胖、開檔變慢。
+// 根因：aoa 用 '' 補滿成矩形 → xlsx 會寫出 <c t="str"><v></v></c>（空字串儲存格，
+//       ISBLANK=FALSE、不是真正空白）；樣式迴圈又對整個 !ref 範圍「補建」空儲存格
+//       並套上字型/框線 → 空白區被灌了格式。
+// 對策：所有 book_append_sheet 之前一律過一次 xlsxTrimGhost()：
+//       ① 刪除 v 為 ''/null/undefined 的幽靈儲存格（連同其樣式）
+//       ② 把 !ref 收斂回「真的有值」的邊界（保留 !merges 覆蓋範圍，避免切斷合併格）
+// 注意：所有匯入端都用 sheet_to_json({defval:''}) 依欄名取值，刪空格不影響回匯。
+// 例外（刻意不套，空白格是有意義的版面元素，非垃圾）：
+//   ‧ 儲位數據 sheet — 用「空白但有框線」的格撐出合併格外觀（sMergeInner）
+//   ‧ 儲位釋放「新儲位匯入」sheet — 新儲位欄留空給人工填寫，需保留框線
+// ============================================================
+function xlsxTrimGhost(ws){
+  try{
+    if(!ws||!ws['!ref']||typeof XLSX==='undefined')return ws;
+    const R0=XLSX.utils.decode_range(ws['!ref']);
+    let maxR=-1,maxC=-1;
+    for(let R=R0.s.r;R<=R0.e.r;R++){
+      for(let C=R0.s.c;C<=R0.e.c;C++){
+        const a=XLSX.utils.encode_cell({r:R,c:C});
+        const cell=ws[a];
+        if(!cell)continue;
+        const v=cell.v;
+        if(v===undefined||v===null||v===''){delete ws[a];continue;}
+        if(R>maxR)maxR=R;
+        if(C>maxC)maxC=C;
+      }
+    }
+    // 合併格範圍必須完整保留，否則 Excel 會判定檔案損毀
+    (ws['!merges']||[]).forEach(m=>{
+      if(!m||!m.e)return;
+      if(m.e.r>maxR)maxR=m.e.r;
+      if(m.e.c>maxC)maxC=m.e.c;
+    });
+    if(maxR<0||maxC<0){ws['!ref']='A1:A1';return ws;}
+    ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:maxR,c:maxC}});
+  }catch(e){console.warn('xlsxTrimGhost 略過：',e);}
+  return ws;
+}
+// ============================================================
 // STATE & CONSTANTS
 // ============================================================
 let DB = [];
@@ -3286,7 +3329,7 @@ async function exportArrangeNewReport(){
   const ws=XLSX.utils.aoa_to_sheet(aoa);
   ws['!cols']=[{wch:14},{wch:30},{wch:8},{wch:14},{wch:8},{wch:8},{wch:10},{wch:14},{wch:10}];
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'待安排新品');
+  XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws),'待安排新品');
   // ★ 檔名格式: 進口編號_櫃號/櫃型 (去掉櫃號後面的 (箱數) 標註); 多櫃情況附加「_等N櫃」
   // 例: 申洲26-016_SNBU8314481/40HQ
   const stripBoxCount=s=>String(s||'').replace(/\s*\([^)]*\)\s*$/,'').trim();
@@ -8339,17 +8382,18 @@ function plannerExportResult(){
       const row=[];
       pages.forEach((page,pi)=>{
         const c1=page[0];
+        // ★ 2026-08-23：補位一律用 null（xlsx 不會寫出儲存格）；用 '' 會產生空字串幽靈格
         if(rIdx===0) row.push('商品編號','NEW','擺法','儲位');
         else if(rIdx-1<c1.moves.length){const m=c1.moves[rIdx-1];row.push(m.sku||'',m.dst||'',m.dstLayout||'',m.src||'');}
-        else row.push('','','','');
-        row.push(''); // intra sep
+        else row.push(null,null,null,null);
+        row.push(null); // intra sep
         if(page.length>=2){
           const c2=page[1];
           if(rIdx===0) row.push('商品編號','NEW','擺法','儲位');
           else if(rIdx-1<c2.moves.length){const m=c2.moves[rIdx-1];row.push(m.sku||'',m.dst||'',m.dstLayout||'',m.src||'');}
-          else row.push('','','','');
-        } else {row.push('','','','');}
-        if(pi<pages.length-1) row.push(''); // inter sep
+          else row.push(null,null,null,null);
+        } else {row.push(null,null,null,null);}
+        if(pi<pages.length-1) row.push(null); // inter sep
       });
       aoa.push(row);
     }
@@ -8379,7 +8423,7 @@ function plannerExportResult(){
       ws2['!cols']=cw2.length?cw2:[{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}];
       styleTaiYiSheet(ws2);
       ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
-      XLSX.utils.book_append_sheet(wb,ws2,'待移');
+      XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws2),'待移');
     }
   } else {
     stepResults.forEach((sr,i)=>{
@@ -8414,7 +8458,7 @@ function plannerExportResult(){
       ws2['!cols']=cw2.length?cw2:[{wch:13.3},{wch:12.3},{wch:5.6},{wch:12.5}];
       styleTaiYiSheet(ws2);
       ws2['!margins']={left:0,right:0,top:0,bottom:0,header:0.2,footer:0.2};
-      XLSX.utils.book_append_sheet(wb,ws2,sheetName);
+      XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws2),sheetName);
     });
   }
 
@@ -8427,8 +8471,9 @@ function plannerExportResult(){
     for(let R=range.s.r;R<=range.e.r;R++){
       for(let C=range.s.c;C<=range.e.c;C++){
         const ref=XLSX.utils.encode_cell({r:R,c:C});
-        if(!ws[ref])ws[ref]={t:'s',v:''};
+        if(!ws[ref])continue;                       // ★ 2026-08-23：不補建空格
         const v=ws[ref].v;
+        if(v===''||v==null)continue;                // ★ 無值不套樣式（避免空白區帶格式）
         const isHeader=headerSet.has(R)&&v!==''&&v!=null;
         const style={
           alignment:{horizontal:'center',vertical:'center'},
@@ -8463,9 +8508,10 @@ function plannerExportResult(){
         else if(inPageCol===3||inPageCol===8) colType='loc';
         if(colType==='sep') continue;
         const ref=XLSX.utils.encode_cell({r:R,c:C});
-        if(!ws[ref])ws[ref]={t:'s',v:''};
+        if(!ws[ref])continue;                       // ★ 2026-08-23：不補建空格
         const v=ws[ref].v;
         const hasValue=v!==''&&v!=null;
+        if(!hasValue)continue;                      // ★ 無值不套樣式
         const isHeader=(R===0)&&hasValue;
         const style={
           alignment:{horizontal:'center',vertical:'center'},
@@ -8508,7 +8554,7 @@ function plannerExportResult(){
   if(aoa1.length>1 && hasNewModeStep){
     // 有新品且情境包含新品模式才加新品安排 sheet
     if(typeof applyStyleFull==='function') applyStyleFull(ws1,{headerRows:[0]});
-    XLSX.utils.book_append_sheet(wb,ws1,'新品安排');
+    XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws1),'新品安排');
   }
   // 演算法:
   //   1. 從 AISLE_REPORT_DATA 建初始 SKU→儲位 對應 + 完整 row data
@@ -8517,7 +8563,10 @@ function plannerExportResult(){
   //   4. 若某走道最終 SKU 數=0 (例 step1 全搬光且無後續 step 移入), sheet 名 = `{aisle}_空走道`, 內容空白
   //   5. 移到 XX/TX (overflow) 的 SKU 不在 aislesInReport 內 → 不會出現在任何走道 sheet
   const aislesInReport=(typeof plnGetAislesInReport==='function')?plnGetAislesInReport():[];
-  const priorityCols=['商品編號','商品名稱','顏色','尺寸','儲位'];
+  // ★ 2026-08-23 Gordon：走道 sheet 表頭欄序改與 ERP 庫存查詢總表完全一致
+  //   （ERP：商品系列→商品編號→商品名稱→顏色→尺寸→儲位→倉位→總採購量…→狀態）；
+  //   其餘欄位沿用 AISLE_REPORT_DATA 的原始鍵序＝ERP 後半段順序，故整列與 ERP 逐欄對齊。
+  const priorityCols=['商品系列','商品編號','商品名稱','顏色','尺寸','儲位'];
   const widthMap={'商品編號':13.3,'商品名稱':30,'顏色':8,'尺寸':6,'儲位':12.5,
     '未到量':8,'未抓貨':8,'保留數量':9,'銷售庫存':9,'架上數量':9,'倉庫庫存':9,
     '商品款號':10,'季別':8,'品牌':8,'類別':10};
@@ -8530,6 +8579,34 @@ function plannerExportResult(){
     // shallow copy 避免動到原資料
     skuRowMap[sku]={...row};
   });
+
+  // Step A2: ★ 2026-08-23 Gordon：走道 sheet 要呈現「套用本次計畫後的最終結果」。
+  //   AISLE_REPORT_DATA 只有 ERP 既有庫存 → 新品（虛擬來源「新品-XX」）排進目的走道後
+  //   原本完全不會出現在該走道 sheet。改為把 r.selected 內尚未建檔的 SKU 也補進 skuRowMap：
+  //   欄位以 ERP 欄序為骨架、只填得到的（編號/名稱/顏色/尺寸/儲位/未到量/包材），
+  //   ERP 才有的欄位（商品系列/倉位/採購進貨/庫存…）依 Gordon 指示留空白。
+  {
+    const _erpCols=[];const _seen=new Set();
+    (AISLE_REPORT_DATA||[]).slice(0,50).forEach(row=>{
+      Object.keys(row).forEach(k=>{if(k.charAt(0)!=='_'&&!_seen.has(k)){_seen.add(k);_erpCols.push(k);}});
+    });
+    (r.selected||[]).forEach(s=>{
+      if(!s)return;
+      const sku=String(s['商品編號']||'');
+      if(!sku||skuRowMap[sku])return;              // 報表已有 → 以報表為準，不覆蓋
+      const row={};
+      _erpCols.forEach(k=>{row[k]='';});           // 骨架先全空白
+      row['商品編號']=sku;
+      const put=(k,v)=>{if(k in row&&v!==undefined&&v!==null&&v!=='')row[k]=v;};
+      put('商品名稱',s['商品名稱']);
+      put('顏色',s['顏色']);
+      put('尺寸',s['尺寸']);
+      put('儲位',s['儲位']);
+      put('未到量',s['未到量']);
+      put('包材',s['包材']!==undefined?s['包材']:s['商品包材']);
+      skuRowMap[sku]=row;
+    });
+  }
 
   // Step B: 套用所有 moves (含 phase=XX_OVERFLOW / INTERNAL_DISPLACEMENT / SOURCE_TO_DEST), 更新儲位
   // 注意: 同 SKU 在多 step 中只會被搬一次 (進入挑選清單後就離開來源), 故安全
@@ -8558,7 +8635,7 @@ function plannerExportResult(){
       // ★ 空走道: 命名 `{aisle}_空走道`, 內容空白
       const ws=XLSX.utils.aoa_to_sheet([['']]);
       ws['!cols']=[{wch:14}];
-      XLSX.utils.book_append_sheet(wb,ws,`${aisle}_空走道`);
+      XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws),`${aisle}_空走道`);
       return;
     }
     // 排序: 依當前儲位升冪 (方便操作員按位置查找)
@@ -8575,10 +8652,11 @@ function plannerExportResult(){
     priorityCols.forEach(k=>{if(keysRemaining.has(k)){finalCols.push(k);keysRemaining.delete(k);}});
     allKeysInOrder.forEach(k=>{if(keysRemaining.has(k))finalCols.push(k);});
     const aoa=[finalCols];
-    rows.forEach(row=>aoa.push(finalCols.map(k=>{const v=row[k];return v==null?'':v;})));
+    rows.forEach(row=>aoa.push(finalCols.map(k=>{const v=row[k];return (v==null||v==='')?null:v;})));
     const ws=XLSX.utils.aoa_to_sheet(aoa);
     ws['!cols']=finalCols.map(k=>({wch:widthMap[k]||10}));
     applyStyleFull(ws,{headerRows:[0]});
+    xlsxTrimGhost(ws);   // ★ 2026-08-23：先收斂範圍，autoFilter 才不會超出 dimension
     // ★ autoFilter: Excel 排序時自動辨識首列為標題, 避免標題被排到資料底部
     if(ws['!ref']){
       const r=XLSX.utils.decode_range(ws['!ref']);
@@ -9695,7 +9773,7 @@ function exportDBFiltered(){
   ws['!sheetViews'][0].showGridLines=false;
 
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'資料庫篩選結果');
+  XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws),'資料庫篩選結果');
   const today=new Date();
   const dateStr=`${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
 
@@ -9949,6 +10027,7 @@ function exportXXZoneReport(zone){
     const range=XLSX.utils.decode_range(ws['!ref']||'A1');
     for(let R=range.s.r;R<=range.e.r;R++)for(let C=range.s.c;C<=range.e.c;C++){
       const addr=XLSX.utils.encode_cell({r:R,c:C});if(!ws[addr])continue;
+      if(ws[addr].v===''||ws[addr].v==null)continue;   // ★ 2026-08-23：無值不套樣式
       ws[addr].s={
         alignment:{horizontal:'center',vertical:'center'},
         border:R===0?{...allB,bottom:medB}:allB,
@@ -9962,11 +10041,11 @@ function exportXXZoneReport(zone){
   const ws1=XLSX.utils.aoa_to_sheet(sum);
   ws1['!cols']=[{wch:8},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9},{wch:9},{wch:7}];
   styleSheet(ws1);
-  XLSX.utils.book_append_sheet(wb,ws1,`${zone}區儲位統計`);
+  XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws1),`${zone}區儲位統計`);
   const ws2=XLSX.utils.aoa_to_sheet(det);
   ws2['!cols']=[{wch:10},{wch:8},{wch:14},{wch:30},{wch:10},{wch:8},{wch:9},{wch:9},{wch:9}];
   styleSheet(ws2);
-  XLSX.utils.book_append_sheet(wb,ws2,`${zone}區SKU明細`);
+  XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws2),`${zone}區SKU明細`);
   const d=new Date();const pad=n=>String(n).padStart(2,'0');
   const ts=`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   XLSX.writeFile(wb,`${zone}區統計_${ts}.xlsx`,{bookSST:false,cellStyles:true});
@@ -10580,7 +10659,7 @@ function exportRelocPlan(){
     ws['!margins']={left:0.3,right:0.3,top:0.5,bottom:0.5,header:0.2,footer:0.2};
 
     const sheetName=pages.length>1?`儲位釋放_${pi+1}`:'儲位釋放';
-    XLSX.utils.book_append_sheet(wb,ws,sheetName);
+    XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws),sheetName);
   });
 
   const today=new Date();
@@ -10618,6 +10697,7 @@ function exportRelocPlan(){
     for(let C=rng2.s.c;C<=rng2.e.c;C++){
       const addr=XLSX.utils.encode_cell({r:R,c:C});
       if(!wsImport[addr])continue;
+      // ★ 2026-08-23：本表「新儲位」欄刻意留空給人工填寫 → 空格仍需框線，不套「無值跳過」
       wsImport[addr].s={
         alignment:{horizontal:'center',vertical:'center'},
         border:R===0?{...allB,bottom:medB}:allB,
@@ -10628,6 +10708,7 @@ function exportRelocPlan(){
   }
   if(!wsImport['!sheetViews'])wsImport['!sheetViews']=[{}];
   wsImport['!sheetViews'][0].showGridLines=false;
+  // ★ 2026-08-23：同上，空白填寫欄為刻意保留的版面元素 → 不套 xlsxTrimGhost
   XLSX.utils.book_append_sheet(wb,wsImport,'新儲位匯入');
 
   XLSX.writeFile(wb,`儲位釋放_${dateStr}.xlsx`,{bookSST:false,cellStyles:true});
@@ -11056,6 +11137,8 @@ function exportSlotData(){
   ws['!rows']=[{hpt:16.5},{hpt:15.75}];
   ws['!sheetViews']=[{showGridLines:false}];
 
+  // ★ 2026-08-23：本表刻意用「空白但有框線」的儲存格撐出合併格外觀（sMergeInner），
+  //   屬有意義的版面元素、非垃圾格式 → 不套 xlsxTrimGhost（且 !ref 上方已自算真實邊界）。
   XLSX.utils.book_append_sheet(wb,ws,'儲位數據');
   const today=new Date();
   const dateStr=`${today.getFullYear()}${String(today.getMonth()+1).padStart(2,'0')}${String(today.getDate()).padStart(2,'0')}`;
@@ -11683,35 +11766,45 @@ async function ph1ComputeFrom(dates,loadDay){
     day.forEach((v,k)=>{let e=acc.get(k);if(!e){e={sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,last:null};acc.set(k,e);}e.last=v;});
     prev=day;prevDate=d;
   }
+  // ★ 2026-08-23 Gordon：現況欄位（儲位/庫存/未到量/包材）一律以「最新一天快照」為準，
+  //   不可用 e.last（＝該 SKU「最後一次出現過」的那天）。區間中途被拉去 TX/釋放儲位的 SKU，
+  //   之後的日報表就不再出現，e.last 會把早就作廢的舊儲位一直留著（Gordon 實例：
+  //   684700510→B02-090-2、692740320→B03-096-2，8/2 起已完全不在 EPR 內仍照顯示）。
+  //   結論：本表只呈現「最新一天儲位仍在 1F/2F」的 SKU；期間曾存在但現已不在者不予理會。
+  const lastSnap=prev||new Map();
   // ★ SKU 級明細（2026-07-18 Gordon：排名表以單 SKU 呈現；拉下1F看 2F 的 SKU、推上2F看 1F 的 SKU）
   const skuRows=[];
   acc.forEach((e,code)=>{
-    if(!e.last||ph1Seg(code)!=='過季'||!e.last.slot)return;
-    const isAcc=ph1IsAcc(e.last.pack),lock=ph1LockOf(e.last.pack,e.last.series),thr=isAcc?70:40;
+    const cur=lastSnap.get(code);                       // ★ 最新一天快照；不在＝已下架/已釋放
+    if(!cur||ph1Seg(code)!=='過季'||!cur.slot)return;
+    const fl=ph1Floor(cur.slot);
+    if(fl!=='1F'&&fl!=='2F')return;                     // ★ 已移到 XX/TX 溢位或非 1/2F → 不列
+    const isAcc=ph1IsAcc(cur.pack),lock=ph1LockOf(cur.pack,cur.series),thr=isAcc?70:40;
     const av=Math.max(e.availD,1);
-    skuRows.push({code:code,name:e.last.name,slot:e.last.slot,floor:ph1Floor(e.last.slot),
-      sold:e.sold,availD:av,daily:e.sold/av,ss:e.last.stock,pend:e.last.pend,
-      pack:e.last.pack,acc:isAcc,lock:lock,gate:(e.last.stock<thr&&(e.last.pend||0)>0)});
+    skuRows.push({code:code,name:cur.name,slot:cur.slot,floor:fl,
+      sold:e.sold,availD:av,daily:e.sold/av,ss:cur.stock,pend:cur.pend,
+      pack:cur.pack,acc:isAcc,lock:lock,gate:(cur.stock<thr&&(cur.pend||0)>0)});
   });
   // 款色彙總（L1：只取過季）— 供匯出 xlsx 沿用
   const fams=new Map();
   acc.forEach((e,code)=>{
-    if(!e.last||ph1Seg(code)!=='過季')return;
+    const cur=lastSnap.get(code);                       // ★ 2026-08-23：同上，一律以最新一天快照為準
+    if(!cur||ph1Seg(code)!=='過季')return;
     const f=code.slice(0,7);
     let fm=fams.get(f);
-    if(!fm){fm={fam:f,name:e.last.name,series:e.last.series,pack:'',nSku:0,slots:0,sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,ss:0,pend:0,f1:0,f2:0,fx:0,gate:false,acc:false,lock:'',slotList:[]};fams.set(f,fm);}
+    if(!fm){fm={fam:f,name:cur.name,series:cur.series,pack:'',nSku:0,slots:0,sold:0,availD:0,s7:0,a7:0,s21:0,a21:0,ss:0,pend:0,f1:0,f2:0,fx:0,gate:false,acc:false,lock:'',slotList:[]};fams.set(f,fm);}
     fm.nSku++;fm.sold+=e.sold;fm.s7+=e.s7;fm.s21+=e.s21;
     if(e.availD>fm.availD)fm.availD=e.availD;
     if(e.a7>fm.a7)fm.a7=e.a7;
     if(e.a21>fm.a21)fm.a21=e.a21;
-    fm.ss+=e.last.stock;fm.pend+=e.last.pend;
-    if(e.last.slot){fm.slots++;fm.slotList.push(e.last.slot);const fl=ph1Floor(e.last.slot);if(fl==='1F')fm.f1++;else if(fl==='2F')fm.f2++;else if(fl==='溢位')fm.fx++;}
-    if(!fm.pack&&e.last.pack)fm.pack=e.last.pack;
-    if(ph1IsAcc(e.last.pack))fm.acc=true;
-    const lk=ph1LockOf(e.last.pack,e.last.series);
+    fm.ss+=cur.stock;fm.pend+=cur.pend;
+    if(cur.slot){fm.slots++;fm.slotList.push(cur.slot);const fl=ph1Floor(cur.slot);if(fl==='1F')fm.f1++;else if(fl==='2F')fm.f2++;else if(fl==='溢位')fm.fx++;}
+    if(!fm.pack&&cur.pack)fm.pack=cur.pack;
+    if(ph1IsAcc(cur.pack))fm.acc=true;
+    const lk=ph1LockOf(cur.pack,cur.series);
     if(lk==='2F')fm.lock='2F';else if(lk==='1F'&&fm.lock!=='2F')fm.lock='1F';
-    const thr=ph1IsAcc(e.last.pack)?70:40;
-    if(e.last.stock<thr&&(e.last.pend||0)>0)fm.gate=true;
+    const thr=ph1IsAcc(cur.pack)?70:40;
+    if(cur.stock<thr&&(cur.pend||0)>0)fm.gate=true;
   });
   const rows=[];
   fams.forEach(fm=>{
@@ -11755,7 +11848,8 @@ async function ph1Run(){
     PH1_RESULT=await ph1ComputeFrom(dates,d=>idbGet(HIST_EPR_PREFIX+d));
     const m=PH1_RESULT.meta;
     const lk1=PH1_RESULT.rows.filter(r=>r.lock==='1F').length,lk2=PH1_RESULT.rows.filter(r=>r.lock==='2F').length;
-    st.textContent=m.dates[0]+' ~ '+m.dates[m.dates.length-1]+'（'+m.days+' 天）・過季款色 '+(PH1_RESULT.rows.length-lk1-lk2)+'（鎖定排除 '+(lk1+lk2)+'：鎖1F '+lk1+'・鎖2F '+lk2+'）・全SKU估計日均 '+m.daily.toLocaleString()+' 件';
+    st.textContent=m.dates[0]+' ~ '+m.dates[m.dates.length-1]+'（'+m.days+' 天）・過季款色 '+(PH1_RESULT.rows.length-lk1-lk2)+'（鎖定排除 '+(lk1+lk2)+'：鎖1F '+lk1+'・鎖2F '+lk2+'）・全SKU估計日均 '+m.daily.toLocaleString()+' 件'
+      +'・儲位以最新一天（'+m.dates[m.dates.length-1]+'）為準，僅列仍在 1F/2F 者';
     const ex=document.getElementById('ph1-export-btn');if(ex)ex.style.display='';
     ph1Render();
   }catch(e){st.textContent='⚠ '+(e&&e.message?e.message:e);}
@@ -11820,7 +11914,7 @@ function ph1Export(){
       if(!r.gate&&mk){cum+=r[mk];if(cum<=lim)cut='●';}
       return [r.fam,r.name,r.series,r.pack,r.slotList.join(', '),r.nSku,r.slots,r.sold,Math.max(r.availD,1),+r.daily.toFixed(2),+r.eff.toFixed(4),+r.trend.toFixed(2),+r.score.toFixed(4),r.ss,r.pend,r.f1,r.f2,r.fx,r.gate?'★':'',r.acc?'配':'',cut];
     }));
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),cfg[0]);
+    XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(XLSX.utils.aoa_to_sheet(aoa)),cfg[0]);
   });
   const last=PH1_RESULT.meta.dates[PH1_RESULT.meta.dates.length-1]||'';
   XLSX.writeFile(wb,'銷售比對_過季款色排名_'+last.replace(/-/g,'')+'.xlsx');
@@ -11940,7 +12034,7 @@ async function histDownloadEPR(dateKey){
     const aoa=[HIST_EPR_COLS.slice(),..._rows];
     const ws=XLSX.utils.aoa_to_sheet(aoa);
     const wb=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb,ws,'庫存查詢總表');
+    XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws),'庫存查詢總表');
     XLSX.writeFile(wb,`庫存查詢總表_${dateKey.replace(/-/g,'')}.xlsx`,{bookSST:false});
     hideLoading();
   }catch(e){hideLoading();alert('下載失敗：'+e.message);}
@@ -12049,7 +12143,7 @@ function backupPickDownload(){
     try{
       const ws=XLSX.utils.aoa_to_sheet([data.cols,...data.rows]);
       const wb=XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb,ws,'庫存查詢總表');
+      XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws),'庫存查詢總表');
       XLSX.writeFile(wb,`庫存查詢總表_${d.replace(/-/g,'')}.xlsx`,{bookSST:false});
       hideLoading();
     }catch(e){hideLoading();alert('下載失敗：'+e.message);}
@@ -13631,7 +13725,7 @@ function rmExport(){
   });});});
   var ws=XLSX.utils.aoa_to_sheet(rows);
   var wbk=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wbk,ws,'實體架位_編輯版');
+  XLSX.utils.book_append_sheet(wbk,xlsxTrimGhost(ws),'實體架位_編輯版');
   XLSX.writeFile(wbk,'儲位總表_實體架位_編輯版.xlsx');
 }
 
@@ -13829,7 +13923,7 @@ function rmExportCompare(){
   var rows=[['商品編號','儲位','原始儲位材積','實際材積','異常確認']];
   rmCmpSorted().forEach(function(x){rows.push([x.sku||'',x.slot,x.code+' / '+x.cfg,x.rc+' / '+x.real,RM_CMP_CHK[x.slot]?'V':'']);});
   var ws=XLSX.utils.aoa_to_sheet(rows),wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,'材積比對異常');
+  XLSX.utils.book_append_sheet(wb,xlsxTrimGhost(ws),'材積比對異常');
   XLSX.writeFile(wb,'儲架材積比對_異常清單.xlsx');
 }
 // 2026-07-15：匯入異常清單 — 讀「儲位＋異常確認(V)」欄，同步更新表格 checkbox 勾選狀態
