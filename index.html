@@ -8812,7 +8812,7 @@ function renderArrangeCompare(){
       unmatchedBody.innerHTML='<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--green)">✓ 全部商品都已比對到 26FW 新品</td></tr>';
     }else if(!_umPendList.length){
       // ★ 2026-08-25 Gordon：有未匹配但全部已排入儲位 → 無需手動處理，比照左表空狀態文案
-      unmatchedBody.innerHTML=`<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text3)" title="未匹配 ${unmatched.length.toLocaleString()} 筆已全部排入儲位（ERP 儲位欄已填，或走道報表實況已在架上）">本週無待安排新品</td></tr>`;
+      unmatchedBody.innerHTML=`<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text3)" title="未匹配 ${unmatched.length.toLocaleString()} 筆已全部排入儲位（ERP 儲位欄已填，或走道報表實況已在架上）">本週無未匹配之待安排新品</td></tr>`;
     }else{
       // 2026-07-15：款號(前5碼) → ERP 報表中同款(不同色/不同碼)所在走道集合
       const styleAisles={};
