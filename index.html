@@ -8735,12 +8735,20 @@ function renderArrangeCompare(){
     // ★ 全部未匹配都列入（不限 74/75），讓使用者能看見所有需手動處理的品項
     const newSeasonUnmatched=unmatched;
 
+    // ★ 2026-08-25 Gordon：未匹配一律以「待排」口徑呈現（已排入儲位者＝ERP 已給位，不需手動處理）
+    //   → 統計框、類別表「未匹配」列、右側未匹配清單三處共用同一份 _umPendList，數字不會互相打架。
+    const _umPlacedList=[],_umPendList=[];
+    unmatched.forEach(r=>{(plnIsPlacedCode(r.code,_pIdx)?_umPlacedList:_umPendList).push(r);});
+
     // ★ 2026-07-16：本欄標題為「儲位待安排總筆數」→ 顯示待排（扣掉已排入），總數放 tooltip
     const _totalEl=document.getElementById('arrange-total');
     _totalEl.textContent=(ARRANGE_DATA.length-_placedTotal).toLocaleString();
     _totalEl.parentElement.title=`報表總筆數 ${ARRANGE_DATA.length.toLocaleString()}｜已排入 ${_placedTotal.toLocaleString()}（ERP 儲位欄已填，或走道報表實況已在架上）｜待排 ${(ARRANGE_DATA.length-_placedTotal).toLocaleString()}`;
     document.getElementById('arrange-matched').textContent=matchedCount.toLocaleString();
-    document.getElementById('arrange-unmatched').textContent=unmatched.length.toLocaleString();
+    // ★ 2026-08-25：與其他欄位一致 → 顯示「待排」的未匹配筆數，總筆數/已排入放 tooltip
+    const _umEl=document.getElementById('arrange-unmatched');
+    _umEl.textContent=_umPendList.length.toLocaleString();
+    _umEl.parentElement.title=`未匹配總筆數 ${unmatched.length.toLocaleString()}｜已排入 ${_umPlacedList.length.toLocaleString()}（ERP 儲位欄已填，或走道報表實況已在架上）｜待排 ${_umPendList.length.toLocaleString()}`;
 
     // 類別表格
     catBody.innerHTML='';
@@ -8748,7 +8756,7 @@ function renderArrangeCompare(){
     const sorted=Object.entries(catStats).sort((a,b)=>b[1].skuCount-a[1].skuCount);
     // ★ 2026-08-09 Gordon：區分兩種空狀態——①完全沒比對到 26FW（原訊息）；②有比對到但本週全部已排入/無待排 → 明確提示，不留「合計 0」空殼
     const _hasPendingCat=sorted.some(([,s])=>(s.skuCount||0)>0);
-    const _umPendCount=newSeasonUnmatched.filter(r=>!plnIsPlacedCode(r.code,_pIdx)).length;
+    const _umPendCount=_umPendList.length;
     if(!sorted.length && !newSeasonUnmatched.length){
       catBody.innerHTML='<tr><td colspan="3" style="padding:24px;text-align:center;color:var(--text3)">尚未比對到 26FW 新品（請先確認已上傳 26FW 報表）</td></tr>';
     }else if(!_hasPendingCat && _umPendCount===0){
@@ -8774,10 +8782,10 @@ function renderArrangeCompare(){
       });
       // ★ 新增「未匹配」列（僅 74/75 開頭）
       // ★ 2026-07-16: 與其他列一致 → 顯示待排數，已排入另標，合計才不會混算
-      if(newSeasonUnmatched.length){
-        const styles=[...new Set(newSeasonUnmatched.map(r=>String(r.code||'').substring(0,5)))];
-        const _umPlaced=newSeasonUnmatched.filter(r=>plnIsPlacedCode(r.code,_pIdx)).length;
-        const _umPend=newSeasonUnmatched.length-_umPlaced;
+      // ★ 2026-08-25 Gordon：待排＝0（全部已排入）→ 整列隱藏，與上方各類別列 skuCount<=0 的規則一致
+      if(_umPendCount>0){
+        const styles=[...new Set(_umPendList.map(r=>String(r.code||'').substring(0,5)))];
+        const _umPend=_umPendCount;
         // ★ 2026-07-25 Gordon：未匹配列同樣不顯示「(已排 XX)」
         const tr=document.createElement('tr');
         tr.style.borderBottom='1px solid var(--border)';
@@ -8802,6 +8810,9 @@ function renderArrangeCompare(){
     unmatchedBody.innerHTML='';
     if(!unmatched.length){
       unmatchedBody.innerHTML='<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--green)">✓ 全部商品都已比對到 26FW 新品</td></tr>';
+    }else if(!_umPendList.length){
+      // ★ 2026-08-25 Gordon：有未匹配但全部已排入儲位 → 無需手動處理，比照左表空狀態文案
+      unmatchedBody.innerHTML=`<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--text3)" title="未匹配 ${unmatched.length.toLocaleString()} 筆已全部排入儲位（ERP 儲位欄已填，或走道報表實況已在架上）">本週無待安排新品</td></tr>`;
     }else{
       // 2026-07-15：款號(前5碼) → ERP 報表中同款(不同色/不同碼)所在走道集合
       const styleAisles={};
@@ -8811,7 +8822,8 @@ function renderArrangeCompare(){
         if(!styleAisles[st])styleAisles[st]=new Set();
         styleAisles[st].add(aisle);
       });
-      unmatched.forEach(r=>{
+      // ★ 2026-08-25 Gordon：只列「待排」的未匹配（已排入者不需手動處理）
+      _umPendList.forEach(r=>{
         const tr=document.createElement('tr');
         tr.style.borderBottom='1px solid var(--border)';
         const st=String(r.code||'').substring(0,5);
