@@ -3830,6 +3830,32 @@ const PLN_LAYOUT_VOLUME={
   Y:63.54, Z:0.035
 };
 
+// ★ 專用儲位（Gordon 2026-08-27）：指定儲位固定保留給特定包材的商品，所有排入／調整引擎一律不得占用。
+//   目前只有 A02-121-1 / 122-1 / 123-1（單層 'O' 大材積格，材積 20.333）固定給「免洗內褲」使用。
+//   ⚠ 值為「包材關鍵字」，比對用「包含」而非等於 —— ERP 實際包材字串是
+//     免洗內褲袋(粉色) / (黃色) / (灰色)，未來新增顏色也不必改這張表。
+//   ⚠ 只擋「再排進去」，不驅逐既有商品：已被占用的格（含包材為空的既有 SKU）維持原狀。
+const PLN_DEDICATED_SLOTS={
+  'A02-121-1':'免洗內褲',
+  'A02-122-1':'免洗內褲',
+  'A02-123-1':'免洗內褲'
+};
+function plnDedicatedAllows(cell,pkg){
+  const need=PLN_DEDICATED_SLOTS[cell];
+  if(!need)return true;
+  return String(pkg||'').indexOf(need)>=0;
+}
+// 標記專用儲位：空著的一律 locked → 引擎裡既有的 `!cs.sku && !cs.locked` 過濾自動排除，
+// 不需要在十幾個候選池逐一加條件。plnBuildState 與 plnCloneCells 兩處都要套（clone 會重置 locked）。
+function plnApplyDedicatedSlots(cells){
+  Object.keys(PLN_DEDICATED_SLOTS).forEach(k=>{
+    const cs=cells[k];if(!cs)return;
+    cs.dedicated=PLN_DEDICATED_SLOTS[k];
+    if(!cs.sku)cs.locked=true;
+  });
+  return cells;
+}
+
 // ═══ 儲位解析 ═══
 function plnParseCell(cell){
   if(typeof cell!=='string')return null;
@@ -4054,7 +4080,7 @@ const PLN_SPEC = {
     {id:'1.6',  status:'locked',  impl:'plnComplexityConsolidate→plnRunInternalEngine/plnApplyOverflowZone', desc:'(階段4)最低/次低/中等/次高不主動位移；最高=借內部整理騰位；目的走道位置不夠→挑既有SKU移溢位區(§1.7)已落地；新品永不被位移、locked防連鎖'},
     {id:'1.7',  status:'locked',  impl:'plnApplyOverflowZone/plnIdentifyOverflowCandidates/plnOverflowAisleFor/plnOverflowEmpties', flag:'config.overflow=[\'TX\',\'XX\']', desc:'(階段4)溢位區TX+XX自動承接：未到≤10且銷售≤6/銷售少優先移出；TX供L區/XX其他；空儲位材積最大優先排入；套用於每一複雜度等級'},
     {id:'3.6-auto', status:'locked', impl:'plnAutoSelect (plnSelectSourceSKUs sortMode=auto)', desc:'(Gordon 2026-07-10)挑選「自動」＝預設：不限高/低庫存，雙軌評估取優—A零散優先(搬運件數少的整色組先，適合目的空格少) vs B整款優先(SKU數最貼近N的整款先，適合零散不足剛好有整款可拉走)；評分＝湊滿N→拆款少→搬運件數少；整色組進出+DP精確湊數+回溯，湊不出才拆色(未到≤10/銷售低優先)並附_selWarnings'},
-    {id:'1.3f-nonag', status:'locked', impl:'plnRunNewEngine plnPlaceNonAgUnits (非AG fallback 唯一路徑)', desc:'(Gordon 2026-07-11核定, 取代1.3e)非AG走道(D/H擺法=配件類, 每格儲位箱隔開→同款色不同碼「允許」相鄰)新品排入：由前往後填全空欄(儲位總表序列連續, 柱位缺欄不斷段)；①色=原子單位, 缺任一格整色不排+失敗回報(整款能排幾色排幾色)；②帶溢出碼的色優先排, 溢出碼先吃既有殘格(F01-036-4/037-4型, 前面的先用)；③殘格不足消化溢出碼的色遞延最後排, 新殘格技術性留尾端供下批新品續用；④4碼款整欄完美排入, ≤3碼款排欄層1..k留上層殘格, 全空欄不足時整色改吃殘格(允許跨欄: 4款3碼12格→3款001-003層1-3+第4款001-4/002-4/003-4)；容量不足同①逐色回報'},
+    {id:'1.3f-nonag', status:'locked', impl:'plnRunNewEngine plnPlaceNonAgUnits (非AG fallback 唯一路徑)', desc:'(Gordon 2026-07-11核定, 取代1.3e)非AG走道(D/H擺法=配件類, 每格儲位箱隔開→同款色不同碼「允許」相鄰)新品排入：由前往後填全空欄(儲位總表序列連續, 柱位缺欄不斷段)；①色=原子單位, 缺任一格整色不排+失敗回報(整款能排幾色排幾色)；②帶溢出碼的色優先排, 溢出碼先吃既有殘格(F01-036-4/037-4型, 前面的先用)；③殘格不足消化溢出碼的色遞延最後排(★2026-08-27 M01案: 遞延段改「每4格溢出=1欄」切塊, 一塊主碼欄排完立刻接該塊溢出欄, 不再全部主碼排到底後把溢出丟尾端), 新殘格技術性留尾端供下批新品續用；④4碼款整欄完美排入, ≤3碼款排欄層1..k留上層殘格, 全空欄不足時整色改吃殘格(允許跨欄: 4款3碼12格→3款001-003層1-3+第4款001-4/002-4/003-4)；容量不足同①逐色回報'},
     {id:'new-dedup2', status:'locked', impl:'plnRunNewEngine prePlaced 跨步驟去重', desc:'(Gordon 2026-07-10)前面step已排入的新品(cells._isNewProduct)自動從佇列扣除：step2不重複排入、queueTotal/UI剩餘SKU數正確歸零；plannerRefreshStepCounts補新品模擬分支(修step2來源/目的顯示?)+newq-count動態剩餘'},
     {id:'1.8',  status:'todo',    desc:'包材→走道對應表（待補）'},
     {id:'3.5c', status:'pending', desc:'溢出碼高未到量→大材積C精修（待Gordon定）'},
@@ -4161,7 +4187,7 @@ function plnBuildState(){
     const c=String(r['儲位']||'').trim();
     if(cells[c]){cells[c].sku=String(r['商品編號']||'');cells[c].info=r;}
   });
-  return cells;
+  return plnApplyDedicatedSlots(cells);   // ★ 2026-08-27 專用儲位（A02-121~123 免洗內褲）
 }
 // ★ 區分三類: empty / occupied (原C01可動) / locked (剛放置不可再動)
 function plnColState(cells,aisle,col){
@@ -4169,7 +4195,8 @@ function plnColState(cells,aisle,col){
   for(let L=1;L<=4;L++){
     const cid=plnCellId(aisle,col,L);
     if(!cells[cid])continue;
-    if(!cells[cid].sku)r.empty.push(L);
+    // ★ 2026-08-27：空但 locked ＝專用儲位（A02-121~123），不可算進 empty 被調整引擎取用
+    if(!cells[cid].sku){ if(cells[cid].locked)r.locked.push(L); else r.empty.push(L); }
     else if(cells[cid].locked)r.locked.push(L);
     else r.occupied.push(L);
   }
@@ -4499,7 +4526,8 @@ function plnAutoFitGroups(groups,C){
 function plnAuditCapacity(cells,config){
   const result={total:0,byAisle:{},byLayout:{}};
   config.destination.forEach(a=>{
-    const empties=Object.values(cells).filter(cs=>cs.aisle===a&&!cs.sku);
+    // ★ 2026-08-27：!cs.locked 排除「空但被保留」的專用儲位（已排入的格本來就有 sku、不受影響）
+    const empties=Object.values(cells).filter(cs=>cs.aisle===a&&!cs.sku&&!cs.locked);
     result.byAisle[a]=empties.length;
     result.total+=empties.length;
     empties.forEach(cs=>{result.byLayout[cs.layout]=(result.byLayout[cs.layout]||0)+1;});
@@ -5906,9 +5934,9 @@ function plnColorNameOf(info){
 function plnCloneCells(src,keepLocked){
   const out={};
   Object.entries(src).forEach(([k,v])=>{
-    out[k]={cell:v.cell,aisle:v.aisle,col:v.col,layer:v.layer,layout:v.layout,sku:v.sku,info:v.info,locked:keepLocked?!!v.locked:false};
+    out[k]={cell:v.cell,aisle:v.aisle,col:v.col,layer:v.layer,layout:v.layout,sku:v.sku,info:v.info,locked:keepLocked?!!v.locked:false,dedicated:v.dedicated};
   });
-  return out;
+  return plnApplyDedicatedSlots(out);     // ★ 2026-08-27 clone 會重置 locked → 專用儲位標記要重套
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -6219,6 +6247,7 @@ function plnRunNewEngine(config,initialCells){
     const cell=plnCellId(aisle,col,layer);
     const cs=cells[cell];
     if(!cs||cs.sku||cs.locked)return false;
+    if(!plnDedicatedAllows(cell,s.packaging))return false;   // ★ 2026-08-27 專用儲位守衛
     const info={'商品編號':s.code,'商品名稱':s.name||'','尺寸':s.size||'','顏色':plnColorNameOf({'商品名稱':s.name||''}),
       '銷售庫存':0,'架上數量':0,'未到量':s.pending||0,'未抓貨':0,'保留數量':0,
       '商品包材':s.packaging||'','類別':kuCat,'儲位':cell,'_isNewProduct':true};
@@ -6239,7 +6268,9 @@ function plnRunNewEngine(config,initialCells){
   //   規則:
   //   ① 色=原子單位: 該色缺任一格則整色完全不排、列失敗回報 (整款則能排幾色排幾色)。
   //   ② 帶溢出碼的色(5碼款等)優先排, 溢出碼先吃殘格 (如 F01-036-4/037-4, 前面的先用)。
-  //   ③ 殘格不足消化溢出碼的色 → 遞延到最後排 (新殘格技術性留在最尾端, 供下批新品續用)。
+  //   ③ 殘格不足消化溢出碼的色 → 遞延到最後排; ★遞延段以「每 4 格溢出＝1 欄」切塊,
+  //     一塊主碼欄排完就緊接該塊溢出欄 (4色主碼 001-004 + 溢出 005 → 006-009 + 010 …),
+  //     不再「全部主碼排到底、溢出全丟尾端」(2026-08-27 M01 案)。新殘格仍留最尾端供下批續用。
   //   ④ 4碼款整欄完美排入; ≤3碼款正常排欄(層1..k, 上層留殘格), 全空欄不足時整色改吃殘格
   //      (允許跨欄, 如 4款3碼 12格 → 3款排 001-003 層1-3, 第4款排 001-4/002-4/003-4)。
   //   units: [{kc,color7,cat,skus}] — 依序就地排入, 回傳排不進的 units (原子性: 排不進=完全沒動)。
@@ -6300,8 +6331,9 @@ function plnRunNewEngine(config,initialCells){
       }
       unplaced.push(p.u);
     }
-    // Phase 3: 遞延色 — 批次處理: 先排完全部主碼組, 再統一排溢出碼 (§1.3f-③)
-    //   (Gordon 例: 4色5碼 → 主碼 001-004, 溢出碼依序 005 層1-4; 溢出欄開在所有主碼之後,
+    // Phase 3: 遞延色 — ★切塊處理 (2026-08-27 修正): 每「一欄份(4格)溢出」為一塊,
+    //   一塊主碼組排完立刻排該塊溢出碼 (§1.3f-③)
+    //   (Gordon 例: 4色5碼 → 主碼 001-004, 溢出碼依序 005 層1-4; 下一塊接著 006-009 主碼 + 010 溢出…
     //    未用部分=新殘格, 技術性留在最尾端供下批新品續用)
     {
       // 可行性預檢 (色原子性): 逐色模擬 freeCols / 溢出格 供需
@@ -6316,16 +6348,31 @@ function plnRunNewEngine(config,initialCells){
           slots=slots-Math.min(slots,p.overflow.length)+extraCols*4-spillNeed;
         } else unplaced.push(p.u);
       }
-      toPlace.forEach(p=>placeBins(p));                       // ① 全部主碼組 (連續欄, 由前往後)
-      for(const p of toPlace){                                // ② 統一溢出碼: 剩餘殘格→溢出欄
-        for(const s of p.overflow){
-          let cs=takeSlot()||spillSlots.shift();
-          if(!cs){
-            const col=freeCols.shift();
-            for(let L=1;L<=4;L++){const c2=cells[plnCellId(aisle,col,L)];if(c2&&!c2.sku&&!c2.locked)spillSlots.push(c2);}
-            cs=spillSlots.shift();
+      // ★ 2026-08-27 M01 案（Gordon）：切塊排入 —— 每累積「一整欄份(4 格)」溢出碼就結一塊,
+      //   該塊主碼欄排完立刻開該塊的溢出欄 → 版面回到擺法D 慣例「4 色主碼(001-004) + 1 欄溢出(005)」。
+      //   舊版是「全部主碼一路排到底 → 溢出全擠尾端」, 22 色時 M01-050 主碼 ↔ M01-072 溢出, 相距 22 欄。
+      //   spillSlots/殘格池仍跨塊共用 → 上一塊溢出欄用剩的格會被下一塊接著用, 密度(末欄/空洞)與舊版完全相同。
+      //   toPlace ≤ 一塊時(如 Gordon 原例 4 色 5 碼)行為與舊版逐格相同。
+      const OVF_PER_COL=4;
+      const chunks=[];
+      { let cur=[],acc=0;
+        for(const p of toPlace){
+          cur.push(p); acc+=p.overflow.length;
+          if(acc>=OVF_PER_COL){chunks.push(cur);cur=[];acc=0;}
+        }
+        if(cur.length)chunks.push(cur); }
+      for(const chunk of chunks){
+        chunk.forEach(p=>placeBins(p));                       // ① 本塊主碼組 (連續欄, 由前往後)
+        for(const p of chunk){                                // ② 本塊溢出碼: 剩餘殘格→溢出欄
+          for(const s of p.overflow){
+            let cs=takeSlot()||spillSlots.shift();
+            if(!cs){
+              const col=freeCols.shift();
+              for(let L=1;L<=4;L++){const c2=cells[plnCellId(aisle,col,L)];if(c2&&!c2.sku&&!c2.locked)spillSlots.push(c2);}
+              cs=spillSlots.shift();
+            }
+            placeOneSku(s,aisle,cs.col,cs.layer,p.u.cat);
           }
-          placeOneSku(s,aisle,cs.col,cs.layer,p.u.cat);
         }
       }
     }
