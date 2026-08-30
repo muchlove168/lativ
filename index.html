@@ -6867,6 +6867,64 @@ function plnRunNewEngine(config,initialCells){
         let holes=0; [...allCols].forEach(c=>{if(c<last)holes+=(freeN.get(c)||0);});
         return [last,holes,crossD,crossN];
       }
+      // ★2026-08-30 v11（Gordon C04「4碼色佔走好位」案）候選④：「碼數→主碼欄」最佳化 ★
+      //   【Gordon 裁示】這是「額外解法」，不覆蓋原本邏輯：現成殘格/溢出容量的分布單純時，
+      //     原順序照樣勝出、行為零變化；只有這種「溢出容量分布需要特別配」的案例才會被選中。
+      //   【問題】佇列固定 (kc,color7) 升冪 → 4 碼色（零溢出）常常佔走「緊鄰溢出欄」的好位，
+      //     把 5/6 碼色擠到離溢出欄很遠的地方。C04 實測：4 碼色吃掉 119/120/123/124，
+      //     5 碼色被推到 125~131，溢出碼只好倒回去搶 121/122，實體欄距拉到 6~8 欄。
+      //   【觀察】被挪用當主碼欄的架首C（如 127/133），因為實體相鄰禁忌不能用隔壁 B 欄放自己的
+      //     溢出碼 → 它們天生最適合放「零溢出」的 4 碼色。原邏輯看不到這件事。
+      //   【做法】主碼欄／溢出欄／budget 全部沿用既有計算（密度不變），只解一個小指派問題：
+      //     「哪一欄該放幾碼的色」。碼數多的優先配「架距→欄距」最小且容量夠、非相鄰禁忌的溢出欄；
+      //     配完剩下的欄給零溢出色。再依主碼欄升冪從原順序的分桶取色（桶內維持原 kc/color7 序）。
+      //   【評分】候選④ 會打散同款 → 於 4 鍵之後追加第 5 鍵「款區塊被打斷數」。
+      //     原三候選皆為款區塊排序、此鍵恆為 0 → **原三候選之間的比較結果完全不變（零回歸）**；
+      //     候選④ 必須在前 4 鍵嚴格更好才會勝出，打平一律回到原順序。
+      //   【驗證】C04 實案 [135,1,8,5] → [135,1,1,1]（與 60,060 種配置窮舉的最佳解相同）。
+      //     682 組回歸（含實案，CB/AG 各半）：更好 79、持平 603、**變差 0**；候選④ 命中率 12%。
+      //   【不套用的情況】① 有多主碼組色（7/8 碼，`groups.length>1`）② 主碼欄不足
+      //     ③ 溢出容量不足以配完 ④ 找不到合法溢出欄 —— 一律回傳 null，交回原三候選。
+      function planClassOrder(order){
+        if(order.some(e=>e.groups.length!==1))return null;
+        const freeN=new Map(); [...allCols].forEach(c=>freeN.set(c,emptyLayers(c).length));
+        const bigC=c=>isBigLayout(getColLayout(aisle,c));
+        const pool=[...allCols].filter(c=>bigC(c)&&freeN.get(c)===4&&!firstCset.has(c)).sort((a,b)=>a-b);
+        const promo=new Set(planBorrowCols(order,pool,isCBaisle?null:agLegacyDemoteN(order,pool)));
+        const mpool=pool.concat([...promo]).sort((a,b)=>a-b);
+        if(mpool.length<order.length)return null;
+        const mains=mpool.slice(0,order.length);
+        const rkOf=c=>{const s=_segOf.get(c);return s?s.ri:-99;};
+        const sgOf=c=>{const s=_segOf.get(c);return s?s.si:-99;};
+        const taboo=(m,o)=>rkOf(m)===rkOf(o)&&sgOf(m)===sgOf(o)&&Math.abs(m-o)===1;
+        const ovC=[...allCols].filter(c=>(firstCset.has(c)||isSmallLayout(getColLayout(aisle,c)))&&!promo.has(c))
+          .sort((a,b)=>(rkOf(a)-rkOf(b))||
+            ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||(a-b));
+        const bud=new Map(); let left=order.reduce((s,e)=>s+e.size5Skus.length,0);
+        for(const c of ovC){const u=Math.min(freeN.get(c)||0,Math.max(0,left));bud.set(c,u);left-=u;}
+        if(left>0)return null;
+        const freeM=new Set(mains), asg=new Map();
+        for(const k of order.map(e=>e.size5Skus.length).sort((a,b)=>b-a)){
+          if(k<=0)continue;
+          let bst=null;
+          for(const m of freeM)for(const o of ovC){
+            if((bud.get(o)||0)<k||taboo(m,o))continue;
+            const rd=Math.abs(rkOf(o)-rkOf(m))*k, pd=Math.abs(o-m)*k;
+            if(!bst||rd<bst.rd||(rd===bst.rd&&(pd<bst.pd||(pd===bst.pd&&m<bst.m))))bst={m,o,rd,pd};
+          }
+          if(!bst)return null;
+          asg.set(bst.m,k); freeM.delete(bst.m); bud.set(bst.o,(bud.get(bst.o)||0)-k);
+        }
+        freeM.forEach(m=>asg.set(m,0));
+        const bucket=new Map();
+        order.forEach(e=>{const k=e.size5Skus.length; if(!bucket.has(k))bucket.set(k,[]); bucket.get(k).push(e);});
+        const out=[];
+        for(const m of mains){const b=bucket.get(asg.get(m)); if(!b||!b.length)return null; out.push(b.shift());}
+        return out.length===order.length?out:null;
+      }
+      // 第 5 評分鍵：款區塊被打斷幾處（原三候選恆為 0）
+      const _kuBreak=(arr)=>{let b=0,last=null;const seen=new Set();
+        arr.forEach(e=>{const k=String(e.kc); if(k!==last){ if(seen.has(k))b++; seen.add(k); last=k; }});return b;};
       if(queue.length>1){          // ★v8：CB / AG 皆適用
         // 款區塊搬移（款內色序不變）：dir=1 溢出密度降冪、dir=-1 升冪
         const kuSort=(arr,dir)=>{
@@ -6883,8 +6941,10 @@ function plnRunNewEngine(config,initialCells){
           });
         };
         let best=null;
-        for(const cand of [queue,kuSort(queue,1),kuSort(queue,-1)]){
-          const sc=cbScoreOrder(cand);
+        const _cands=[queue,kuSort(queue,1),kuSort(queue,-1)];
+        const _c4=planClassOrder(queue); if(_c4)_cands.push(_c4);   // ★v11 候選④（不適用時為 null）
+        for(const cand of _cands){
+          const sc=cbScoreOrder(cand).concat([_kuBreak(cand)]);     // ★v11 第 5 鍵：款區塊打斷數
           if(!best||plnCmpScoreArr(sc,best.sc)<0)best={sc,cand};
         }
         queue=best.cand;
