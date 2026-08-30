@@ -6772,7 +6772,24 @@ function plnRunNewEngine(config,initialCells){
           for(const fc of cands){
             if(out.length>=limit)break;
             if(emptyLayers(fc).length!==4)break;
-            if((units.length-qi)<=m)break;                              // 最後一架、主碼欄已夠 → 不挪
+            // ★2026-08-30 v9（Gordon C04 新品-小衣案）「最後一架」閘門改為「挪用無助於密度才擋」★
+            //   【舊行為】只要剩餘主碼組數 <= 本架可用主碼欄數，就一律不挪（原意：最後一架用不著挪）。
+            //   【問題】CB 架結構是 [架首C, B, C,C,C,C]，架首C 恆在該架 4 個主碼欄「之前」。
+            //     把它升為主碼欄，會讓最後一個被用到的主碼欄整整往前一欄 → 末欄變小、末欄前空洞變少。
+            //     舊閘門把這種「純賺」的挪用也擋掉了。
+            //   【實案】C04 4碼x4 + 5碼x6 + 6碼x3（64 格）：limit(pNeed)=2，第一次挪 127 過關，
+            //     第二次要挪的 133 被此閘門擋下 → 主碼一路排到 136，133 整欄 + 122-4 空著
+            //     （末欄 136 / 空洞 5）。放行後：主碼止於 135、只剩 134-4 一格空
+            //     （末欄 135 / 空洞 1），與 Gordon 手排同分，且不必拆散「整款排一起」。
+            //   【為何安全】挪用「數量」上限本來就是 pNeed（＝密度最小 footprint 內主碼欄缺幾欄），
+            //     是密度導出的配額；下方兩道閘門（全走道溢出容量、bank+ovfCap-need≥4）仍全數保留。
+            //   【範圍】只放行 CB（cap==null）。AG 走 cap=demoteN + 補足迴圈，數量非密度導出 → 維持舊行為。
+            //   【驗證】22 組情境 + 800 組亂數 CB 壓力測試：CB 更好 490／持平 356／變差 0；AG 逐項相同。
+            const _rest=units.length-qi;                                 // 尚未指派的主碼組數
+            if(_rest<=m){                                                // 最後一架、主碼欄已夠
+              const _lastMain=mains[Math.min(_rest,mains.length)-1];     // 不挪的話最後會用到的主碼欄
+              if(cap!=null||!(fc<_lastMain))break;                       // AG 維持舊行為；CB 只在挪用能把末欄往前時放行
+            }
             if(isCBaisle&&(capAll-4*(out.length+1))<V)break;            // 挪完溢出容量會不夠
             if((bank+ovfCap-need)<4)break;                              // 沒有整整一欄會空著 → 不挪
             out.push(fc); ovfCap-=4; m+=1; need=0;
