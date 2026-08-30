@@ -849,6 +849,11 @@ const SS_PFX = SEASON_GEN.filter(s=>s.label.endsWith('SS')).map(s=>s.pfx).flat()
 const FW_PFX = SEASON_GEN.filter(s=>s.label.endsWith('FW')).map(s=>s.pfx).flat();
 const SEASON_ORDER = SEASON_GEN.slice().reverse();   // 新→舊（getXXStatus/rfIsNextSeason 依相對序判斷，維持語意）
 
+// ★ 2026-08-30 走道硬性下線清單（寫死刪除）：列於此的走道一律不進 AISLE_CONFIG，
+//   不受 localStorage 舊存檔、EPR 殘留儲位、平面圖推導影響。要復活走道 → 從本 Set 移除。
+const AISLE_REMOVED = new Set(['D06','D07','D08']);
+const isAisleRemoved = a => AISLE_REMOVED.has(String(a||'').trim().toUpperCase());
+
 let AISLE_CONFIG = {
   g1:[
     {走道:'B10',可用:368},{走道:'B09',可用:432},{走道:'B08',可用:432},{走道:'B07',可用:432},
@@ -862,8 +867,11 @@ let AISLE_CONFIG = {
     {走道:'C11',可用:340},{走道:'C10',可用:396},{走道:'C09',可用:396},{走道:'C08',可用:380},
     {走道:'C07',可用:496},{走道:'C06',可用:472},{走道:'C05',可用:504},{走道:'C04',可用:592},
     {走道:'C03',可用:616},{走道:'C02',可用:648},{走道:'C01',可用:672},{走道:'D11',可用:612},
-    {走道:'D10',可用:652},{走道:'D09',可用:760},{走道:'D08',可用:784},{走道:'D07',可用:824},
-    {走道:'D06',可用:856},{走道:'E10',可用:652},{走道:'E09',可用:756},{走道:'E08',可用:856},
+    {走道:'D10',可用:652},{走道:'D09',可用:760},
+    // ⛔ 2026-08-30 現場已無 D06/D07/D08 走道 → 永久移除（原值 D08:784 / D07:824 / D06:856，合計 2,464 格）。
+    //    僅刪這裡不夠：loadAisleConfig 會從 localStorage 舊存檔補回、ensureAislesFromDB 會依 EPR 殘留儲位補回，
+    //    故另以 AISLE_REMOVED 於三處入口攔截；欲復活請改 AISLE_REMOVED 而非只加回本行。
+    {走道:'E10',可用:652},{走道:'E09',可用:756},{走道:'E08',可用:856},
     {走道:'E07',可用:668},{走道:'E06',可用:508},{走道:'E05',可用:560},
     {走道:'E04',可用:560},{走道:'E03',可用:560},{走道:'E02',可用:560},{走道:'E01',可用:458}
   ],
@@ -1225,7 +1233,7 @@ function loadAisleConfig(){
   try{
     const saved=localStorage.getItem('lativ_aisle_config');if(!saved)return;
     const parsed=JSON.parse(saved);
-    ['g1','g2','g3','g4'].forEach(g=>{if(!parsed[g])return;parsed[g].forEach(sr=>{const ex=AISLE_CONFIG[g].find(r=>r.走道===sr.走道);if(!ex)AISLE_CONFIG[g].push(sr);else ex['可用']=sr['可用'];});});
+    ['g1','g2','g3','g4'].forEach(g=>{if(!parsed[g])return;parsed[g].forEach(sr=>{if(isAisleRemoved(sr.走道))return;const ex=AISLE_CONFIG[g].find(r=>r.走道===sr.走道);if(!ex)AISLE_CONFIG[g].push(sr);else ex['可用']=sr['可用'];});});
   }catch(e){}
 }
 // ★ R4（2026-07-18 重整）：走道格數單一真相 — 1F 走道可用儲位由儲架平面圖 RM_DATA 推導（Gordon 裁決：平面圖為準）。
@@ -1256,6 +1264,7 @@ function applyRmDerivedAvail(){
   const ovr=rmAvailOverrides();
   let changed=0;
   for(const a in derived){
+    if(isAisleRemoved(a))continue;              // ★ 2026-08-30 硬性下線走道不推導
     if(a in ovr)continue;                       // 手動覆寫優先
     const g=ZONE_GROUP_MAP[a.charAt(0)];if(!g||!AISLE_CONFIG[g])continue;
     const ex=AISLE_CONFIG[g].find(r=>r.走道===a);
@@ -1277,7 +1286,7 @@ function ensureAislesFromDB(){
   const seen=new Set();let added=0;
   DB.forEach(r=>{
     const code=aisleFromSlot(r.儲位);
-    if(!code||existing.has(code)||seen.has(code))return;
+    if(!code||isAisleRemoved(code)||existing.has(code)||seen.has(code))return;
     seen.add(code);
     const group=ZONE_GROUP_MAP[code.charAt(0)]||'g1';
     AISLE_CONFIG[group].push({走道:code,可用:0});
@@ -1314,6 +1323,8 @@ function confirmAddAisle(){
   const group=document.getElementById('new-aisle-group').value;
   const avail=parseInt(document.getElementById('new-aisle-avail').value)||0;
   if(!name){alert('請輸入走道名稱');return;}
+  // ★ 2026-08-30：硬性下線走道擋在這裡，否則加得進去、重新整理又被 AISLE_REMOVED 濾掉，看起來像 bug
+  if(isAisleRemoved(name)){alert('走道 '+name+' 已由系統永久移除（現場不存在），無法新增。\n若確定要復活，請修改程式內的 AISLE_REMOVED 清單。');return;}
   const all=[...AISLE_CONFIG.g1,...AISLE_CONFIG.g2,...AISLE_CONFIG.g3,...AISLE_CONFIG.g4];
   if(all.find(a=>a.走道===name)){alert('走道 '+name+' 已存在');return;}
   AISLE_CONFIG[group].push({走道:name,可用:avail});
@@ -10835,7 +10846,7 @@ const SLOT_ZONES=[
   {floor:'1F',zone:'A',aisles:['A03','A04','A05','A06','A07','A08','A09','A10']},
   {floor:'1F',zone:'B',aisles:['B01','B02','B03','B04','B05','B06','B07','B08','B09','B10']},
   {floor:'1F',zone:'C',aisles:['C01','C02','C03','C04','C05','C06','C07','C08','C09','C10','C11']},
-  {floor:'1F',zone:'D',aisles:['D06','D07','D08','D09','D10','D11']},
+  {floor:'1F',zone:'D',aisles:['D09','D10','D11']},   // ⛔ 2026-08-30 D06/D07/D08 隨走道下線移除（見 AISLE_REMOVED）
   {floor:'1F',zone:'E',aisles:['E01','E02','E03','E04','E05','E06','E07']},
   {floor:'2F',zone:'P',aisles:['P02','P03','P04','P05','P06','P07','P08','P09','P10']},
   {floor:'2F',zone:'L',aisles:['L01','L02','L03','L04','L05','L06','L07','L08','L09','L10','L11','L12','L13','L14','L15']},
@@ -11206,7 +11217,8 @@ function exportSlotData(){
 
 function loadSlotConfig(){
   const saved=localStorage.getItem('slot_zones');
-  if(saved){try{const arr=JSON.parse(saved);arr.forEach((a,i)=>{if(SLOT_ZONES[i])SLOT_ZONES[i].aisles=a;});}catch(e){}}
+  // ★ 2026-08-30：舊存檔可能仍含已下線走道（D06/D07/D08）→ 還原時一併濾掉，與 AISLE_CONFIG 保持一致
+  if(saved){try{const arr=JSON.parse(saved);arr.forEach((a,i)=>{if(SLOT_ZONES[i])SLOT_ZONES[i].aisles=(a||[]).filter(x=>!isAisleRemoved(x));});}catch(e){}}
 }
 // ★ 2026-07-25 Gordon #1：每月底 SKU 數改為「當月顯示最新一天、跨月鎖定」。
 //   舊行為：只有在系統日＝當月最後一天上傳時才寫入 → 當月整月都顯示「—」，月底才跳一個值。
