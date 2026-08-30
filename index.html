@@ -7253,16 +7253,55 @@ function plnRunNewEngine(config,initialCells){
               || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
               || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
               || (a-b); };
-          const fitWholeB=(g,items,pool)=>{
-            const cands=pool.filter(c=>(budgetLeft.get(c)||0)>=items.length&&!physAdjConflict(c,g.donor.color7)).sort(ovSortNear(g,items.length));
+          // ★2026-08-30 v10（Gordon C04「溢出碼拆欄」案）後續色的整欄容量保留檢查 ★
+          //   【問題】budget 是密度導出的固定用量，但指派順序是「主碼欄升冪」。當 5 碼色（1 個溢出）
+          //     的主碼欄排在 6 碼色（2 個溢出）之前時，單碼色會由近而遠把各欄 budget 一格一格吃掉，
+          //     等 6 碼色輪到時已經沒有任何一欄剩 ≥2 格 → fitWholeB 失敗 → 同色兩碼被拆到兩欄。
+          //     C04 實測：淺紫條 140/150 拆到 128-4 + 121-4，深藍白條 140/150 拆到 134-3 + 122-4。
+          //   【做法】不動 budget（密度完全不變）、不動指派順序（避免 C02「順序顛倒」回歸），
+          //     只在挑候選欄時多一道守衛：若選了這一欄會害「後面還沒指派的色」放不下
+          //     （多碼色找不到任何一個非相鄰、budget ≥ 碼數的整欄；或單碼色找不到任何非相鄰餘格），
+          //     就先排除這欄；全部候選都不合格時原樣放行（絕不因此排不進去）。
+          //   【效果】C04：三個 6 碼色的溢出對全部同欄（粉色條+淺紫條→128、深藍白條→134），
+          //     末欄 135／空洞 1 完全不變。
+          //   【取捨】守衛可能把某個單碼色推到隔壁架 → 「溢出碼同架」(優先序#3) 偶爾變差，
+          //     換取「同色不拆欄」(#2)。600 組回歸：拆欄 445→392、密度/未安置/逃逸 零變差、
+          //     跨架總距 5365→5603（依 Gordon 優先序，此為預期內的讓步）。
+          const _ovFeasible=(col,take,pend)=>{
+            if(!pend.length)return true;
+            const b=new Map(); orderedAll.forEach(c=>b.set(c,(budgetLeft.get(c)||0)-(c===col?take:0)));
+            const multi=pend.filter(x=>x.items.length>=2).sort((x,y)=>y.items.length-x.items.length);
+            for(const g2 of multi){                      // 多碼色：best-fit 找「裝得下的最小欄」
+              const n2=g2.items.length; let pick=null;
+              for(const c of orderedAll){ const v=b.get(c)||0;
+                if(v>=n2&&!physAdjConflict(c,g2.donor.color7)&&(pick===null||v<b.get(pick)))pick=c; }
+              if(pick===null)return false;
+              b.set(pick,b.get(pick)-n2);
+            }
+            for(const g2 of pend){                       // 單碼色：至少要有一欄非相鄰且還有餘量
+              if(g2.items.length>=2)continue;
+              let pick=null;
+              for(const c of orderedAll){ if((b.get(c)||0)>0&&!physAdjConflict(c,g2.donor.color7)){pick=c;break;} }
+              if(pick===null)return false;
+              b.set(pick,b.get(pick)-1);
+            }
+            return true;
+          };
+          const _ovKeep=(cands,need,pend)=>{
+            if(!pend.length||cands.length<2)return cands;
+            const ok=cands.filter(c=>_ovFeasible(c,Math.min(budgetLeft.get(c)||0,need),pend));
+            return ok.length?ok:cands;                   // 全部不合格 → 原樣放行
+          };
+          const fitWholeB=(g,items,pool,pend)=>{
+            const cands=_ovKeep(pool.filter(c=>(budgetLeft.get(c)||0)>=items.length&&!physAdjConflict(c,g.donor.color7)),items.length,pend).sort(ovSortNear(g,items.length));
             if(!cands.length)return items;
             const col=cands[0], remain=items.slice();
             for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if((budgetLeft.get(col)||0)<=0)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat)){remain.shift();budgetLeft.set(col,(budgetLeft.get(col)||0)-1);} }
             return remain;
           };
-          const fillFromB=(g,remain,pool)=>{
+          const fillFromB=(g,remain,pool,pend)=>{
             while(remain.length){
-              const cands=pool.filter(c=>(budgetLeft.get(c)||0)>0&&!physAdjConflict(c,g.donor.color7)).sort(ovSortNear(g,remain.length));
+              const cands=_ovKeep(pool.filter(c=>(budgetLeft.get(c)||0)>0&&!physAdjConflict(c,g.donor.color7)),remain.length,pend).sort(ovSortNear(g,remain.length));
               if(!cands.length)break;
               const col=cands[0]; const before=remain.length;
               for(const L of emptyLayers(col).sort((x,y)=>x-y)){ if(!remain.length)break; if((budgetLeft.get(col)||0)<=0)break; if(placeOneSku(remain[0],aisle,col,L,g.donor.ku.cat)){remain.shift();budgetLeft.set(col,(budgetLeft.get(col)||0)-1);} }
@@ -7270,10 +7309,12 @@ function plnRunNewEngine(config,initialCells){
             }
             return remain;
           };
-          for(const g of ovGroups){
+          for(let _gi=0;_gi<ovGroups.length;_gi++){
+            const g=ovGroups[_gi];
+            const _pend=ovGroups.slice(_gi+1).filter(x=>x.items.length>0);
             let items=g.items.slice();
-            items=fitWholeB(g,items,budgetPool());
-            if(items.length)items=fillFromB(g,items,budgetPool());
+            items=fitWholeB(g,items,budgetPool(),_pend);
+            if(items.length)items=fillFromB(g,items,budgetPool(),_pend);
             for(const sku of items){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
           }
         }
