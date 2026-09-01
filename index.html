@@ -5030,6 +5030,9 @@ function plnPackScatteredLow(cells,selected,config){
   Object.values(cells).forEach(cs=>{if(cs.sku)skuMap.set(cs.cell,cs.sku);});
   const usedCells=new Set();
   const assignments={};
+  // ★ 2026-09-01（P04 案）：材積拆兩層 —— 走道級留首鍵（低庫存＝小材積走道優先），
+  //   每格材積降到 cs.col 之後只當 tiebreaker，走道內部改由欄號（密度）主導。
+  const aisleVolKeyL=plnDestVolKeys(cells,config.destination,true);
   for(const r of sorted){
     const sku=String(r['商品編號']||'');
     if(!sku)continue;
@@ -5045,7 +5048,7 @@ function plnPackScatteredLow(cells,selected,config){
       const adj=plnAdjConflictByMap(skuMap,sku,cs.cell);
       const layerMatch=(targetL!=null&&cs.layer===targetL)?0:1;
       const sameLay=(srcLayout&&cs.layout===srcLayout)?0:1;
-      const score=[vol,adj,layerMatch,sameLay,cs.col];
+      const score=[aisleVolKeyL.get(cs.aisle),adj,layerMatch,sameLay,cs.col,vol];
       if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){
         bestScore=score;bestCell=cs;
       }
@@ -5085,6 +5088,53 @@ const PLN_COMPLEXITY_LEVELS = ['sort','match','color','kuan','consolidate','micr
 function plnLayoutVol(layout){
   const v=PLN_LAYOUT_VOLUME[layout];
   return (v===undefined)?-1:v;   // 未知擺法視為最小材積（永遠最後拿大材積）
+}
+
+/* ★ 2026-09-01 Gordon（B04~B10 → P04 案）：材積偏好「拆兩層」——修正密度被材積反壓
+ * ───────────────────────────────────────────────────────────────────────────
+ * 【症狀】B04~B10 六步驟搬進 P04（AG 型 AAGGGG），G 欄由前往後被填滿、A 欄整條留空：
+ *   105/106、111/112 … 147/148 共 16 個 A 欄（64 格）變成走道中段的空洞，末欄一路推到 170。
+ * 【根因】儲位調整「複雜度階梯」四處挑格評分，都把「**每一格的材積**」排在**欄號之前**：
+ *   ‧ plnFindHoleFill        [volKey, …, col, layer]      ← volKey 為首鍵
+ *   ‧ bestColumnForColor     [碼對層, -vol, distSum, col, …]
+ *   ‧ evalColumn(micro)      [位移, 拆群, 碼對層, -vol, distSum, col]
+ *   ‧ plnPackScatteredLow    [vol, adj, layerMatch, sameLay, col]
+ *   單一擺法走道（E01/E02/F01/A02…）材積是常數 → 此鍵等於沒作用，所以一直沒被發現；
+ *   一旦目的走道是**混合擺法**（AG 型 AAGGGG、CB 型 CBCCCC、C08~C11 的 L+A…），
+ *   這個鍵就把整條走道切成「先填完所有大材積欄、再回頭填小材積欄」，
+ *   直接違反鎖定的使用者優先序「儲位密度（硬約束）＞…＞量/材積匹配（最低）」。
+ * 【修正】材積鍵拆成兩層，語意＝「材積只決定先用哪**條走道**，不決定先用走道裡的哪一**欄**」：
+ *   ① 走道級 `plnDestVolKeys()`：維持在評分最前面 → 跨走道「小材積走道用完才溢到大材積走道」
+ *      （2026-08-14 E06→E09 案的結論）完全保留。
+ *   ② 每格級：降到 `col` 之後，只當最末 tiebreaker → 走道內部改由欄號（＝密度）主導。
+ * 【零回歸保證】單一擺法走道的走道級材積 ≡ 每格材積，且降級後的每格鍵在同走道內為常數
+ *   → 比較結果與修正前**逐位元相同**。只有混合擺法走道會改變 ＝ 正是本次要修的情境。
+ * ⚠ 走道級材積＝該走道**全部格**（不只空格）的材積平均，與占用狀況無關 → 同一次 Run 內
+ *   各步驟穩定，不會因為填了幾格就翻轉走道順序。
+ */
+function plnAisleVolMean(cells,aisle){
+  let sum=0,n=0;
+  for(const k in cells){
+    const cs=cells[k];
+    if(!cs||cs.aisle!==aisle)continue;
+    const v=plnLayoutVol(cs.layout);
+    if(v<0)continue;                 // 未知擺法不列入平均
+    sum+=v;n++;
+  }
+  // ⚠ 必須四捨五入到固定精度：兩條「同樣擺法但格數不同」的走道（如 F01 617 格 / E01 全 D），
+  //   浮點累加會給出 2.2139999999999997 vs 2.2140000000000004 這種差 1ulp 的值，
+  //   讓本來應該打平的走道被亂數排序 → 單一擺法走道的零回歸保證會破功。
+  return n?(Math.round(sum/n*1e6)/1e6):-1;   // 全未知 → -1（沿用 plnLayoutVol 的未知哨兵）
+}
+// 目的走道的「走道級材積鍵」：isLow → 小材積走道優先（ASC，未知排最後）；其餘 → 大材積走道優先。
+// 一次算好整包，避免在挑格內迴圈裡重複掃 cells。
+function plnDestVolKeys(cells,dests,isLow){
+  const m=new Map();
+  (dests||[]).forEach(a=>{
+    const v=plnAisleVolMean(cells,a);
+    m.set(a, isLow?(v<0?1e9:v):-v);
+  });
+  return m;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -5227,6 +5277,8 @@ function plnFindHoleFill(config, ctx, opts){
   //   導致 H 空格充足時，高銷售 SKU 仍先被塞進較大的 D 空格。低庫存改小材積優先，
   //   H 用完才溢到 D；高庫存/整理/自動維持 -vol 大材積優先（零回歸）。
   const isLow=(config.sortMode==='low');
+  // ★ 2026-09-01（P04 案）：材積拆兩層 —— 走道級留在首鍵、每格級降到 col 之後（見 plnDestVolKeys）
+  const aisleVolKey=plnDestVolKeys(cells,dests,isLow);
 
   // 目的走道空洞（未佔用、非 locked）
   const empties=[];
@@ -5295,10 +5347,14 @@ function plnFindHoleFill(config, ctx, opts){
       // ★ 2026-07-05 (Gordon): 銷售≥50 → 材積 → 碼對層 → 距離 (庫存多盡量對層);
       //   銷售<50 → 材積 → 距離 → 碼對層 (庫存低不在意對層, 能省距離就省距離)
       // ★ 2026-08-14: 低庫存→小材積優先(vol ASC，未知擺法排最後)；其餘→大材積優先(-vol)
+      // ★ 2026-09-01 (P04 案): 這個「每格材積」鍵降到 cs.col 之後 —— 它原本在首鍵，
+      //   在混合擺法走道（AAGGGG / CBCCCC…）會把整條走道切成「大材積欄全填完才回頭填小材積欄」，
+      //   密度（硬約束）被材積（最低優先）反壓。跨走道的材積偏好改由 aVol（走道級）承接。
       const volKey=isLow?(vol<0?1e9:vol):-vol;
-      const key=match ? (row.sales>=50 ? [volKey, layerMatch, dist, cs.col, cs.layer]
-                                       : [volKey, dist, layerMatch, cs.col, cs.layer])
-                      : [volKey, dist, cs.col, cs.layer];
+      const aVol=aisleVolKey.get(cs.aisle);
+      const key=match ? (row.sales>=50 ? [aVol, layerMatch, dist, cs.col, cs.layer, volKey]
+                                       : [aVol, dist, layerMatch, cs.col, cs.layer, volKey])
+                      : [aVol, dist, cs.col, cs.layer, volKey];
       if(bestKey===null || plnCmpScoreArr(key,bestKey)<0){ bestKey=key; best=cs; }
     }
     if(!best){ failed.push({kc:plnSkuKuan(row.sku),n:1}); continue; }
@@ -5411,7 +5467,13 @@ function plnComplexityConcentrate(config, ctx, opt){
     return s+nearestKuanCol(a,col,String(r.sku).substring(0,5));
   },0);
 
-  // 為一個色挑最佳單欄：碼對層多 → 大材積 → 移動少 → 欄號 → 浪費少
+  // 為一個色挑最佳單欄：碼對層多 → 走道級材積 → 移動少 → 欄號 → 浪費少 → 每格材積
+  // ★ 2026-09-01（P04 案）：原本第 2 鍵是「該欄材積」(-vol)，在 AG/CB 混合擺法走道會
+  //   先把所有 G/C 欄填滿、A/B 欄整條留空（P04：16 個 A 欄 64 格變中段空洞）。
+  //   改成走道級材積在前、每格材積降到欄號之後（見 plnDestVolKeys）。
+  //   ⚠ isLow 固定傳 false：本函式原本用的是無條件「大材積優先」(-plnLayoutVol)，
+  //     不看 sortMode。這裡刻意沿用，避免順手把低庫存語意塞進來（那是另一個議題、非本輪需求）。
+  const aisleVolKeyC=plnDestVolKeys(cells,dests,false);
   function bestColumnForColor(crows){
     const N=crows.length; let best=null,bestScore=null;
     for(const a of dests){
@@ -5421,7 +5483,7 @@ function plnComplexityConcentrate(config, ctx, opt){
         const asg=plnAssignColorToColumn(empty,crows);
         if(!asg)continue;
         const layout=(cells[plnCellId(a,col,empty[0])]||{}).layout||'';
-        const score=[N-asg.matched, -plnLayoutVol(layout), distSum(crows,a,col), col, empty.length-N];
+        const score=[N-asg.matched, aisleVolKeyC.get(a), distSum(crows,a,col), col, empty.length-N, -plnLayoutVol(layout)];
         if(bestScore===null||plnCmpScoreArr(score,bestScore)<0){ bestScore=score; best={aisle:a,col,assign:asg.assign}; }
       }
     }
@@ -5571,6 +5633,10 @@ function plnComplexityColorMicro(config, ctx){
     return s+nearestKuanCol(a,col,String(r.sku).substring(0,5));
   },0);
 
+  // ★ 2026-09-01（P04 案）：材積拆兩層，走道級材積鍵（見 plnDestVolKeys）
+  //   ⚠ isLow 固定 false：同 bestColumnForColor，原本就是無條件「大材積優先」。
+  const aisleVolKeyM=plnDestVolKeys(cells,dests,false);
+
   // 該欄可動佔用層（排除新品 §1.6；locked 已由 plnColState 歸入 locked 不計入 occupied）
   const movableOcc=(a,col,occ)=>occ.filter(L=>
     !(((cells[plnCellId(a,col,L)].info)||{})._isNewProduct===true));
@@ -5590,7 +5656,8 @@ function plnComplexityColorMicro(config, ctx){
     const cand=[...free,...occM].sort((x,y)=>x-y).slice(0,N);
     const asg=plnAssignColorToColumn(cand,crows);
     const matched=asg?asg.matched:0;
-    return {aisle:a, col, score:[need, breaks, N-matched, -plnLayoutVol(layout), distSum(crows,a,col), col]};
+    // ★ 2026-09-01（P04 案）：材積拆兩層 —— 走道級在前、每格級降到 col 之後（見 plnDestVolKeys）
+    return {aisle:a, col, score:[need, breaks, N-matched, aisleVolKeyM.get(a), distSum(crows,a,col), col, -plnLayoutVol(layout)]};
   }
 
   // 規劃並排入一色組到 (a,col)：先位移少數佔用者→再排入。安置不了佔用者→回傳 false（降級）。
