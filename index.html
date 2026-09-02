@@ -5832,7 +5832,9 @@ function plnAdjPlaceViaNewEngine(config, work, rows, moves, failed){
   const placedSet=new Set();
   res.moves.forEach(m=>{ if(m.phase!=='NEW_PRODUCT')return; const sku=String(m.sku); placedSet.add(sku);
     const src=srcOf.get(sku); const dc=fc[m.dst];
-    if(dc){ dc.info=src?src.info:dc.info; if(dc.info&&dc.info._isNewProduct)delete dc.info._isNewProduct; if(dc.info)dc.info['儲位']=m.dst; dc.locked=true; }
+    // ⚠ info 物件是 AISLE_REPORT_DATA 的原始列（plnBuildState 直接引用），絕不能就地改寫「儲位」——
+    //   否則預覽模擬跑過一次後 ERP 資料就被改成 A06，下次 plnBuildState 來源走道變 0 筆（Gordon 實機：「P08 只有 0 個 SKU」）。
+    if(dc){ const base=src?src.info:(dc.info||{}); const info=Object.assign({},base); delete info._isNewProduct; info['儲位']=m.dst; dc.info=info; dc.locked=true; }
     moves.push({phase:'SOURCE_TO_DEST',sku,src:src?src.cell:null,dst:m.dst,dstLayout:m.dstLayout||''});
   });
   // 沒排進去的 → 放回來源格、列失敗
