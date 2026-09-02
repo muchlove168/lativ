@@ -5806,6 +5806,40 @@ function plnComplexityColorMicro(config, ctx){
  *   ‧ 對每個目的走道嘗試整理，挑「移動次數最少」者。
  *   ‧ 真的整理不出連續空位 → 降級找洞塞_匹配保底（不漏排）。
  * ═══════════════════════════════════════════════════════════════════════════ */
+// ★2026-09-02：儲位調整「以新品邏輯排入」橋接。rows=[{sku,raw}]；work=整理後的 cells（會被改寫）。
+//   回傳新品引擎產出的 finalCells（已把原 info 放回、moves 轉成 SOURCE_TO_DEST），失敗回 null。
+function plnAdjPlaceViaNewEngine(config, work, rows, moves, failed){
+  const srcAisles=config.source||[];
+  const srcOf=new Map();
+  rows.forEach(r=>{ const cid=plnFindSkuCell(work,r.sku,srcAisles); if(cid)srcOf.set(r.sku,{cell:cid,info:work[cid].info}); });
+  const skus=rows.map(r=>{ const info=(srcOf.get(r.sku)||{}).info||r.raw||{};
+    return {code:r.sku,name:String(info['商品名稱']||r.raw['商品名稱']||''),size:String(info['尺寸']||r.raw['尺寸']||''),
+      packaging:String(info['包材']||info['商品包材']||''),
+      pending:Number(info['銷售庫存']||0)+Number(info['未到量']||0),   // 降A 選色用「庫存件數」當未到量的替身
+      volume:Number(info['商品材積']||0)}; });
+  const label='新品-__adj__';
+  const saved=window.NEW_PRODUCT_QUEUE;
+  let res=null;
+  try{
+    // 先把來源格清空（否則新品引擎的「已在架上」安全網會把它們全部跳過）
+    srcOf.forEach(v=>{ const c=work[v.cell]; c.sku=null; c.info=null; c.locked=false; });
+    window.NEW_PRODUCT_QUEUE=[{label,category:'__adj__',skus}];
+    res=plnRunNewEngine({source:[label],destination:config.destination||[],sortMode:'new',nToPick:rows.length,overflow:[]},work);
+  }catch(e){ console.warn('[儲位調整→新品邏輯] 委派失敗，退回簡化填法：',e&&e.message); res=null; }
+  finally{ window.NEW_PRODUCT_QUEUE=saved; }
+  if(!res||!res.finalCells){ srcOf.forEach((v,sku)=>{ const c=work[v.cell]; c.sku=sku; c.info=v.info; }); return null; }
+  const fc=res.finalCells;
+  const placedSet=new Set();
+  res.moves.forEach(m=>{ if(m.phase!=='NEW_PRODUCT')return; const sku=String(m.sku); placedSet.add(sku);
+    const src=srcOf.get(sku); const dc=fc[m.dst];
+    if(dc){ dc.info=src?src.info:dc.info; if(dc.info&&dc.info._isNewProduct)delete dc.info._isNewProduct; if(dc.info)dc.info['儲位']=m.dst; dc.locked=true; }
+    moves.push({phase:'SOURCE_TO_DEST',sku,src:src?src.cell:null,dst:m.dst,dstLayout:m.dstLayout||''});
+  });
+  // 沒排進去的 → 放回來源格、列失敗
+  rows.forEach(r=>{ if(placedSet.has(r.sku))return; const src=srcOf.get(r.sku); if(src&&fc[src.cell]&&!fc[src.cell].sku){ fc[src.cell].sku=r.sku; fc[src.cell].info=src.info; }
+    failed.push({kc:plnSkuKuan(r.sku),n:1,reason:'NEW_ENGINE_UNPLACED'}); });
+  return fc;
+}
 function plnComplexityConsolidate(config, ctx){
   const {cells, selected, capacity, deficit, xxSalesMax}=ctx;
   const baseMoves=ctx.moves||[];
@@ -5827,6 +5861,19 @@ function plnComplexityConsolidate(config, ctx){
   }
 
   if(!bestInt){
+    // ★2026-09-02：整理不出連續空位時，先試「新品邏輯排入」（新品引擎本身就會處理散落空格、整色 4+1、
+    //   結構感知選款），成功即回傳；仍失敗才退回找洞塞_匹配保底。P06→A06 Step2（A06 剩 74 個散格）實測：
+    //   保底路徑把 15 色全部拆散，新品邏輯則整色成欄。
+    {
+      const work0=plnCloneCells(cells,true);
+      const moves0=[...baseMoves]; const failed0=[];
+      const rows0=selected.map(r=>({sku:String(r['商品編號']||''), raw:r})).filter(r=>r.sku);
+      const fc0=plnAdjPlaceViaNewEngine(config, work0, rows0, moves0, failed0);
+      if(fc0&&moves0.length>baseMoves.length){
+        return {selected,capacity,deficit,moves:moves0,failed:failed0,config,xxSalesMax,finalCells:fc0,
+                complexity:'consolidate', strategy:'集中連續空位(無連續空位→新品邏輯排入)', consolidateMoves:0};
+      }
+    }
     // 無法整理出連續空位 → 找洞塞_匹配保底
     const r=plnFindHoleFill(config, ctx, {match:true});
     r.complexity='consolidate'; r.strategy='集中連續空位(無連續空位→找洞塞_匹配保底)';
@@ -5838,18 +5885,81 @@ function plnComplexityConsolidate(config, ctx){
   const moves=[...baseMoves, ...bestInt.moves];                    // 內部整理 moves + 後續排入
   const range=bestInt._internalTargetRange.map(cid=>work[cid]);   // 連續空位（run 序）
 
-  // 排入：挑選 SKU 依尺碼碼升冪填入連續空位（碼1→run 首層…，碼序對層自然落地）
-  const rows=selected.map(r=>({sku:String(r['商品編號']||''), raw:r})).filter(r=>r.sku)
-    .sort((a,b)=>PLN_PRIM.sizeCodeNum(a.sku)-PLN_PRIM.sizeCodeNum(b.sku)||a.sku.localeCompare(b.sku));
-  rows.forEach((r,i)=>{
-    const dst=range[i];
-    if(!dst){ failed.push({kc:plnSkuKuan(r.sku),n:1}); return; }
+  // ★2026-09-02（Gordon P08/P06→A06 空走道案）排入改「以色為單位的 4+1」，不再全體依尺碼碼排序後逐格填。
+  //   【症狀】舊寫法把 326 筆 SKU 依「尺碼碼→編號」全域排序、從 001-1 逐格填 → 所有 S 碼排在前 20 欄、M 碼排在
+  //     下 20 欄……每個色的 5 個碼被拆到 5 個相隔 20 欄的儲位（匯出檔 67 色 100% 拆散）。原設計只對「連續空位
+  //     ＝一欄內的幾層」成立（碼序對層），對整條空走道完全不適用。
+  //   【做法】沿用新品排入的 §1.2 鐵則：每色依尺碼升冪切 4 碼主碼組（佔一整欄、碼序對層）＋餘數溢出碼。
+  //     主碼組依序放進 range 內的整欄（大材積欄優先、用完才降到小材積欄）；溢出碼放到離主碼欄最近的
+  //     小材積欄格（實體欄距優先，§1.3a 同色不相鄰欄）；剩餘零散（<3 碼色、湊不到整欄的）走殘餘格順序填。
+  //     range 的總格數與整理結果完全不變，只改「誰放哪一格」。
+  const rows=selected.map(r=>({sku:String(r['商品編號']||''), raw:r})).filter(r=>r.sku);
+  // ★★2026-09-02 Gordon：「挑了 399 個 SKU 移到 A06，要按照新品邏輯排入」→ 集中連續空位整理完後，
+  //   排入一律委派給新品排入引擎 plnRunNewEngine（AG/CB→runAgEngine、全-A→runAllAEngine、D/H→plnPlaceNonAgUnits，
+  //   含結構感知選款、降A、溢出 budget、候選試排、微調），本函式只負責「來源格清空 → 交給新品引擎 → 把 moves 換回
+  //   SOURCE_TO_DEST 並保留原 info」。委派失敗（例外）才退回下方的簡化 4+1 填法。
+  {
+    const viaNew=plnAdjPlaceViaNewEngine(config, work, rows, moves, failed);
+    if(viaNew){
+      return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:viaNew,
+              complexity:'consolidate', strategy:'集中連續空位→新品邏輯排入',
+              consolidateMoves:bestInt.moves.length, targetRange:bestInt._internalTargetRange};
+    }
+  }
+  const _place=(r,dst)=>{
     const srcCell=plnFindSkuCell(work,r.sku,config.source);
     let srcInfo=null;
     if(srcCell){ srcInfo=work[srcCell].info; work[srcCell].sku=null; work[srcCell].info=null; }
     work[dst.cell].sku=r.sku; work[dst.cell].info=srcInfo; work[dst.cell].locked=true;
     moves.push({phase:'SOURCE_TO_DEST',sku:r.sku,src:srcCell,dst:dst.cell,dstLayout:dst.layout||''});
-  });
+  };
+  const freeCells=range.filter(c=>!c.sku);                        // range 內目前空的格（run 序）
+  const byCol=new Map(); freeCells.forEach(c=>{ const k=c.aisle+'#'+c.col; if(!byCol.has(k))byCol.set(k,[]); byCol.get(k).push(c); });
+  const colFree=k=>(byCol.get(k)||[]).filter(c=>!c.sku);
+  const isSmallCol=k=>{ const cs=byCol.get(k)||[]; return cs.length&&isSmallLayout(cs[0].layout||''); };
+  const wholeCols=[...byCol.keys()].filter(k=>colFree(k).length>=4);
+  const bigWhole=wholeCols.filter(k=>!isSmallCol(k)), smallWhole=wholeCols.filter(k=>isSmallCol(k));
+  // 色分組（依 selected 出現順序＝高庫存優先序），每色尺碼升冪
+  const colorOrder=[]; const byColor=new Map();
+  rows.forEach(r=>{ const c7=plnSkuKuanSe(r.sku); if(!byColor.has(c7)){byColor.set(c7,[]);colorOrder.push(c7);} byColor.get(c7).push(r); });
+  const mainsQ=[], ovfQ=[], looseQ=[];
+  for(const c7 of colorOrder){
+    const rs=[...byColor.get(c7)].sort((x,y)=>PLN_PRIM.sizeCodeNum(x.sku)-PLN_PRIM.sizeCodeNum(y.sku)||x.sku.localeCompare(y.sku));
+    if(rs.length<3){ looseQ.push(...rs); continue; }
+    let i=0; for(;i+4<=rs.length;i+=4)mainsQ.push({c7,rows:rs.slice(i,i+4)});
+    const rest=rs.slice(i);
+    if(rest.length>=3&&!mainsQ.some(m=>m.c7===c7))mainsQ.push({c7,rows:rest});   // 3 碼色也佔一欄（§1.2b 碼序對層、缺碼層留空）
+    else ovfQ.push(...rest.map(r=>({c7,r})));
+  }
+  const c7At=(a,col,L)=>{ const cs=work[plnCellId(a,col,L)]; return cs&&cs.sku?plnSkuKuanSe(cs.sku):null; };
+  const mainColOf=new Map();   // c7 → 主碼欄
+  const usedCol=new Set();
+  const takeWhole=(c7)=>{
+    for(const pool of [bigWhole,smallWhole]){
+      for(const k of pool){ if(usedCol.has(k)||colFree(k).length<4)continue;
+        const cs=colFree(k)[0]; if(PLN_PRIM.adjConflict(c7At,cs.aisle,cs.col,c7))continue; usedCol.add(k); return k; }
+    }
+    return null;
+  };
+  for(const m of mainsQ){
+    const k=takeWhole(m.c7);
+    if(!k){ ovfQ.push(...m.rows.map(r=>({c7:m.c7,r}))); continue; }   // 沒整欄了 → 整組退成零散
+    const cs=colFree(k).sort((x,y)=>x.layer-y.layer);
+    const used=new Set();
+    m.rows.forEach(r=>{ const tL=plnGetTargetLayer(r.sku,r.raw['尺寸']); const hit=cs.find(c=>c.layer===tL&&!used.has(c.cell)); if(hit){used.add(hit.cell);_place(r,hit);} else r._pend=true; });
+    m.rows.filter(r=>r._pend).forEach(r=>{ const hit=cs.find(c=>!used.has(c.cell)); if(hit){used.add(hit.cell);_place(r,hit);delete r._pend;} });
+    if(!mainColOf.has(m.c7))mainColOf.set(m.c7,cs[0].col);
+  }
+  // 溢出碼：離主碼欄最近（小材積欄優先當同距離的 tiebreak）、§1.3a 不與同色相鄰欄
+  const restCells=()=>freeCells.filter(c=>!c.sku);
+  for(const o of ovfQ){
+    const mc=mainColOf.get(o.c7);
+    const cands=restCells().filter(c=>!PLN_PRIM.adjConflict(c7At,c.aisle,c.col,o.c7)||c.col===mc)
+      .sort((x,y)=>(mc==null?0:(Math.abs(x.col-mc)-Math.abs(y.col-mc)))||((isSmallLayout(x.layout||'')?0:1)-(isSmallLayout(y.layout||'')?0:1))||(x.col-y.col)||(x.layer-y.layer));
+    if(cands.length)_place(o.r,cands[0]); else looseQ.push(o.r);
+  }
+  // 零散：剩餘格順序填
+  for(const r of looseQ){ const c=restCells()[0]; if(!c){ failed.push({kc:plnSkuKuan(r.sku),n:1}); continue; } _place(r,c); }
 
   return {selected,capacity,deficit,moves,failed,config,xxSalesMax,finalCells:work,
           complexity:'consolidate', strategy:'集中連續空位',
