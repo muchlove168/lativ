@@ -4534,10 +4534,16 @@ function plnAutoSelect(rows,colorGroups,n){
 //      佇列序已是「款 n DESC → kc ASC → color ASC」，成本越小代表選中的色組在佇列上越集中、
 //      同款的色會連在一起 → 排入時溢出碼自然落在相鄰欄，不會被拆到遠處。
 //   絕不拆色：每個色組只有「整組取」或「整組不取」兩種狀態。
-function plnAutoFitGroups(groups,C){
+function plnAutoFitGroups(groups,C,struct){
   const G=groups.length;
   const empty={take:new Array(G).fill(false),total:0,exact:false,capacity:C||0,spill:0};
   if(!G||!(C>0))return empty;
+  // ★2026-09-02（Gordon 分櫃拋轉案）結構感知：只算「空格數」會選到排不進去的組合。
+  //   B09 Step2 實例：剩 18 格 = 061/062 兩個整欄 + 10 個散落殘格；每個色的 4 個主碼需要「一整欄」，
+  //   純格數 DP 挑了 4 個色（18 格），實際只有 2 欄可放主碼 → 排進去 9 筆、還拆了兩款。
+  //   傳入 struct={fullCols} 時追加第二維：Σ主碼組數 ≤ fullCols（主碼組數＝⌊尺寸/4⌋，<4 碼色不佔整欄）。
+  //   溢出碼／短碼色吃殘格或未用整欄，不另設限（空格總數已涵蓋）。不傳 struct ＝ 原一維 DP（零回歸）。
+  if(struct&&struct.fullCols!=null)return plnAutoFitGroupsStruct(groups,C,struct);
   const sumAll=groups.reduce((s,g)=>s+g.size,0);
   const CAP=Math.min(C,sumAll);
   // ★2026-08-13（Gordon C08 案）密度優先：填滿目標的整色組合有多組時，優先選「碎片最少」者。
@@ -4570,6 +4576,47 @@ function plnAutoFitGroups(groups,C){
   for(let i=G-1;i>=0;i--){if(parent[i][j]){take[i]=true;j-=groups[i].size;}}
   let spill=0;groups.forEach((g,i)=>{if(take[i])spill+=Math.max(0,g.size-4);});
   return {take,total:best,exact:best===C,capacity:C,spill};
+}
+
+// ★2026-09-02 結構感知版：dp[c][j]＝用掉 c 個整欄、j 格的最小成本（成本鍵與一維版相同：碎片為主、佇列序為次）
+function plnAutoFitGroupsStruct(groups,C,struct){
+  const G=groups.length;
+  const empty={take:new Array(G).fill(false),total:0,exact:false,capacity:C||0,spill:0,fullCols:struct.fullCols};
+  const K=Math.max(0,struct.fullCols|0);
+  const sumAll=groups.reduce((s,g)=>s+g.size,0);
+  const CAP=Math.min(C,sumAll);
+  if(!(CAP>0))return empty;
+  const IDXMAX=G*G+1;
+  const W=CAP+1;
+  let prev=new Float64Array((K+1)*W).fill(Infinity); prev[0]=0;
+  const parent=[];
+  for(let i=0;i<G;i++){
+    const cur=Float64Array.from(prev);
+    const pk=new Uint8Array((K+1)*W);
+    const sz=groups[i].size, need=Math.floor(sz/4), c=Math.abs(sz-4)*IDXMAX+i;
+    for(let k=K;k>=need;k--)for(let j=CAP;j>=sz;j--){
+      const base=prev[(k-need)*W+(j-sz)];
+      if(base===Infinity)continue;
+      const nc=base+c, idx=k*W+j;
+      if(nc<cur[idx]){cur[idx]=nc;pk[idx]=1;}
+    }
+    parent.push(pk);prev=cur;
+  }
+  let best=-1,bestK=0;
+  for(let j=CAP;j>=0&&best<0;j--)for(let k=0;k<=K;k++){ if(prev[k*W+j]!==Infinity){best=j;bestK=k;break;} }
+  if(best<0)return empty;
+  const take=new Array(G).fill(false);
+  let j=best,k=bestK;
+  for(let i=G-1;i>=0;i--){ if(parent[i][k*W+j]){take[i]=true;j-=groups[i].size;k-=Math.floor(groups[i].size/4);} }
+  let spill=0;groups.forEach((g,i)=>{if(take[i])spill+=Math.max(0,g.size-4);});
+  return {take,total:best,exact:best===C,capacity:C,spill,fullCols:K,colsUsed:bestK};
+}
+// ★2026-09-02：目的走道「可放主碼組的整欄數」（4 層全空且未鎖）
+function plnCountFullFreeCols(cells,config){
+  let n=0; const seen=new Set();
+  Object.values(cells).forEach(cs=>{ if(!(config.destination||[]).includes(cs.aisle))return; const key=cs.aisle+'|'+cs.col; if(seen.has(key))return; seen.add(key);
+    const st=plnColState(cells,cs.aisle,cs.col); if(st.empty.length>=4)n++; });
+  return n;
 }
 
 function plnAuditCapacity(cells,config){
@@ -6322,7 +6369,7 @@ function plnRunNewEngine(config,initialCells){
   const _cap=plnAuditCapacity(cells,config).total;
   const _lim=config.nToPick>0?config.nToPick:Infinity;
   const _target=Math.min(_cap,_lim);
-  const _af=plnAutoFitGroups(groups,_target);
+  const _af=plnAutoFitGroups(groups,_target,{fullCols:plnCountFullFreeCols(cells,config)});   // ★2026-09-02 結構感知
   const take=_af.take;
   _autoFit={capacity:_cap,limit:config.nToPick||0,target:_target,total:_af.total,
     exact:_af.exact,spill:_af.spill,picked:_af.take.filter(Boolean).length,
