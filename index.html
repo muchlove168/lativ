@@ -7013,8 +7013,10 @@ function plnRunNewEngine(config,initialCells){
           usedCol.add(col); freeN.set(col,0);
         }}
         const _rkOf0=c=>{const s=_segOf.get(c);return s?s.ri:9999;};
+        const _mEnd=[...mainOf.values()].reduce((m,c)=>c>m?c:m,0);                         // ★09-02 與 orderedAll 同步：近端殘格欄優先
+        const _nearRes0=c=>{const f=freeN.get(c)||0;return f>0&&f<4&&c<=_mEnd+PLN_OVF_MAX_COLDIST;};
         const ovC=[...allCols].filter(c=>(firstCset.has(c)||isSmallLayout(getColLayout(aisle,c)))&&!promo.has(c))
-          .sort((a,b)=>(_rkOf0(a)-_rkOf0(b))||
+          .sort((a,b)=>((_nearRes0(a)?0:1)-(_nearRes0(b)?0:1))||(_rkOf0(a)-_rkOf0(b))||
             ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||(a-b));   // v7：同架內 B 先於架首C
         const bud=new Map(); let left=V;
         for(const c of ovC){const u=Math.min(freeN.get(c)||0,Math.max(0,left));bud.set(c,u);left-=u;}
@@ -7300,15 +7302,32 @@ function plnRunNewEngine(config,initialCells){
           // ★ 僅「單主碼組」色可降A（8碼以上多組色需 G 欄＋§1.3c 空一欄間距，
           //   降A會被同色不相鄰規則拆散到不同架的 A 欄 → 反而更碎；synth 8碼單色案）
           demotePool=remaining.filter(e=>e.groups.length===1);
-          let mainsLeft=mainGroupsTotal, ovfLeft=overflowCells; demoteN=0;
-          for(const c of footprintCols){
-            if(mainsLeft<=0&&ovfLeft<=0)break;
-            if(isSmallLayout(getColLayout(aisle,c))){
-              if(ovfLeft>=4)ovfLeft-=4;                    // 溢出夠填整欄 → 前段 A 欄照舊給溢出
-              else if(mainsLeft>0&&demoteN<demotePool.length){demoteN++;mainsLeft--;} // 否則降一色整欄用滿
-              else ovfLeft=0;                              // 殘餘溢出吃此 A 欄（尾端）
-            } else if(mainsLeft>0)mainsLeft--;             // G 欄 → 主碼組（用罄後留空，保整欄）
-          }
+          // ★2026-09-02（Gordon B09 手排第二版）「既有殘格不算開欄」★
+          //   Gordon 把 743550 白、743560 藏青兩色降 A（043／050），XXL 用掉 038/044/049 三個整欄＋
+          //   013-4/031-4/032-4/037-4/055-4/056-4 六個「本來就被舊品占住一部分的 A 欄殘格」→ 主碼止於 053、
+          //   沒開任何新洞，054／061／062 三個整欄完整留給下一櫃。舊走欄公式只走「全空欄」、把 18 個 XXL 全算在
+          //   全空 A 欄上 → 只降 1 色、多開一個 A 欄還留 2 個洞（038-4／049-4）。
+          //   【做法】先把「部分被占的 A 欄」裡的空格（殘格）當作免費溢出容量扣掉，再走欄決定降 A 數。
+          //   殘格只取「走道前緣附近」的：兩趟——第一趟全算，得到主碼末欄 E；第二趟只算 col ≤ E+PLN_OVF_MAX_COLDIST
+          //   的殘格（避免為了省一欄把 XXL 丟到 073-4 那麼遠；073/098 那些留給更後面的批次）。
+          //   密度評分同步改為「開了幾個整欄／開欄內留幾個洞」（見 _scoreActual），殘格被用掉不算開欄。
+          const _resA=[...allCols].filter(c=>isSmallLayout(getColLayout(aisle,c))&&!colFullyFree(c)&&emptyLayers(c).length>0)
+            .map(c=>({c,n:emptyLayers(c).length}));
+          const _walk=(resCells)=>{
+            let mL=mainGroupsTotal, oL=Math.max(0,overflowCells-resCells), dN=0, endCol=0;
+            for(const c of footprintCols){
+              if(mL<=0&&oL<=0)break;
+              if(isSmallLayout(getColLayout(aisle,c))){
+                if(oL>=4)oL-=4;                              // 溢出夠填整欄 → 前段 A 欄照舊給溢出
+                else if(mL>0&&dN<demotePool.length){dN++;mL--;endCol=c;} // 否則降一色整欄用滿
+                else oL=0;                                   // 殘餘溢出吃此 A 欄（尾端）
+              } else if(mL>0){mL--;endCol=c;}                // G 欄 → 主碼組（用罄後留空，保整欄）
+            }
+            return {dN,endCol};
+          };
+          const _w1=_walk(_resA.reduce((s,x)=>s+x.n,0));
+          const _resNear=_resA.filter(x=>x.c<=_w1.endCol+PLN_OVF_MAX_COLDIST).reduce((s,x)=>s+x.n,0);
+          demoteN=_walk(_resNear).dN;
         } else {
           const RACK_CELLS=RACK*4; // 6 欄 × 4 層
           const minRacks=Math.max(1,Math.ceil(totalCells/RACK_CELLS));
@@ -7444,7 +7463,13 @@ function plnRunNewEngine(config,initialCells){
             ovGroups.push({donor:e,items,mc:(e.mainCol!=null?e.mainCol:0)});
           }
           ovGroups.sort((a,b)=>a.mc-b.mc);
-          const allPool=[...allOvf,...shortBackup];
+          // ★2026-09-02：主碼末欄 +PLN_OVF_MAX_COLDIST 內、被舊品占一部分的「大材積主碼欄」殘格也納入溢出池（最後一層）。
+          //   Gordon 分櫃案 Step2：剩 054/061/062 三整欄＋063-1~3 殘格，XXL 若只認 A 欄殘格會被丟到 073-4／094-3／098-2（19~37 欄外）；
+          //   063 就在隔壁。既有殘格填掉不算開欄，密度只賺不賠；只取近端的，避免遠端 G 殘格被拿來湊。
+          const _mainEndPool=colorEntries.reduce((m,e)=>(e.mainCol!=null&&e.mainCol>m)?e.mainCol:m,0);
+          const _setPool=new Set([...allOvf,...shortBackup]);
+          const gResNear=[...allCols].filter(c=>!_setPool.has(c)&&isBigLayout(getColLayout(aisle,c))&&!firstCset.has(c)&&c<=_mainEndPool+PLN_OVF_MAX_COLDIST&&(()=>{const f=emptyLayers(c).length;return f>0&&f<4;})());
+          const allPool=[...allOvf,...shortBackup,...gResNear];
           // ★★ 2026-08-02 更新：下方 07-21/07-22 的「逐架接力(carry)」實作已由
           //     「全走道由前往後填滿」取代（見本區塊末端 globalPool 迴圈；ovSort 亦改 a-b 密度主鍵）。
           //     以下 07-21/07-22 段落保留為設計沿革(C06 跨架搶欄 / C02 赤字架流離＋順序顛倒的成因記錄)——
@@ -7507,7 +7532,14 @@ function plnRunNewEngine(config,initialCells){
           //   （大尺碼因折法關係實體大小與小尺碼相當，放 B 小材積格無物理風險——Gordon 確認。）
           //   AG 走道 (AAGGGG) 的 ovfCols 皆為小材積，此鍵值恆等 → 排序結果與舊版相同，零回歸。
           const _rkOfCol=c=>{const s=_segOf.get(c);return s?s.ri:9999;};
+          // ★2026-09-02（Gordon B09 手排第二版）budget 消耗序：「主碼末欄 + PLN_OVF_MAX_COLDIST 內、本來就被占一部分的溢出欄殘格」
+          //   先於全空溢出欄——既有殘格填掉是純賺、不算開欄；全空欄要留整欄給下一批。與上方 demoteN 走欄的殘格假設一致，
+          //   否則走欄少降了色、budget 卻沒用殘格 → 尾端 A 欄多開一欄還留洞（合成回歸 i=44 抓到）。
+          //   殘格欄之後維持 v7 序 (架序, 小材積優先, 欄號)。⚠ cbScoreOrder 的 ovC 同步套用同一規則。
+          const _mainEnd0=colorEntries.reduce((m,e)=>(e.mainCol!=null&&e.mainCol>m)?e.mainCol:m,0);
+          const _isNearRes=c=>{const f=emptyLayers(c).length;return f>0&&f<4&&c<=_mainEnd0+PLN_OVF_MAX_COLDIST;};
           const orderedAll=[...allPool].sort((a,b)=>
+            ((_isNearRes(a)?0:1)-(_isNearRes(b)?0:1))||
             (_rkOfCol(a)-_rkOfCol(b))||
             ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||
             (a-b));
@@ -7638,7 +7670,8 @@ function plnRunNewEngine(config,initialCells){
                 for(let k=0;k<u.n;k++){ const a=cells[from[k]], b=cells[to[k]]; b.sku=a.sku;b.info=a.info; a.sku=null;a.info=null;a.locked=false; b.locked=true; if(b.info)b.info['儲位']=b.cell; const mi=_mvIdx.get(String(b.sku)); if(mi!=null){moves[mi].dst=b.cell;moves[mi].dstLayout=b.layout||'';} }
                 u.ids=to; u.col=col; return from; };
               const moveBack=(u,from)=>{ const cur=u.ids.slice(); for(let k=0;k<u.n;k++){ const a=cells[cur[k]], b=cells[from[k]]; b.sku=a.sku;b.info=a.info; a.sku=null;a.info=null;a.locked=false; b.locked=true; if(b.info)b.info['儲位']=b.cell; const mi=_mvIdx.get(String(b.sku)); if(mi!=null){moves[mi].dst=b.cell;moves[mi].dstLayout=b.layout||'';} } u.ids=from; u.col=cells[from[0]].col; };
-              const tryMove=(u,col)=>{ if(u.col===col||u.col>=_lastCol)return false; const mc=u.g.donor.mainCol; if(Math.abs(col-mc)>=Math.abs(u.col-mc))return false;
+              const tryMove=(u,col)=>{ if(u.col===col||u.col>=_lastCol)return false; if(emptyLayers(col).length>=4)return false;   // ★不可為了就近而「開」一個全空欄（開欄數是硬約束）
+                const mc=u.g.donor.mainCol; if(Math.abs(col-mc)>=Math.abs(u.col-mc))return false;
                 const from=moveTo(u,col); if(!from)return false; if(!physAdjConflict(col,c7(u))){ const sc=score(); if(plnCmpScoreArr(sc,cur)<0){cur=sc;return true;} } moveBack(u,from); return false; };
               const okAdj=(ring)=>ring.every(u=>!physAdjConflict(u.col,c7(u)));
               let cur=score(), guard=0;
@@ -7684,13 +7717,17 @@ function plnRunNewEngine(config,initialCells){
           firstCset.clear(); s.fc.forEach(c=>firstCset.add(c)); _racks.forEach((rk,i)=>{rk.ovfCols=s.ovf[i].slice();});
           mainColPool.length=0; s.mp.forEach(c=>mainColPool.push(c));
         };
-        // 實際結果評分（字典序、越小越好）：[未排入色數＋新增失敗數, 末欄, 末欄前空洞, 同色溢出拆欄數, 實體欄距總和, 跨架總距, 跨架組數]（★09-02 Gordon 裁示：實體欄距在跨架之前）
+        // 實際結果評分（字典序、越小越好）：[未排入色數＋新增失敗數, 開欄數, 開欄末欄, 同色溢出拆欄數, 實體欄距總和, 跨架總距, 開欄內空洞, 跨架組數]（★09-02 Gordon 裁示：實體欄距在跨架之前；密度＝開欄數優先）
         const _scoreActual=(s)=>{
           const rkOf=c=>{const x=_segOf.get(c);return x?x.ri:rackIdx(c);};
-          const where=new Map(); let last=0;
-          _aisleCells.forEach(c=>{ if(!c.sku)return; const o=s.cs[c.cell]; if(o&&o.sku)return; where.set(String(c.sku),c.col); if(c.col>last)last=c.col; });
+          // ★2026-09-02 密度鍵改「開欄數／開欄內空洞／開欄末欄」：只有「快照時 4 層全空、本次放了東西」的欄算開欄；
+          //   本來就被舊品占一部分的殘格被用掉不算開欄也不算洞（Gordon：既有殘格填掉是純賺，整欄要留給下一櫃）。
+          const where=new Map(); let last=0; const touched=new Set();
+          _aisleCells.forEach(c=>{ if(!c.sku)return; const o=s.cs[c.cell]; if(o&&o.sku)return; where.set(String(c.sku),c.col); touched.add(c.col); });
+          const _wasFull=new Map(); _aisleCells.forEach(c=>{ const o=s.cs[c.cell]; const free=o&&!o.sku&&!o.locked; _wasFull.set(c.col,(_wasFull.get(c.col)!==false)&&free); });
+          const opened=new Set(); touched.forEach(col=>{ if(_wasFull.get(col))opened.add(col); if(_wasFull.get(col)&&col>last)last=col; });
           let unplaced=failed.length-s.fl, holes=0, crossD=0, crossN=0, physD=0, split=0;
-          _aisleCells.forEach(c=>{ if(!c.sku&&!c.locked&&c.col<last)holes++; });
+          _aisleCells.forEach(c=>{ if(!c.sku&&!c.locked&&opened.has(c.col))holes++; });
           colorEntries.forEach(e=>{
             if(e._deferred)return;
             const all=[...(e.mainSkus||[]),...(e.size5Skus||[])];
@@ -7701,7 +7738,9 @@ function plnRunNewEngine(config,initialCells){
               const d=Math.abs(rkOf(col)-mr); if(d){crossN++;crossD+=d;} physD+=Math.abs(col-e.mainCol); });
             if(ovCols.size>1)split++;                                   // v10「寧願跨架也不拆欄」→ 拆欄數排在跨架之前
           });
-          return [unplaced,last,holes,split,physD,crossD,crossN];
+          // 開欄內空洞不當獨立鍵：排入數與開欄數相同時，「開欄內空洞 − 用掉的殘格」是常數（4×開欄 − 排入），
+          //   把空洞放前面等於偏好去吃很遠的殘格（C06 合成案：實體欄距 507 vs 22 只為了少 1 個洞）→ 降到實體欄距之後。
+          return [unplaced,opened.size,last,split,physD,crossD,holes,crossN];
         };
         const _s0=_snap();
         // ── 第一層：排入順序候選（cbScoreOrder 選出的基準永遠排第一，打平即基準）──
@@ -7717,11 +7756,11 @@ function plnRunNewEngine(config,initialCells){
         // ── 第二層：挪用欄候選 ──
         {
           const base=_phaseInfo.borrow.slice();
-          const _sc0=_scoreActual(_s0);                       // 基準分數；_sc0[1]＝基準末欄
+          const _sc0=_scoreActual(_s0);                       // 基準分數；_sc0[2]＝基準開欄末欄
           const _wasFree=c=>[1,2,3,4].every(L=>{const o=_s0.cs[plnCellId(aisle,c,L)];return o&&!o.sku&&!o.locked;});
           // 候選只取「基準 footprint 內」（欄號 ≤ 基準末欄）的全空同型欄：footprint 之外的欄只會把末欄往後推（密度鍵必輸），
           // 沒必要逐一試排。B09 實案：36 個 A 欄 → 只剩 038/043/044/050 四個候選（單次 1.6s → 0.2s）。
-          const alts=(isCBaisle?[..._s0.fc]:smallColPool).filter(c=>c<=_sc0[1]&&_wasFree(c)).sort((a,b)=>a-b);
+          const alts=(isCBaisle?[..._s0.fc]:smallColPool).filter(c=>c<=_sc0[2]&&_wasFree(c)).sort((a,b)=>a-b);
           const cands=[]; const seen=new Set([base.join(',')]);
           if(base.length){
             for(let i=0;i<base.length;i++)for(const c of alts){
