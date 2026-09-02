@@ -7186,7 +7186,26 @@ function plnRunNewEngine(config,initialCells){
         //     溢出跨架最遠距離 4 架 → 3 架。
         // ★v8：CB 挪用架首C 當主碼欄 —— 規劃邏輯已抽到共用的 planBorrowCols()（見上方註解）。
         //   行為與 v4~v7 實測驗證過的版本相同（C04 實案仍挪用 049/055、主碼欄與手排逐欄相符）。
-        const promotedFirstC=new Set(isCBaisle?planBorrowCols(remaining,mainColPool,null):[]);
+        // ★★ 2026-09-02（Gordon B09 新品中褲案）挪用欄「候選試排」★★
+        //   【症狀】B09（AAGGGG）18 色×5 碼，未到量最低的 743550 白色整色降 A。planBorrowCols 以
+        //     「逐架 bank 溢出容量」挑降A欄 → 選中 049（第 8 架），把該架 A 容量吃掉一整欄，
+        //     後段 743560 藏青／743590 藍的 XXL 只好倒回 044、742800 黑的 XXL 被推到 043，
+        //     實體欄距總和 64、最遠 10 欄；Gordon 手排把白色放 044（緊鄰同款 040-042／045），
+        //     溢出碼由前往後順流 → 總和 45、只有白色自己的 XXL 跨架。
+        //   【根因】bank 模型只看「哪一架會空出整欄」（密度），完全不看「降A欄佔掉的是誰的溢出容量」。
+        //     同樣密度下，降A欄放在不同架，溢出碼的流向差很多。
+        //   【做法】沿用「原行為永遠是候選之一」原則：以 planBorrowCols 的結果為基準，
+        //     再產生「換成其他全空同型欄」的單點替換候選（AG＝其他全空 A 欄；CB＝其他全空架首C），
+        //     每個候選都用【真正的引擎】在快照上試排一次（非另寫模型，杜絕評分/實際脫鉤），
+        //     取實際結果字典序最佳者 [未排入, 末欄, 末欄前空洞, 拆欄數, 跨架總距, 實體欄距總和, 跨架組數]，
+        //     打平回基準（零回歸）。密度鍵在前 → 候選只能在密度不變的前提下改善溢出距離。
+        //   【範圍】整段主碼/降A/溢出放置邏輯一行未改，只是包進 _placePhase(borrowOverride)；
+        //     borrowOverride=null 即原行為。CB 的 v9/v10/v11 全部原封保留。
+        //   【第 6 鍵】實體欄距總和只用在本試排比較，不動 cbScoreOrder（排入順序候選評分）的 5 鍵。
+        const _phaseInfo={demoteN:0,borrow:[]};
+        function _placePhase(borrowOverride){
+        const promotedFirstC=new Set(isCBaisle?(borrowOverride||planBorrowCols(remaining,mainColPool,null)):[]);
+        if(isCBaisle)_phaseInfo.borrow=[...promotedFirstC].sort((a,b)=>a-b);
         if(promotedFirstC.size){
           promotedFirstC.forEach(c=>{
             firstCset.delete(c);                       // 不再視為「留給溢出」的保留欄
@@ -7225,7 +7244,8 @@ function plnRunNewEngine(config,initialCells){
         //   smallColPool（A1,A2,A3,A4…），等於前段 A 欄全被主碼佔走、所有溢出碼被擠到後段，
         //   造成大量跨架（全5碼×20 實測跨架總距 30）。新版讓每一架自己留下溢出容量，
         //   ★數量仍等於 legacy demoteN → 密度結果完全不變（末欄/空洞逐項相同，零回歸）。
-        const agBorrowCols=(!isCBaisle&&demoteN>0)?planBorrowCols(remaining,mainColPool,demoteN):[];
+        const agBorrowCols=(!isCBaisle&&demoteN>0)?(borrowOverride||planBorrowCols(remaining,mainColPool,demoteN)):[];
+        _phaseInfo.demoteN=demoteN; if(!isCBaisle)_phaseInfo.borrow=agBorrowCols.slice();
         if(demoteN>0){
           const pool=isCBaisle?remaining:demotePool;   // CB 維持原池（零回歸）；AG 只從單主碼組色挑
           pool.forEach(e=>{e.overflowLen=e.size5Skus.length;});
@@ -7492,6 +7512,131 @@ function plnRunNewEngine(config,initialCells){
             items=fitWholeB(g,items,budgetPool(),_pend);
             if(items.length)items=fillFromB(g,items,budgetPool(),_pend);
             for(const sku of items){ if(!placeOverflowSafe({donor:g.donor,sku}))failed.push({kc:g.donor.kc,n:g.donor.ku.n,reason:'NO_XXL_SLOT',cat:g.donor.ku.cat}); }
+          }
+          // ★★ 2026-09-02（Gordon B09 案）溢出碼「事後互換微調」★★
+          //   【問題】上方指派是「依主碼欄升冪、逐色貪婪」：前面的色先把最近的格拿走，後面的色只能拿遠的。
+          //     B09 實測：742800 鐵灰(035) 先拿 037-4，藏青(036) 拿 038-1，輪到黑(039) 時 038 因相鄰禁忌不能用
+          //     → 被推到 043-1（欄距 4）；若改成 黑→037-4、鐵灰→038，同樣的格、同樣的密度，欄距總和少 4。
+          //     這類「三方輪替」貪婪永遠看不到（Gordon 手排就是這樣排的）。
+          //   【做法】指派完成後，在「已放好的溢出格」之間做整組對調／三方輪替（只動溢出碼、不動主碼、
+          //     不碰任何空格 → budget／末欄／空洞逐格不變）。全域分數字典序 [跨架總距, 實體欄距總和, 跨架組數,
+          //     同顏色名稱相鄰數] 嚴格變好才採用（★跨架組數刻意排在實體欄距之後：若放前面，
+          //     會出現「把 5 個各跨 1 架併成 1 個跨 3 架」的併組——總距不變、組數變少、實體欄距爆增 14 欄）；同色溢出組整組移動（v10「不拆欄」保留）；
+          //     移完後以真實狀態重驗 physAdjConflict（§1.3a 同色不相鄰）—— 違反即還原。
+          //   【範圍】CB／AG 共用（本段本來就是共用路徑）。只在 _placePhase 內執行 → 候選試排比的是微調後的結果。
+          {
+            const _mvIdx=new Map(); moves.forEach((m,i)=>{ if(m.phase==='NEW_PRODUCT')_mvIdx.set(String(m.sku),i); });
+            const _cellOfCode=new Map(); Object.values(cells).forEach(c=>{ if(c.aisle===aisle&&c.sku&&c.info&&c.info._isNewProduct)_cellOfCode.set(String(c.sku),c.cell); });
+            const rkOf=c=>{const x=_segOf.get(c);return x?x.ri:rackIdx(c);};
+            const units=[];
+            for(const g of ovGroups){
+              if(g.donor.mainCol==null)continue;
+              const ids=g.items.map(s=>_cellOfCode.get(String(s.code||''))).filter(Boolean);
+              if(ids.length!==g.items.length)continue;
+              const cols=new Set(ids.map(id=>cells[id].col)); if(cols.size!==1)continue;   // 已拆欄者不動
+              units.push({g,ids:ids.sort((a,b)=>cells[a].layer-cells[b].layer),col:[...cols][0],n:ids.length});
+            }
+            if(units.length>=2&&units.length<=80){
+              const c7=u=>u.g.donor.color7, cn=u=>u.g.donor.colorName;
+              const score=()=>{ let cd=0,cn2=0,pd=0,nc=0;
+                for(const u of units){ const mc=u.g.donor.mainCol, d=Math.abs(rkOf(u.col)-rkOf(mc)); if(d){cn2++;cd+=d*u.n;} pd+=Math.abs(u.col-mc)*u.n; if(adjColorNameConflict(u.col,cn(u)))nc++; }
+                return [cd,pd,cn2,nc]; };
+              // 輪替：ring[0] 的碼搬到 ring[1] 的格、ring[1]→ring[2]…、最後一個→ring[0]（各單位碼數相同）
+              const rotate=(ring)=>{ const cellsOf=ring.map(u=>u.ids.slice()); const m=ring.length;
+                for(let i=0;i<m;i++)ring[i]._new=cellsOf[(i+1)%m];
+                // 逐格交換內容：用暫存法，先把每個單位的 sku/info 取出再寫回
+                const bag=ring.map(u=>u.ids.map(id=>({sku:cells[id].sku,info:cells[id].info})));
+                for(let i=0;i<m;i++){ const to=ring[i]._new; bag[i].forEach((x,k)=>{ const c=cells[to[k]]; c.sku=x.sku;c.info=x.info; if(c.info)c.info['儲位']=c.cell; const mi=_mvIdx.get(String(c.sku)); if(mi!=null){moves[mi].dst=c.cell;moves[mi].dstLayout=c.layout||'';} }); }
+                for(let i=0;i<m;i++){ ring[i].ids=ring[i]._new; ring[i].col=cells[ring[i].ids[0]].col; delete ring[i]._new; } };
+              const unrotate=(ring)=>{ rotate(ring.slice().reverse()); };
+              const okAdj=(ring)=>ring.every(u=>!physAdjConflict(u.col,c7(u)));
+              let cur=score(), guard=0;
+              // 先用算術預估 [跨架總距, 實體欄距] 的變化（O(m)、不動格），只有預估變好才真的搬格＋重驗相鄰（省 >95% 搬格）
+              const estGain=(ring)=>{ let dc=0,dp=0; const m=ring.length;
+                for(let i=0;i<m;i++){ const u=ring[i], mc=u.g.donor.mainCol, to=ring[(i+1)%m].col;
+                  dc+=(Math.abs(rkOf(to)-rkOf(mc))-Math.abs(rkOf(u.col)-rkOf(mc)))*u.n; dp+=(Math.abs(to-mc)-Math.abs(u.col-mc))*u.n; }
+                return dc<0||(dc===0&&dp<0); };
+              const tryRing=(ring)=>{ if(!estGain(ring))return false; rotate(ring); if(okAdj(ring)){ const sc=score(); if(plnCmpScoreArr(sc,cur)<0){cur=sc;return true;} } unrotate(ring); return false; };
+              let improved=true;
+              while(improved&&guard++<200){
+                improved=false;
+                for(let i=0;i<units.length&&!improved;i++)for(let j=i+1;j<units.length&&!improved;j++){
+                  const a=units[i],b=units[j]; if(a.n!==b.n||a.col===b.col)continue; if(tryRing([a,b]))improved=true; }
+                if(improved||units.length>60)continue;
+                for(let i=0;i<units.length&&!improved;i++)for(let j=0;j<units.length&&!improved;j++)for(let k=0;k<units.length&&!improved;k++){
+                  if(i===j||j===k||i===k)continue; const a=units[i],b=units[j],c=units[k]; if(a.n!==b.n||b.n!==c.n)continue;
+                  if(a.col===b.col||b.col===c.col||c.col===a.col)continue; if(tryRing([a,b,c]))improved=true; }
+              }
+            }
+          }
+        }
+        } // ── end _placePhase ──
+        // ── 2026-09-02 挪用欄候選試排驅動（見上方 ★★ 註解）──
+        //   快照範圍＝本段所有會被改寫的狀態：本走道 cells(sku/info/locked)、_placedCodes、moves/placed/failed 長度、
+        //   colorEntries 的 placed/mainCol/mainRackIdx/_forceA/overflowLen、usedColSet/colColor、
+        //   firstCset、各架 ovfCols、mainColPool（架首C 升格會 push 進去）。
+        const _aisleCells=Object.values(cells).filter(c=>c.aisle===aisle);
+        const _snap=()=>{
+          const cs={}; _aisleCells.forEach(c=>{ cs[c.cell]={sku:c.sku,info:c.info,locked:c.locked}; });
+          return {cs,codes:new Set(_placedCodes),mv:moves.length,pl:placed.length,fl:failed.length,
+            ent:colorEntries.map(e=>({placed:e.placed,mainCol:e.mainCol,mainRackIdx:e.mainRackIdx,_forceA:e._forceA,overflowLen:e.overflowLen})),
+            used:new Set(usedColSet),cc:new Map(colColor),fc:new Set(firstCset),ovf:_racks.map(rk=>rk.ovfCols.slice()),mp:mainColPool.slice()};
+        };
+        const _restore=(s)=>{
+          Object.keys(s.cs).forEach(id=>{ const c=cells[id],o=s.cs[id]; c.sku=o.sku;c.info=o.info;c.locked=o.locked; });
+          _placedCodes.clear(); s.codes.forEach(c=>_placedCodes.add(c));
+          moves.length=s.mv; placed.length=s.pl; failed.length=s.fl;
+          colorEntries.forEach((e,i)=>{ const o=s.ent[i]; e.placed=o.placed;e.mainCol=o.mainCol;e.mainRackIdx=o.mainRackIdx;e._forceA=o._forceA;e.overflowLen=o.overflowLen; });
+          usedColSet.clear(); s.used.forEach(c=>usedColSet.add(c)); colColor.clear(); s.cc.forEach((v,k)=>colColor.set(k,v));
+          firstCset.clear(); s.fc.forEach(c=>firstCset.add(c)); _racks.forEach((rk,i)=>{rk.ovfCols=s.ovf[i].slice();});
+          mainColPool.length=0; s.mp.forEach(c=>mainColPool.push(c));
+        };
+        // 實際結果評分（字典序、越小越好）：[未排入色數＋新增失敗數, 末欄, 末欄前空洞, 同色溢出拆欄數, 跨架總距, 實體欄距總和, 跨架組數]
+        const _scoreActual=(s)=>{
+          const rkOf=c=>{const x=_segOf.get(c);return x?x.ri:rackIdx(c);};
+          const where=new Map(); let last=0;
+          _aisleCells.forEach(c=>{ if(!c.sku)return; const o=s.cs[c.cell]; if(o&&o.sku)return; where.set(String(c.sku),c.col); if(c.col>last)last=c.col; });
+          let unplaced=failed.length-s.fl, holes=0, crossD=0, crossN=0, physD=0, split=0;
+          _aisleCells.forEach(c=>{ if(!c.sku&&!c.locked&&c.col<last)holes++; });
+          colorEntries.forEach(e=>{
+            if(e._deferred)return;
+            const all=[...(e.mainSkus||[]),...(e.size5Skus||[])];
+            if(all.length&&!all.every(sk=>_placedCodes.has(String(sk.code||''))))unplaced++;
+            if(e.mainCol==null)return;
+            const mr=rkOf(e.mainCol); const ovCols=new Set();
+            (e.size5Skus||[]).forEach(sk=>{ const col=where.get(String(sk.code||'')); if(col==null)return; ovCols.add(col);
+              const d=Math.abs(rkOf(col)-mr); if(d){crossN++;crossD+=d;} physD+=Math.abs(col-e.mainCol); });
+            if(ovCols.size>1)split++;                                   // v10「寧願跨架也不拆欄」→ 拆欄數排在跨架之前
+          });
+          return [unplaced,last,holes,split,crossD,physD,crossN];
+        };
+        const _s0=_snap();
+        _placePhase(null);                                   // 基準＝原行為
+        {
+          const base=_phaseInfo.borrow.slice();
+          const _sc0=_scoreActual(_s0);                       // 基準分數；_sc0[1]＝基準末欄
+          const _wasFree=c=>[1,2,3,4].every(L=>{const o=_s0.cs[plnCellId(aisle,c,L)];return o&&!o.sku&&!o.locked;});
+          // 候選只取「基準 footprint 內」（欄號 ≤ 基準末欄）的全空同型欄：footprint 之外的欄只會把末欄往後推（密度鍵必輸），
+          // 沒必要逐一試排。B09 實案：36 個 A 欄 → 只剩 038/043/044/050 四個候選（單次 1.6s → 0.2s）。
+          const alts=(isCBaisle?[..._s0.fc]:smallColPool).filter(c=>c<=_sc0[1]&&_wasFree(c)).sort((a,b)=>a-b);
+          const cands=[]; const seen=new Set([base.join(',')]);
+          if(base.length){
+            for(let i=0;i<base.length;i++)for(const c of alts){
+              if(base.includes(c))continue;
+              const cand=base.slice(); cand[i]=c; cand.sort((a,b)=>a-b);
+              const key=cand.join(','); if(seen.has(key))continue; seen.add(key); cands.push(cand);
+            }
+          }
+          const CAP=24; if(cands.length>CAP)cands.length=CAP;   // 保險上限（單次試排≈一次完整排入的成本）
+          if(cands.length){
+            let best={cols:null,sc:_sc0};
+            for(const cand of cands){
+              _restore(_s0); _placePhase(cand);
+              const sc=_scoreActual(_s0);
+              if(plnCmpScoreArr(sc,best.sc)<0)best={cols:cand,sc};   // 嚴格更好才換；打平回基準
+            }
+            _restore(_s0); _placePhase(best.cols);            // best.cols=null → 重跑基準（決定性，結果相同）
+            if(best.cols&&typeof console!=='undefined')console.log(`[新品排入] ${aisle} 挪用欄候選試排：${JSON.stringify(base)} → ${JSON.stringify(best.cols)}，分數 ${JSON.stringify(_sc0)} → ${JSON.stringify(best.sc)}`);
           }
         }
       }
