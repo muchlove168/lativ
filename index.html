@@ -3281,11 +3281,14 @@ function forecastBuildSelectedSkus(selection){
   };
   // 款號 → 該款出現的貨櫃所勾選的類別集合（跨多個選取合併）
   const styleSelCats={};  // style → Set(選取類別)
+  const styleContainer={}; // ★2026-09-02 style → 櫃號（同款出現在多個勾選櫃時以「+」串接）
   selection.forEach(sel=>{
     const styles=groupToStyles[sel.grpKey]||new Set();
+    const cno=String(sel.importNo||sel.containerType||sel.arrivalDate||'未知櫃').trim()||'未知櫃';
     styles.forEach(st=>{
       if(!styleSelCats[st])styleSelCats[st]=new Set();
       sel.cats.forEach(c=>styleSelCats[st].add(c));
+      if(!styleContainer[st])styleContainer[st]=cno; else if(!styleContainer[st].split('+').includes(cno))styleContainer[st]+='+'+cno;
     });
   });
   // 過濾 ARRANGE_DATA — 以「該 SKU 真實類別」是否落在該款勾選類別集合為準
@@ -3310,10 +3313,12 @@ function forecastBuildSelectedSkus(selection){
     dedupedRows.push(r);
   });
   const catLookup={};
+  const containerLookup={};   // ★2026-09-02 逐 SKU 所屬櫃號（供送 planner 依「櫃×類別」分群）
   dedupedRows.forEach(r=>{
     catLookup[r.code]=_selSkuCatOf(r.code)||'';   // ★ 逐 SKU 真實類別（供匯出「類別」欄 + 送 planner 分群）
+    containerLookup[r.code]=styleContainer[String(r.code||'').substring(0,5)]||'未知櫃';
   });
-  return {rows:dedupedRows, styleSelCats, catLookup};
+  return {rows:dedupedRows, styleSelCats, catLookup, containerLookup};
 }
 
 // 匯出待安排新品儲位報表 — 欄位: 商品編號, 商品名稱, 尺寸, 儲位, 材積, 未到量, 預計倉位, 商品包材, 類別
@@ -3365,18 +3370,23 @@ async function sendToPlannerFromForecast(){
     alert('請先在儲位調整區上傳「走道報表」與「儲位總表」');
     return;
   }
-  const {rows, catLookup}=forecastBuildSelectedSkus(selection);
+  const {rows, catLookup, containerLookup}=forecastBuildSelectedSkus(selection);
   if(!rows.length){alert('勾選範圍內沒有可傳送的 SKU');return;}
-  // 按類別分群, 建立 NEW_PRODUCT_QUEUE
-  const byCat={};
+  // ★2026-09-02（Gordon）：改按「類別 × 櫃號」分群，每一櫃的每個類別各成一個虛擬來源「新品-類別｜櫃號」，
+  //   情境配置就能分 step 拋：Step1 只勾 KIKIETD0823 的中褲（90 筆）排滿 B09，Step2 再勾 ETD0829YO 的中褲（44 筆），
+  //   引擎照既有 plnAutoFitGroups 從中挑出最適合剩餘 18 格的整色組合。同一 step 勾多個來源＝合併排入（舊行為）。
+  //   只勾一櫃時 label 仍帶櫃號（格式一致）；label 只在本次 session 的佇列內使用，不影響匯出／同步（皆以 e.label 透傳）。
+  const byKey={};
   rows.forEach(r=>{
-    const cat=catLookup[r.code]||'未匹配';
-    if(!byCat[cat])byCat[cat]=[];
-    byCat[cat].push({code:r.code,name:r.name,size:r.size,packaging:r.packaging,plannedSlot:r.plannedSlot,pending:r.pending,volume:r.volume,slot:r.slot});
+    const cat=catLookup[r.code]||'未匹配', cno=containerLookup[r.code]||'未知櫃';
+    const key=`${cat}||${cno}`;
+    if(!byKey[key])byKey[key]={cat,cno,skus:[]};
+    byKey[key].skus.push({code:r.code,name:r.name,size:r.size,packaging:r.packaging,plannedSlot:r.plannedSlot,pending:r.pending,volume:r.volume,slot:r.slot});
   });
-  window.NEW_PRODUCT_QUEUE=Object.entries(byCat).map(([cat,skus])=>({
-    label:`新品-${cat}`,
+  window.NEW_PRODUCT_QUEUE=Object.values(byKey).sort((a,b)=>String(a.cno).localeCompare(String(b.cno))||String(a.cat).localeCompare(String(b.cat))).map(({cat,cno,skus})=>({
+    label:`新品-${cat}｜${cno}`,
     category:cat,
+    container:cno,
     skus,
   }));
   // 重新渲染 planner 情境配置 (會將虛擬走道顯示為 src 選項)
