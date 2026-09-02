@@ -6813,7 +6813,10 @@ function plnRunNewEngine(config,initialCells){
             while(i<sorted.length&&small(sorted[i])){ aCols.push(sorted[i]); i++; }
             let g=0; while(i<sorted.length&&big(sorted[i])&&g<4){ gCols.push(sorted[i]); i++; g++; }
             const cols=[...aCols,...gCols];
-            rk.push({cols,mainCols:gCols,ovfCols:aCols,segments:[cols.slice()],isShort:aCols.length<2});
+            // ★2026-09-02 Gordon 裁示：AAGGGG 的 AA 與 GGGG 之間有實體隔板（同 CB 的儲位箱）→ 拆成 [AA]、[GGGG] 兩段，
+            //   A↔G 跨隔板不算相鄰（B09 案：黑 XXL 可放 038 緊鄰其主碼 039）。舊版整架單一 segment 保留於註解作脈絡。
+            const _segs=[]; if(aCols.length)_segs.push(aCols.slice()); if(gCols.length)_segs.push(gCols.slice());
+            rk.push({cols,mainCols:gCols,ovfCols:aCols,segments:_segs.length?_segs:[cols.slice()],isShort:aCols.length<2});
           }
         }
         return rk;
@@ -7001,7 +7004,7 @@ function plnRunNewEngine(config,initialCells){
       //     682 組回歸（含實案，CB/AG 各半）：更好 79、持平 603、**變差 0**；候選④ 命中率 12%。
       //   【不套用的情況】① 有多主碼組色（7/8 碼，`groups.length>1`）② 主碼欄不足
       //     ③ 溢出容量不足以配完 ④ 找不到合法溢出欄 —— 一律回傳 null，交回原三候選。
-      function planClassOrder(order){
+      function planClassOrder(order,legacyAdj){   // ★2026-09-02 legacyAdj=true：相鄰禁忌用「同架 col±1」（AG 拆段前的舊語意），多產一個候選給真引擎試排
         if(order.some(e=>e.groups.length!==1))return null;
         const freeN=new Map(); [...allCols].forEach(c=>freeN.set(c,emptyLayers(c).length));
         const bigC=c=>isBigLayout(getColLayout(aisle,c));
@@ -7012,26 +7015,34 @@ function plnRunNewEngine(config,initialCells){
         const mains=mpool.slice(0,order.length);
         const rkOf=c=>{const s=_segOf.get(c);return s?s.ri:-99;};
         const sgOf=c=>{const s=_segOf.get(c);return s?s.si:-99;};
-        const taboo=(m,o)=>rkOf(m)===rkOf(o)&&sgOf(m)===sgOf(o)&&Math.abs(m-o)===1;
+        const taboo=(m,o)=>rkOf(m)===rkOf(o)&&(legacyAdj||sgOf(m)===sgOf(o))&&Math.abs(m-o)===1;
         const ovC=[...allCols].filter(c=>(firstCset.has(c)||isSmallLayout(getColLayout(aisle,c)))&&!promo.has(c))
           .sort((a,b)=>(rkOf(a)-rkOf(b))||
             ((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1))||(a-b));
         const bud=new Map(); let left=order.reduce((s,e)=>s+e.size5Skus.length,0);
         for(const c of ovC){const u=Math.min(freeN.get(c)||0,Math.max(0,left));bud.set(c,u);left-=u;}
         if(left>0)return null;
-        const freeM=new Set(mains), asg=new Map();
-        for(const k of order.map(e=>e.size5Skus.length).sort((a,b)=>b-a)){
-          if(k<=0)continue;
-          let bst=null;
-          for(const m of freeM)for(const o of ovC){
-            if((bud.get(o)||0)<k||taboo(m,o))continue;
-            const rd=Math.abs(rkOf(o)-rkOf(m))*k, pd=Math.abs(o-m)*k;
-            if(!bst||rd<bst.rd||(rd===bst.rd&&(pd<bst.pd||(pd===bst.pd&&m<bst.m))))bst={m,o,rd,pd};
+        // ★2026-09-02：原貪婪（架距→欄距）會把 3 碼溢出色塞進 4 格欄、每欄剩 1 格碎片，輪到 2 碼色時無整欄可配 → 整個候選④ 報 null
+        //   （P04 合成案，AG 拆段後實際發生）。先照原貪婪跑（v11 零回歸）；失敗時再用「best-fit」重跑一次
+        //   （同架距/欄距下優先挑剩餘 budget 最貼近 k 的欄，減少碎片）。候選④ 最終由真引擎試排裁決，不會因此變差。
+        const tryAssign=(bestFit)=>{
+          const fm=new Set(mains), as=new Map(), bd=new Map(bud);
+          for(const k of order.map(e=>e.size5Skus.length).sort((a,b)=>b-a)){
+            if(k<=0)continue;
+            let bst=null;
+            for(const m of fm)for(const o of ovC){
+              if((bd.get(o)||0)<k||taboo(m,o))continue;
+              const rd=Math.abs(rkOf(o)-rkOf(m))*k, pd=Math.abs(o-m)*k, lf=bestFit?((bd.get(o)||0)-k):0;
+              if(!bst||rd<bst.rd||(rd===bst.rd&&(pd<bst.pd||(pd===bst.pd&&(lf<bst.lf||(lf===bst.lf&&m<bst.m))))))bst={m,o,rd,pd,lf};
+            }
+            if(!bst)return null;
+            as.set(bst.m,k); fm.delete(bst.m); bd.set(bst.o,(bd.get(bst.o)||0)-k);
           }
-          if(!bst)return null;
-          asg.set(bst.m,k); freeM.delete(bst.m); bud.set(bst.o,(bud.get(bst.o)||0)-k);
-        }
-        freeM.forEach(m=>asg.set(m,0));
+          fm.forEach(m=>as.set(m,0));
+          return as;
+        };
+        const asg=tryAssign(false)||tryAssign(true);
+        if(!asg)return null;
         const bucket=new Map();
         order.forEach(e=>{const k=e.size5Skus.length; if(!bucket.has(k))bucket.set(k,[]); bucket.get(k).push(e);});
         const out=[];
@@ -7041,6 +7052,9 @@ function plnRunNewEngine(config,initialCells){
       // 第 5 評分鍵：款區塊被打斷幾處（原三候選恆為 0）
       const _kuBreak=(arr)=>{let b=0,last=null;const seen=new Set();
         arr.forEach(e=>{const k=String(e.kc); if(k!==last){ if(seen.has(k))b++; seen.add(k); last=k; }});return b;};
+      // ★2026-09-02：排入順序候選除了用 cbScoreOrder 模型挑一個當基準，其餘候選也保留下來，
+      //   交給下方「候選試排」用真引擎實跑比分（模型與實際脫鉤時，實際結果說了算；基準永遠是候選之一）。
+      let _orderCands=[queue];
       if(queue.length>1){          // ★v8：CB / AG 皆適用
         // 款區塊搬移（款內色序不變）：dir=1 溢出密度降冪、dir=-1 升冪
         const kuSort=(arr,dir)=>{
@@ -7059,11 +7073,13 @@ function plnRunNewEngine(config,initialCells){
         let best=null;
         const _cands=[queue,kuSort(queue,1),kuSort(queue,-1)];
         const _c4=planClassOrder(queue); if(_c4)_cands.push(_c4);   // ★v11 候選④（不適用時為 null）
+        const _c4b=planClassOrder(queue,true); if(_c4b&&!_cands.some(c=>c.length===_c4b.length&&c.every((e,i)=>e===_c4b[i])))_cands.push(_c4b);   // ★09-02 候選④'（舊相鄰語意，AG 拆段後才會與④不同）
         for(const cand of _cands){
           const sc=cbScoreOrder(cand).concat([_kuBreak(cand)]);     // ★v11 第 5 鍵：款區塊打斷數
           if(!best||plnCmpScoreArr(sc,best.sc)<0)best={sc,cand};
         }
         queue=best.cand;
+        _orderCands=[best.cand].concat(_cands.filter(c=>c!==best.cand));
       }
       function physAdjCols(col){ const s=_segOf.get(col); if(!s)return []; const seg=_racks[s.ri].segments[s.si]; const o=[]; if(s.pos>0)o.push(seg[s.pos-1]); if(s.pos<seg.length-1)o.push(seg[s.pos+1]); return o; }
       function physAdjacent(c1,c2){ return physAdjCols(c1).includes(c2); }
@@ -7133,10 +7149,16 @@ function plnRunNewEngine(config,initialCells){
           if(!leftFree&&rightSmallFree)isolatedSet.add(c);
         });
 
+        const _queue0=queue;   // ★2026-09-02：基準佇列（cbScoreOrder 選出的順序）
         // ── 主碼候選欄（大材積、全空、非架首C、非孤立），小材積候選欄（全空）──
         const mainColPool=bigColsAvail.filter(c=>!firstCset.has(c)&&!isolatedSet.has(c));
         const smallColPool=smallColsAvail.slice(); // 已排序
 
+        // ★2026-09-02：以下「rule 4 孤立欄 → remaining → 架首C 規劃 → 降A → 主碼 → 溢出」整段包進 _placePhase(borrowOverride, orderOverride)
+        //   （程式內容未改、只是縮進函式；orderOverride＝本次試排用的佇列順序，null＝上方 queue）。
+        const _phaseInfo={demoteN:0,borrow:[]};
+        function _placePhase(borrowOverride,orderOverride){
+        const queue=orderOverride||_queue0;
         // ── rule 4：純 4 碼（無溢出）色 → 孤立 G 欄 ──
         const isolatedCols=[...isolatedSet].sort((a,b)=>a-b);
         const pure4=queue.filter(e=>!e.placed&&e.groups.length===1&&e.mainSkus.length===4&&e.size5Skus.length===0);
@@ -7197,13 +7219,11 @@ function plnRunNewEngine(config,initialCells){
         //   【做法】沿用「原行為永遠是候選之一」原則：以 planBorrowCols 的結果為基準，
         //     再產生「換成其他全空同型欄」的單點替換候選（AG＝其他全空 A 欄；CB＝其他全空架首C），
         //     每個候選都用【真正的引擎】在快照上試排一次（非另寫模型，杜絕評分/實際脫鉤），
-        //     取實際結果字典序最佳者 [未排入, 末欄, 末欄前空洞, 拆欄數, 跨架總距, 實體欄距總和, 跨架組數]，
+        //     取實際結果字典序最佳者 [未排入, 末欄, 末欄前空洞, 拆欄數, 實體欄距總和, 跨架總距, 跨架組數]（★Gordon 裁示實體欄距在跨架之前），
         //     打平回基準（零回歸）。密度鍵在前 → 候選只能在密度不變的前提下改善溢出距離。
         //   【範圍】整段主碼/降A/溢出放置邏輯一行未改，只是包進 _placePhase(borrowOverride)；
         //     borrowOverride=null 即原行為。CB 的 v9/v10/v11 全部原封保留。
         //   【第 6 鍵】實體欄距總和只用在本試排比較，不動 cbScoreOrder（排入順序候選評分）的 5 鍵。
-        const _phaseInfo={demoteN:0,borrow:[]};
-        function _placePhase(borrowOverride){
         const promotedFirstC=new Set(isCBaisle?(borrowOverride||planBorrowCols(remaining,mainColPool,null)):[]);
         if(isCBaisle)_phaseInfo.borrow=[...promotedFirstC].sort((a,b)=>a-b);
         if(promotedFirstC.size){
@@ -7449,6 +7469,9 @@ function plnRunNewEngine(config,initialCells){
               || (!isCBaisle?((isSmallLayout(getColLayout(aisle,a))?0:1)-(isSmallLayout(getColLayout(aisle,b))?0:1)):0)
               || (Math.abs(rackOf(a)-mr)-Math.abs(rackOf(b)-mr))
               || (a-b); };
+          // ★2026-09-02 註：曾試把上式「架距」改成「實體欄距」（Gordon 裁示就近＝實體距離），合成回歸反而變差
+          //   （P04 131 SKU：實體欄距 215→378）——貪婪逐色時架尾的色會搶下一架的 A 欄、一路往後連鎖，最後一架的色被推遠。
+          //   故初始指派維持「架距優先」的穩定結構，實體距離交給下方「事後互換微調」與挪用欄試排的評分處理。
           // ★2026-08-30 v10（Gordon C04「溢出碼拆欄」案）後續色的整欄容量保留檢查 ★
           //   【問題】budget 是密度導出的固定用量，但指派順序是「主碼欄升冪」。當 5 碼色（1 個溢出）
           //     的主碼欄排在 6 碼色（2 個溢出）之前時，單碼色會由近而遠把各欄 budget 一格一格吃掉，
@@ -7519,7 +7542,7 @@ function plnRunNewEngine(config,initialCells){
           //     → 被推到 043-1（欄距 4）；若改成 黑→037-4、鐵灰→038，同樣的格、同樣的密度，欄距總和少 4。
           //     這類「三方輪替」貪婪永遠看不到（Gordon 手排就是這樣排的）。
           //   【做法】指派完成後，在「已放好的溢出格」之間做整組對調／三方輪替（只動溢出碼、不動主碼、
-          //     不碰任何空格 → budget／末欄／空洞逐格不變）。全域分數字典序 [跨架總距, 實體欄距總和, 跨架組數,
+          //     不碰任何空格 → budget／末欄／空洞逐格不變）。全域分數字典序 [實體欄距總和, 跨架總距, 跨架組數,
           //     同顏色名稱相鄰數] 嚴格變好才採用（★跨架組數刻意排在實體欄距之後：若放前面，
           //     會出現「把 5 個各跨 1 架併成 1 個跨 3 架」的併組——總距不變、組數變少、實體欄距爆增 14 欄）；同色溢出組整組移動（v10「不拆欄」保留）；
           //     移完後以真實狀態重驗 physAdjConflict（§1.3a 同色不相鄰）—— 違反即還原。
@@ -7540,7 +7563,7 @@ function plnRunNewEngine(config,initialCells){
               const c7=u=>u.g.donor.color7, cn=u=>u.g.donor.colorName;
               const score=()=>{ let cd=0,cn2=0,pd=0,nc=0;
                 for(const u of units){ const mc=u.g.donor.mainCol, d=Math.abs(rkOf(u.col)-rkOf(mc)); if(d){cn2++;cd+=d*u.n;} pd+=Math.abs(u.col-mc)*u.n; if(adjColorNameConflict(u.col,cn(u)))nc++; }
-                return [cd,pd,cn2,nc]; };
+                return [pd,cd,cn2,nc]; };
               // 輪替：ring[0] 的碼搬到 ring[1] 的格、ring[1]→ring[2]…、最後一個→ring[0]（各單位碼數相同）
               const rotate=(ring)=>{ const cellsOf=ring.map(u=>u.ids.slice()); const m=ring.length;
                 for(let i=0;i<m;i++)ring[i]._new=cellsOf[(i+1)%m];
@@ -7549,19 +7572,32 @@ function plnRunNewEngine(config,initialCells){
                 for(let i=0;i<m;i++){ const to=ring[i]._new; bag[i].forEach((x,k)=>{ const c=cells[to[k]]; c.sku=x.sku;c.info=x.info; if(c.info)c.info['儲位']=c.cell; const mi=_mvIdx.get(String(c.sku)); if(mi!=null){moves[mi].dst=c.cell;moves[mi].dstLayout=c.layout||'';} }); }
                 for(let i=0;i<m;i++){ ring[i].ids=ring[i]._new; ring[i].col=cells[ring[i].ids[0]].col; delete ring[i]._new; } };
               const unrotate=(ring)=>{ rotate(ring.slice().reverse()); };
+              // ★2026-09-02 追加「搬進末欄前的空格」：把整組溢出碼搬到 col<末欄 且有 ≥n 個空格的欄（來源欄也須 <末欄）
+              //   → 末欄不變、末欄前空洞數不變（搬走的格變空、搬入的空格被填），密度完全中性；只有實體欄距會變。
+              //   同碼數對調搆不到的情境（3 碼溢出色只能跟 3 碼溢出色換）靠這一招補。
+              let _lastCol=0; Object.values(cells).forEach(c=>{ if(c.aisle===aisle&&c.sku&&c.info&&c.info._isNewProduct&&c.col>_lastCol)_lastCol=c.col; });
+              const _freeCols=[...allCols].filter(c=>c<_lastCol&&(firstCset.has(c)||isSmallLayout(getColLayout(aisle,c))||_racks.some(rk=>rk.isShort&&rk.cols.includes(c)))).sort((a,b)=>a-b);   // 只用溢出欄型（A/B/架首C/短架），不搶主碼欄
+              const moveTo=(u,col)=>{ const free=emptyLayers(col).sort((x,y)=>x-y); if(free.length<u.n)return null; const to=free.slice(0,u.n).map(L=>plnCellId(aisle,col,L)); const from=u.ids.slice();
+                for(let k=0;k<u.n;k++){ const a=cells[from[k]], b=cells[to[k]]; b.sku=a.sku;b.info=a.info; a.sku=null;a.info=null;a.locked=false; b.locked=true; if(b.info)b.info['儲位']=b.cell; const mi=_mvIdx.get(String(b.sku)); if(mi!=null){moves[mi].dst=b.cell;moves[mi].dstLayout=b.layout||'';} }
+                u.ids=to; u.col=col; return from; };
+              const moveBack=(u,from)=>{ const cur=u.ids.slice(); for(let k=0;k<u.n;k++){ const a=cells[cur[k]], b=cells[from[k]]; b.sku=a.sku;b.info=a.info; a.sku=null;a.info=null;a.locked=false; b.locked=true; if(b.info)b.info['儲位']=b.cell; const mi=_mvIdx.get(String(b.sku)); if(mi!=null){moves[mi].dst=b.cell;moves[mi].dstLayout=b.layout||'';} } u.ids=from; u.col=cells[from[0]].col; };
+              const tryMove=(u,col)=>{ if(u.col===col||u.col>=_lastCol)return false; const mc=u.g.donor.mainCol; if(Math.abs(col-mc)>=Math.abs(u.col-mc))return false;
+                const from=moveTo(u,col); if(!from)return false; if(!physAdjConflict(col,c7(u))){ const sc=score(); if(plnCmpScoreArr(sc,cur)<0){cur=sc;return true;} } moveBack(u,from); return false; };
               const okAdj=(ring)=>ring.every(u=>!physAdjConflict(u.col,c7(u)));
               let cur=score(), guard=0;
-              // 先用算術預估 [跨架總距, 實體欄距] 的變化（O(m)、不動格），只有預估變好才真的搬格＋重驗相鄰（省 >95% 搬格）
+              // 先用算術預估 [實體欄距, 跨架總距] 的變化（O(m)、不動格），只有預估變好才真的搬格＋重驗相鄰（省 >95% 搬格）
               const estGain=(ring)=>{ let dc=0,dp=0; const m=ring.length;
                 for(let i=0;i<m;i++){ const u=ring[i], mc=u.g.donor.mainCol, to=ring[(i+1)%m].col;
                   dc+=(Math.abs(rkOf(to)-rkOf(mc))-Math.abs(rkOf(u.col)-rkOf(mc)))*u.n; dp+=(Math.abs(to-mc)-Math.abs(u.col-mc))*u.n; }
-                return dc<0||(dc===0&&dp<0); };
+                return dp<0||(dp===0&&dc<0); };
               const tryRing=(ring)=>{ if(!estGain(ring))return false; rotate(ring); if(okAdj(ring)){ const sc=score(); if(plnCmpScoreArr(sc,cur)<0){cur=sc;return true;} } unrotate(ring); return false; };
               let improved=true;
               while(improved&&guard++<200){
                 improved=false;
                 for(let i=0;i<units.length&&!improved;i++)for(let j=i+1;j<units.length&&!improved;j++){
                   const a=units[i],b=units[j]; if(a.n!==b.n||a.col===b.col)continue; if(tryRing([a,b]))improved=true; }
+                if(improved)continue;
+                for(const u of units){ if(improved)break; for(const col of _freeCols){ if(tryMove(u,col)){improved=true;break;} } }
                 if(improved||units.length>60)continue;
                 for(let i=0;i<units.length&&!improved;i++)for(let j=0;j<units.length&&!improved;j++)for(let k=0;k<units.length&&!improved;k++){
                   if(i===j||j===k||i===k)continue; const a=units[i],b=units[j],c=units[k]; if(a.n!==b.n||b.n!==c.n)continue;
@@ -7591,7 +7627,7 @@ function plnRunNewEngine(config,initialCells){
           firstCset.clear(); s.fc.forEach(c=>firstCset.add(c)); _racks.forEach((rk,i)=>{rk.ovfCols=s.ovf[i].slice();});
           mainColPool.length=0; s.mp.forEach(c=>mainColPool.push(c));
         };
-        // 實際結果評分（字典序、越小越好）：[未排入色數＋新增失敗數, 末欄, 末欄前空洞, 同色溢出拆欄數, 跨架總距, 實體欄距總和, 跨架組數]
+        // 實際結果評分（字典序、越小越好）：[未排入色數＋新增失敗數, 末欄, 末欄前空洞, 同色溢出拆欄數, 實體欄距總和, 跨架總距, 跨架組數]（★09-02 Gordon 裁示：實體欄距在跨架之前）
         const _scoreActual=(s)=>{
           const rkOf=c=>{const x=_segOf.get(c);return x?x.ri:rackIdx(c);};
           const where=new Map(); let last=0;
@@ -7608,10 +7644,20 @@ function plnRunNewEngine(config,initialCells){
               const d=Math.abs(rkOf(col)-mr); if(d){crossN++;crossD+=d;} physD+=Math.abs(col-e.mainCol); });
             if(ovCols.size>1)split++;                                   // v10「寧願跨架也不拆欄」→ 拆欄數排在跨架之前
           });
-          return [unplaced,last,holes,split,crossD,physD,crossN];
+          return [unplaced,last,holes,split,physD,crossD,crossN];
         };
         const _s0=_snap();
-        _placePhase(null);                                   // 基準＝原行為
+        // ── 第一層：排入順序候選（cbScoreOrder 選出的基準永遠排第一，打平即基準）──
+        //   B09 裁示後 AG 的 A↔G 不再相鄰，cbScoreOrder 模型與實際結果會脫鉤（P04 合成案：模型選的順序實體欄距 378、原序 215）→ 用真引擎實跑裁決。
+        let _bestOrder=_orderCands[0], _bestOsc=null;
+        for(const oc of _orderCands){
+          _restore(_s0); _placePhase(null,oc);
+          const sc=_scoreActual(_s0).concat([_kuBreak(oc)]);   // 第 8 鍵：款區塊打斷數（候選④ 才會 >0）
+          if(!_bestOsc||plnCmpScoreArr(sc,_bestOsc)<0){_bestOsc=sc;_bestOrder=oc;}
+        }
+        _restore(_s0); _placePhase(null,_bestOrder);            // 基準＝最佳順序＋原挪用欄
+        if(_bestOrder!==_orderCands[0]&&typeof console!=='undefined')console.log(`[新品排入] ${aisle} 排入順序候選試排：改選候選 #${_orderCands.indexOf(_bestOrder)+1}，分數 ${JSON.stringify(_bestOsc)}`);
+        // ── 第二層：挪用欄候選 ──
         {
           const base=_phaseInfo.borrow.slice();
           const _sc0=_scoreActual(_s0);                       // 基準分數；_sc0[1]＝基準末欄
@@ -7631,11 +7677,11 @@ function plnRunNewEngine(config,initialCells){
           if(cands.length){
             let best={cols:null,sc:_sc0};
             for(const cand of cands){
-              _restore(_s0); _placePhase(cand);
+              _restore(_s0); _placePhase(cand,_bestOrder);
               const sc=_scoreActual(_s0);
               if(plnCmpScoreArr(sc,best.sc)<0)best={cols:cand,sc};   // 嚴格更好才換；打平回基準
             }
-            _restore(_s0); _placePhase(best.cols);            // best.cols=null → 重跑基準（決定性，結果相同）
+            _restore(_s0); _placePhase(best.cols,_bestOrder);  // best.cols=null → 重跑基準（決定性，結果相同）
             if(best.cols&&typeof console!=='undefined')console.log(`[新品排入] ${aisle} 挪用欄候選試排：${JSON.stringify(base)} → ${JSON.stringify(best.cols)}，分數 ${JSON.stringify(_sc0)} → ${JSON.stringify(best.sc)}`);
           }
         }
